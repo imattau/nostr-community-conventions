@@ -20,6 +20,7 @@ export function getQueryParam(name) {
 }
 
 const RELAY_STORAGE_KEY = "ncc-viewer-relays";
+const DEFAULT_RELAY_STORAGE_KEY = "ncc-viewer-default-relays";
 
 function normalizeRelay(value) {
   const trimmed = (value || "").trim();
@@ -40,6 +41,25 @@ export function getRelayOverrides() {
   } catch (error) {
     return [];
   }
+}
+
+export function getDefaultRelays() {
+  const raw = window.localStorage.getItem(DEFAULT_RELAY_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list.map(normalizeRelay).filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+
+export function setDefaultRelays(relays) {
+  const sanitized = relays.map(normalizeRelay).filter(Boolean);
+  window.localStorage.setItem(DEFAULT_RELAY_STORAGE_KEY, JSON.stringify(sanitized));
+  document.dispatchEvent(new Event("ncc-viewer-default-relays-updated"));
+  return sanitized;
 }
 
 export function saveRelayOverrides(relays) {
@@ -72,7 +92,7 @@ export function setRelayCount(count) {
   if (toggle) toggle.textContent = `Relays: ${count}`;
 }
 
-export function initRelayControls(getDefaultRelays, onRelaysChange) {
+export function initRelayControls(onRelaysChange) {
   const toggle = document.getElementById("relay-toggle");
   const panel = document.getElementById("relay-panel");
   const listEl = document.getElementById("relay-list");
@@ -97,7 +117,7 @@ export function initRelayControls(getDefaultRelays, onRelaysChange) {
 
   function render() {
     const relays = getRelayOverrides();
-    const defaults = (typeof getDefaultRelays === "function" && getDefaultRelays()) || [];
+    const defaults = getDefaultRelays();
 
     defaultListEl.innerHTML = defaults.length
       ? defaults.map((relay) => `<li><span>${relay}</span></li>`).join("")
@@ -173,6 +193,10 @@ export function initRelayControls(getDefaultRelays, onRelaysChange) {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closePanel();
+  });
+
+  document.addEventListener("ncc-viewer-default-relays-updated", () => {
+    render();
   });
 
   render();

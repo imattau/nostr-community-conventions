@@ -4,7 +4,8 @@ import {
   buildApiUrl,
   getRelayCacheKey,
   initRelayControls,
-  setRelayCount
+  setRelayCount,
+  setDefaultRelays
 } from "./app.js";
 
 const listEl = document.getElementById("ncc-list");
@@ -45,8 +46,6 @@ function renderList(items) {
     .join("");
 }
 
-let defaultRelays = [];
-
 async function load() {
   const cacheKey = getRelayCacheKey(CACHE_KEY);
   const cachedRaw = window.localStorage.getItem(cacheKey);
@@ -55,7 +54,7 @@ async function load() {
       const cached = JSON.parse(cachedRaw);
       if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
         setRelayCount(cached.relays?.length || 0);
-        defaultRelays = cached.default_relays || defaultRelays;
+        if (cached.default_relays) setDefaultRelays(cached.default_relays);
         renderList(cached.items || []);
         return;
       }
@@ -69,7 +68,7 @@ async function load() {
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
     setRelayCount(data.relays.length);
-    defaultRelays = data.default_relays || defaultRelays;
+    if (data.default_relays) setDefaultRelays(data.default_relays);
     renderList(data.items || []);
     window.localStorage.setItem(
       cacheKey,
@@ -85,5 +84,5 @@ async function load() {
   }
 }
 
-initRelayControls(() => defaultRelays, () => load());
+initRelayControls(() => load());
 load();
