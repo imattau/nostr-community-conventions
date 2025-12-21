@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  ncc-viewer:
+    build: .
+    ports:
+      - "4321:4321"
+    environment:
+      NCC_RELAYS: "wss://relay.damus.io,wss://nos.lol,wss://relay.nostr.band,wss://nostr.wine,wss://relay.primal.net,wss://nostr-01.yakihonne.com"
+      NCC_CACHE_TTL_MS: "60000"
+      NCC_SINCE_SECONDS: "0"
+      PORT: "4321"

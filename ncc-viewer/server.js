@@ -1,11 +1,14 @@
 import express from "express";
 import { SimplePool } from "nostr-tools";
+import WebSocket from "ws";
+
+global.WebSocket = WebSocket;
 
 const app = express();
 const pool = new SimplePool();
 
 const RELAYS = (process.env.NCC_RELAYS ||
-  "wss://relay.damus.io,wss://relay.nostr.band,wss://nos.lol,wss://relay.snort.social")
+  "wss://relay.damus.io,wss://nos.lol,wss://relay.nostr.band,wss://nostr.wine,wss://relay.primal.net,wss://nostr-01.yakihonne.com")
   .split(",")
   .map((relay) => relay.trim())
   .filter(Boolean);
