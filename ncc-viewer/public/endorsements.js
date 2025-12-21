@@ -1,4 +1,11 @@
-import { shorten, formatTimestamp, getQueryParam } from "./app.js";
+import {
+  shorten,
+  formatTimestamp,
+  getQueryParam,
+  buildApiUrl,
+  initRelayControls,
+  setRelayCount
+} from "./app.js";
 
 const titleEl = document.getElementById("endorsement-title");
 const subtitleEl = document.getElementById("endorsement-subtitle");
@@ -47,13 +54,15 @@ async function load() {
   subtitleEl.textContent = "Signals of adoption and support from the ecosystem.";
 
   try {
-    const response = await fetch(`/api/nccs/${encodeURIComponent(dTag)}/endorsements`);
+    const response = await fetch(buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}/endorsements`));
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
+    setRelayCount(data.relays.length);
     renderList(data.endorsements || []);
   } catch (error) {
     renderEmpty("Unable to load endorsements right now.");
   }
 }
 
+initRelayControls(() => load());
 load();

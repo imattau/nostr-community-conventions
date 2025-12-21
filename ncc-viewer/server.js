@@ -20,11 +20,7 @@ const PORT = Number(process.env.PORT || 4321);
 const CACHE_TTL_MS = Number(process.env.NCC_CACHE_TTL_MS || 600_000);
 const SINCE_SECONDS = Number(process.env.NCC_SINCE_SECONDS || 0);
 
-let cacheState = {
-  at: 0,
-  data: null,
-  pending: null
-};
+const cacheState = new Map();
 
 const KIND_NCC = 30050;
 const KIND_NSR = 30051;
@@ -47,6 +43,38 @@ function getPublishedAt(event) {
 
 function normalizeId(value) {
   return (value || "").trim().toLowerCase();
+}
+
+function normalizeRelay(value) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+  const hasScheme = /^[a-z]+:\/\//i.test(trimmed);
+  const withScheme = hasScheme ? trimmed : `wss://${trimmed}`;
+  if (!/^wss?:\/\//i.test(withScheme)) return "";
+  return withScheme;
+}
+
+function parseRelayOverrides(raw) {
+  if (!raw) return [];
+  const seen = new Set();
+  const relays = [];
+  for (const entry of raw.split(",")) {
+    const normalized = normalizeRelay(entry);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    relays.push(normalized);
+    if (relays.length >= 10) break;
+  }
+  return relays;
+}
+
+function getRelaysFromRequest(req) {
+  const extra = parseRelayOverrides(req.query.relays || "");
+  const merged = [...RELAYS];
+  for (const relay of extra) {
+    if (!merged.includes(relay)) merged.push(relay);
+  }
+  return merged;
 }
 
 function isNccDTag(value) {
@@ -116,14 +144,14 @@ function dedupe(events) {
   return result;
 }
 
-async function fetchEvents() {
+async function fetchEvents(relays) {
   const filter = {
     kinds: [KIND_NCC, KIND_NSR, KIND_ENDORSEMENT]
   };
   if (SINCE_SECONDS > 0) filter.since = SINCE_SECONDS;
 
   try {
-    const events = await pool.querySync(RELAYS, filter, { maxWait: 4000 });
+    const events = await pool.querySync(relays, filter, { maxWait: 4000 });
     return dedupe(events);
   } catch (error) {
     console.error("Failed to fetch NCC events from relays:", error);
@@ -335,33 +363,45 @@ function buildProposals(dTag, index) {
     .sort((a, b) => b.published_at - a.published_at);
 }
 
-async function getData() {
-  const now = Date.now();
-  if (cacheState.data && now - cacheState.at < CACHE_TTL_MS) return cacheState.data;
-  if (cacheState.pending) return cacheState.pending;
+function getCacheBucket(key) {
+  if (!cacheState.has(key)) {
+    cacheState.set(key, { at: 0, data: null, pending: null });
+  }
+  return cacheState.get(key);
+}
 
-  cacheState.pending = fetchEvents()
+async function getData(relays) {
+  const key = relays.join(",");
+  const bucket = getCacheBucket(key);
+  const now = Date.now();
+  if (bucket.data && now - bucket.at < CACHE_TTL_MS) return bucket.data;
+  if (bucket.pending) return bucket.pending;
+
+  bucket.pending = fetchEvents(relays)
     .then((events) => {
       const index = buildIndex(events);
       const list = buildList(index);
       const payload = { index, list };
-      cacheState = { at: Date.now(), data: payload, pending: null };
+      bucket.at = Date.now();
+      bucket.data = payload;
+      bucket.pending = null;
       return payload;
     })
     .catch((error) => {
-      cacheState.pending = null;
+      bucket.pending = null;
       throw error;
     });
 
-  return cacheState.pending;
+  return bucket.pending;
 }
 
 app.use(express.static("public"));
 
 app.get("/api/nccs", async (req, res) => {
   try {
-    const data = await getData();
-    res.json({ relays: RELAYS, items: data.list });
+    const relays = getRelaysFromRequest(req);
+    const data = await getData(relays);
+    res.json({ relays, items: data.list });
   } catch (error) {
     res.status(500).json({ error: "Failed to load NCCs", detail: error.message });
   }
@@ -369,12 +409,13 @@ app.get("/api/nccs", async (req, res) => {
 
 app.get("/api/nccs/:d", async (req, res) => {
   try {
-    const data = await getData();
+    const relays = getRelaysFromRequest(req);
+    const data = await getData(relays);
     const dTag = normalizeId(req.params.d);
     const eventId = normalizeId(req.query.event_id || "");
     const details = buildDetails(dTag, data.index, eventId);
     if (!details) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays: RELAYS, details });
+    res.json({ relays, details });
   } catch (error) {
     res.status(500).json({ error: "Failed to load NCC", detail: error.message });
   }
@@ -382,11 +423,12 @@ app.get("/api/nccs/:d", async (req, res) => {
 
 app.get("/api/nccs/:d/endorsements", async (req, res) => {
   try {
-    const data = await getData();
+    const relays = getRelaysFromRequest(req);
+    const data = await getData(relays);
     const dTag = normalizeId(req.params.d);
     const endorsements = buildEndorsements(dTag, data.index);
     if (!endorsements) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays: RELAYS, endorsements });
+    res.json({ relays, endorsements });
   } catch (error) {
     res.status(500).json({ error: "Failed to load endorsements", detail: error.message });
   }
@@ -394,18 +436,20 @@ app.get("/api/nccs/:d/endorsements", async (req, res) => {
 
 app.get("/api/nccs/:d/proposals", async (req, res) => {
   try {
-    const data = await getData();
+    const relays = getRelaysFromRequest(req);
+    const data = await getData(relays);
     const dTag = normalizeId(req.params.d);
     const proposals = buildProposals(dTag, data.index);
     if (!proposals) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays: RELAYS, proposals });
+    res.json({ relays, proposals });
   } catch (error) {
     res.status(500).json({ error: "Failed to load proposals", detail: error.message });
   }
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, relays: RELAYS });
+  const relays = getRelaysFromRequest(req);
+  res.json({ ok: true, relays });
 });
 
 app.listen(PORT, () => {
