@@ -4,7 +4,8 @@ import {
   getQueryParam,
   buildApiUrl,
   initRelayControls,
-  setRelayCount
+  setRelayCount,
+  setDefaultRelays
 } from "./app.js";
 
 const titleEl = document.getElementById("endorsement-title");
@@ -43,8 +44,6 @@ function renderList(items) {
     .join("");
 }
 
-let defaultRelays = [];
-
 async function load() {
   const dTag = getQueryParam("d");
   if (!dTag) {
@@ -59,7 +58,7 @@ async function load() {
     const response = await fetch(buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}/endorsements`));
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
-    defaultRelays = data.default_relays || defaultRelays;
+    if (data.default_relays) setDefaultRelays(data.default_relays);
     setRelayCount(data.relays.length);
     renderList(data.endorsements || []);
   } catch (error) {
@@ -67,5 +66,5 @@ async function load() {
   }
 }
 
-initRelayControls(() => defaultRelays, () => load());
+initRelayControls(() => load());
 load();
