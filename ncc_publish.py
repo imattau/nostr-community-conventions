@@ -24,7 +24,7 @@ import tempfile
 import queue as queue_module
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
 
-from nostr_sdk import Client, EventBuilder, Keys, Kind, NostrSigner, PublicKey, Tag, Timestamp
+from nostr_sdk import Client, EventBuilder, Keys, Kind, NostrSigner, PublicKey, RelayUrl, Tag, Timestamp
 
 
 def _now() -> int:
@@ -627,12 +627,35 @@ def _format_ts(value: Optional[int]) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(value)))
 
 
+def _format_unpublished_drafts(rows: List[sqlite3.Row]) -> List[str]:
+    lines = []
+    for row in rows:
+        title = row["title"] or "-"
+        updated_at = _format_ts(row["updated_at"])
+        status = row["status"] or "draft"
+        lines.append(f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at}")
+    return lines
+
+
 def _db_list_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlite3.Row]:
     cur = conn.execute(
         """
         select id, d, title, status, updated_at, published_at
         from drafts
         where kind = ?
+        order by updated_at desc
+        """,
+        (kind,),
+    )
+    return cur.fetchall()
+
+
+def _db_list_unpublished_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        select id, d, title, status, updated_at, published_at
+        from drafts
+        where kind = ? and (status is null or status != 'published')
         order by updated_at desc
         """,
         (kind,),
@@ -1406,14 +1429,37 @@ def _interactive_cli() -> None:
             continue
 
         if command in ("/publish-ncc", "/publish-nsr"):
-            d_value = _prompt_value("NCC number (e.g. 01)", required=True)
-            d_value = _format_ncc_identifier(d_value)
-            if not d_value:
-                print("Cancelled.")
-                continue
             kind = 30050 if command == "/publish-ncc" else 30051
             config_path = _default_config_path()
             config = _load_config_db(config_path)
+            conn = _db_connect(config_path)
+            unpublished = _db_list_unpublished_drafts(conn, kind)
+            conn.close()
+            label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
+            print(f"{label}:")
+            if not unpublished:
+                print("  (none)")
+            else:
+                for line in _format_unpublished_drafts(unpublished):
+                    print(line)
+            selection = _prompt_value("Draft id or NCC number (e.g. 01)", required=True)
+            draft = None
+            if selection.isdigit():
+                conn = _db_connect(config_path)
+                draft = conn.execute(
+                    "select * from drafts where id = ? and kind = ?",
+                    (int(selection), kind),
+                ).fetchone()
+                conn.close()
+                if not draft:
+                    print("Draft id not found.")
+                    continue
+                d_value = draft["d"]
+            else:
+                d_value = _format_ncc_identifier(selection)
+                if not d_value:
+                    print("Cancelled.")
+                    continue
             relays = _prompt_list(
                 "Relays",
                 config.get("relays") if isinstance(config, dict) else None,
@@ -1424,10 +1470,11 @@ def _interactive_cli() -> None:
                 required=True,
             )
             keys = Keys.parse(privkey)
-            conn = _db_connect(config_path)
-            draft = _db_get_latest_draft(conn, kind, d_value)
-            if not draft:
+            if draft is None:
+                conn = _db_connect(config_path)
+                draft = _db_get_latest_draft(conn, kind, d_value)
                 conn.close()
+            if not draft:
                 json_path = _prompt_value("JSON path (optional)", default=None, required=False)
                 if not json_path:
                     print("Cancelled.")
@@ -1447,6 +1494,7 @@ def _interactive_cli() -> None:
                     )
                     print(f"Publish failed: {exc}. Queued for retry.")
                 continue
+            conn = _db_connect(config_path)
             tags = _db_get_tags(conn, draft["id"])
             conn.close()
             payload = _payload_from_draft(draft["kind"], draft["d"], draft["title"], draft["content"], tags, _now())
@@ -1567,6 +1615,9 @@ def _interactive_tui() -> None:
 
     def set_completer(enabled: bool) -> None:
         input_field.completer = completer if enabled else None
+
+    def set_custom_completer(custom) -> None:
+        input_field.completer = custom
 
     def format_prompt(label: str, default: Optional[str]) -> str:
         if default:
@@ -1757,20 +1808,35 @@ def _interactive_tui() -> None:
             )
             return
         if flow.get("mode") in ("publish-ncc", "publish-nsr") and step.get("key") == "d":
-            identifier = _format_ncc_identifier(value)
-            if not identifier:
-                append_line("Cancelled.")
-                flow["steps"] = []
-                flow["on_complete"] = None
-                flow["mode"] = None
-                set_completer(True)
-                set_input_placeholder(None)
-                return
             kind = 30050 if flow.get("mode") == "publish-ncc" else 30051
             config_path = _default_config_path()
-            conn = _db_connect(config_path)
-            draft = _db_get_latest_draft(conn, kind, identifier)
-            conn.close()
+            draft = None
+            identifier = ""
+            if value.isdigit():
+                conn = _db_connect(config_path)
+                draft = conn.execute(
+                    "select * from drafts where id = ? and kind = ?",
+                    (int(value), kind),
+                ).fetchone()
+                conn.close()
+                if not draft:
+                    append_line("Error: draft id not found.")
+                    append_line(format_prompt(step["label"], step.get("default")))
+                    return
+                identifier = draft["d"]
+            else:
+                identifier = _format_ncc_identifier(value)
+                if not identifier:
+                    append_line("Cancelled.")
+                    flow["steps"] = []
+                    flow["on_complete"] = None
+                    flow["mode"] = None
+                    set_completer(True)
+                    set_input_placeholder(None)
+                    return
+                conn = _db_connect(config_path)
+                draft = _db_get_latest_draft(conn, kind, identifier)
+                conn.close()
             if not draft:
                 flow["steps"] = [
                     {
@@ -1784,6 +1850,7 @@ def _interactive_tui() -> None:
                 flow["answers"] = {"d": identifier}
                 flow["mode"] = "publish-ncc-path" if kind == 30050 else "publish-nsr-path"
                 step = flow["steps"][0]
+                set_custom_completer(None)
                 set_input_placeholder(step.get("default"))
                 append_line(format_prompt(step["label"], step.get("default")))
                 return
@@ -1807,6 +1874,7 @@ def _interactive_tui() -> None:
                 flow["mode"],
                 {"d": identifier, "draft_id": draft["id"]},
             )
+            set_custom_completer(None)
             return
         if flow.get("mode") in ("revise-ncc-path", "revise-nsr-path") and step.get("key") == "json_path":
             if not value:
@@ -2027,6 +2095,9 @@ def _interactive_tui() -> None:
                 on_complete(flow["answers"])
             return
         next_step = flow["steps"][flow["index"]]
+        if not (flow.get("mode") in ("publish-ncc", "publish-nsr") and next_step.get("key") == "d"):
+            if input_field.completer is not None and input_field.completer is not completer:
+                set_custom_completer(None)
         if flow.get("mode") == "create-ncc" and next_step.get("key") == "out_path":
             if next_step.get("default") is None:
                 published_at = flow["answers"].get("published_at")
@@ -2515,10 +2586,32 @@ def _interactive_tui() -> None:
                     )
                     append_line(f"Publish failed: {exc}. Queued for retry.")
 
+            kind = 30050 if command == "/publish-ncc" else 30051
+            conn = _db_connect(_default_config_path())
+            unpublished = _db_list_unpublished_drafts(conn, kind)
+            conn.close()
+            label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
+            append_line(f"{label}:")
+            if not unpublished:
+                append_line("  (none)")
+            else:
+                for line in _format_unpublished_drafts(unpublished):
+                    append_line(line)
+            draft_options: List[str] = []
+            draft_meta: Dict[str, str] = {}
+            for row in unpublished:
+                draft_id = str(row["id"])
+                d_value = row["d"]
+                title = row["title"] or "-"
+                draft_options.extend([draft_id, d_value])
+                draft_meta[draft_id] = f"{d_value} {title}"
+                draft_meta[d_value] = f"#{draft_id} {title}"
+            if draft_options:
+                set_custom_completer(_CommandCompleter(draft_options, meta=draft_meta))
             flow["mode"] = "publish-ncc" if command == "/publish-ncc" else "publish-nsr"
             start_flow(
                 [
-                    {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
+                    {"key": "d", "label": "Draft id or NCC number (e.g. 01)", "default": None, "required": True},
                 ],
                 _complete_publish_latest,
             )
@@ -2850,10 +2943,10 @@ async def publish_event(builder: EventBuilder, *, relays: List[str], keys: Keys)
     signer = NostrSigner.keys(keys)
     client = Client(signer)
     for relay in relays:
-        await client.add_relay(relay)
+        await client.add_relay(RelayUrl.parse(relay))
     await client.connect()
 
-    event = client.sign_event_builder(builder)
+    event = await client.sign_event_builder(builder)
     await client.send_event(event)
     await client.disconnect()
 
