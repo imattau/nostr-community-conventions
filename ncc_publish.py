@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """NCC event publisher.
 
-Builds NCC document (kind 30050) and succession record (kind 30051)
-according to README.md, signs them with a Nostr key, and publishes
-to relays.
+Builds NCC document (kind 30050), succession record (kind 30051),
+and endorsement record (kind 30052) according to README.md, signs
+them with a Nostr key, and publishes to relays.
 """
 
 from __future__ import annotations
@@ -938,6 +938,36 @@ def _extract_succession_fields_from_tags(tags: List) -> tuple[Optional[str], Opt
     )
 
 
+def _extract_endorsement_fields_from_tags(
+    tags: List,
+) -> tuple[Optional[str], List[str], Optional[str], Optional[str], List[str]]:
+    endorses = None
+    roles: List[str] = []
+    implementation = None
+    note = None
+    topics: List[str] = []
+    if tags and isinstance(tags[0], list):
+        endorses = _extract_tag_value(tags, "endorses")
+        roles = _extract_tag_values(tags, "role")
+        implementation = _extract_tag_value(tags, "implementation")
+        note = _extract_tag_value(tags, "note")
+        topics = _extract_tag_values(tags, "t")
+    else:
+        tag_map = _tags_to_map(tags or [])
+        endorses = tag_map.get("endorses", [None])[0]
+        roles = list(tag_map.get("role", []))
+        implementation = tag_map.get("implementation", [None])[0]
+        note = tag_map.get("note", [None])[0]
+        topics = list(tag_map.get("t", []))
+    return (
+        _strip_event_prefix(endorses),
+        roles,
+        implementation,
+        note,
+        topics,
+    )
+
+
 def _normalize_event_reference(value: Optional[str], *, label: str) -> Optional[str]:
     if value is None:
         return None
@@ -961,6 +991,15 @@ def _validate_succession_fields(
         _validate_event_id(previous_event, label="Previous event id")
     steward = _normalize_steward_tag(steward)
     return authoritative_event, previous_event, steward
+
+
+def _validate_endorsement_fields(
+    endorses_event: Optional[str],
+    roles: Optional[List[str]],
+) -> tuple[str, List[str]]:
+    endorses_event = _validate_event_id(endorses_event, label="Endorsed event id")
+    roles = _normalize_role_values(roles)
+    return endorses_event, roles
 
 
 def _apply_succession_updates(
@@ -1494,6 +1533,53 @@ def _nsr_tags_from_inputs(
     return tags
 
 
+def _normalize_role_values(values: Optional[List[str]]) -> List[str]:
+    if not values:
+        return []
+    allowed = {"author", "client", "user"}
+    normalized: List[str] = []
+    seen: set[str] = set()
+    errors = []
+    for role in values:
+        raw = str(role).strip().lower()
+        if not raw:
+            continue
+        if raw not in allowed:
+            errors.append(raw)
+            continue
+        if raw in seen:
+            continue
+        seen.add(raw)
+        normalized.append(raw)
+    if errors:
+        raise ValueError("Role must be author, client, or user. Invalid entries: " + ", ".join(errors))
+    return normalized
+
+
+def _endorsement_tags_from_inputs(
+    *,
+    endorses_event: str,
+    roles: Optional[List[str]],
+    implementation: Optional[str],
+    note: Optional[str],
+    topics: List[str],
+) -> List[tuple[str, str]]:
+    endorses = _normalize_event_reference(endorses_event, label="Endorsed event id")
+    if not endorses:
+        raise ValueError("Endorsed event id is required.")
+    roles = _normalize_role_values(roles)
+    tags: List[tuple[str, str]] = [("endorses", endorses)]
+    for role in roles:
+        tags.append(("role", role))
+    if implementation:
+        tags.append(("implementation", implementation))
+    if note:
+        tags.append(("note", note))
+    for topic in topics:
+        tags.append(("t", topic))
+    return tags
+
+
 def _json_tags_from_tuples(
     kind: int,
     d: str,
@@ -1525,7 +1611,7 @@ def _json_tags_from_tuples(
             tags_list.append(["authors", author])
         if "eventid" in tag_map:
             tags_list.append(["eventid", tag_map["eventid"][0]])
-    else:
+    elif kind == 30051:
         if "authoritative" in tag_map:
             tags_list.append(["authoritative", tag_map["authoritative"][0]])
         if "steward" in tag_map:
@@ -1536,6 +1622,19 @@ def _json_tags_from_tuples(
             tags_list.append(["reason", tag_map["reason"][0]])
         if "effective_at" in tag_map:
             tags_list.append(["effective_at", tag_map["effective_at"][0]])
+        if "eventid" in tag_map:
+            tags_list.append(["eventid", tag_map["eventid"][0]])
+    elif kind == 30052:
+        if "endorses" in tag_map:
+            tags_list.append(["endorses", tag_map["endorses"][0]])
+        for role in tag_map.get("role", []):
+            tags_list.append(["role", role])
+        if "implementation" in tag_map:
+            tags_list.append(["implementation", tag_map["implementation"][0]])
+        if "note" in tag_map:
+            tags_list.append(["note", tag_map["note"][0]])
+        for topic in tag_map.get("t", []):
+            tags_list.append(["t", topic])
         if "eventid" in tag_map:
             tags_list.append(["eventid", tag_map["eventid"][0]])
     return tags_list
@@ -1600,14 +1699,19 @@ def _interactive_cli() -> None:
         "/edit-config": "Edit config stored in the database (prompted).",
         "/create-ncc": "Create a draft NCC JSON file.",
         "/create-nsr": "Create a draft succession record JSON file.",
+        "/create-endorsement": "Create a draft endorsement JSON file.",
         "/revise-ncc": "Revise an existing NCC draft JSON file.",
         "/revise-nsr": "Revise an existing succession record JSON file.",
+        "/revise-endorsement": "Revise an existing endorsement JSON file.",
         "/list-ncc": "List NCC drafts in the database.",
         "/list-nsr": "List succession record drafts in the database.",
+        "/list-endorsements": "List endorsement drafts in the database.",
         "/publish-ncc": "Publish the latest NCC draft JSON file.",
         "/publish-nsr": "Publish the latest succession record JSON file.",
+        "/publish-endorsement": "Publish the latest endorsement JSON file.",
         "/verify-ncc": "Verify published NCC event id on relays.",
         "/verify-nsr": "Verify published NSR event id on relays.",
+        "/verify-endorsement": "Verify published endorsement event id on relays.",
         "/add-relay": "Add a relay to config.",
         "/remove-relay": "Remove a relay from config.",
         "/help": "Show available commands.",
@@ -1637,14 +1741,19 @@ def _interactive_cli() -> None:
             print("  /edit-config")
             print("  /create-ncc")
             print("  /create-nsr")
+            print("  /create-endorsement")
             print("  /revise-ncc")
             print("  /revise-nsr")
+            print("  /revise-endorsement")
             print("  /list-ncc")
             print("  /list-nsr")
+            print("  /list-endorsements")
             print("  /publish-ncc")
             print("  /publish-nsr")
+            print("  /publish-endorsement")
             print("  /verify-ncc")
             print("  /verify-nsr")
+            print("  /verify-endorsement")
             print("  /add-relay")
             print("  /remove-relay")
             print("  /quit")
@@ -1654,14 +1763,19 @@ def _interactive_cli() -> None:
             print("  /edit-config  Edit config stored in the database (prompted).")
             print("  /create-ncc   Create a draft NCC JSON file.")
             print("  /create-nsr   Create a draft succession record JSON file.")
+            print("  /create-endorsement   Create a draft endorsement JSON file.")
             print("  /revise-ncc   Revise an existing NCC draft JSON file.")
             print("  /revise-nsr   Revise an existing succession record JSON file.")
+            print("  /revise-endorsement   Revise an existing endorsement JSON file.")
             print("  /list-ncc     List NCC drafts in the database.")
             print("  /list-nsr     List succession record drafts in the database.")
+            print("  /list-endorsements     List endorsement drafts in the database.")
             print("  /publish-ncc  Publish the latest NCC draft JSON file.")
             print("  /publish-nsr  Publish the latest succession record JSON file.")
+            print("  /publish-endorsement  Publish the latest endorsement JSON file.")
             print("  /verify-ncc   Verify published NCC event id on relays.")
             print("  /verify-nsr   Verify published NSR event id on relays.")
+            print("  /verify-endorsement   Verify published endorsement event id on relays.")
             print("  /add-relay    Add a relay to config.")
             print("  /remove-relay Remove a relay from config.")
             print("  /quit         Exit interactive mode.")
@@ -2016,6 +2130,101 @@ def _interactive_cli() -> None:
                 print("Updated succession record in database.")
             continue
 
+        if command == "/revise-endorsement":
+            d_value = _prompt_value("NCC number (e.g. 01)", required=True)
+            d_value = _format_ncc_identifier(d_value)
+            if not d_value:
+                print("Cancelled.")
+                continue
+            config_path = _default_config_path()
+            store = DraftStore(config_path)
+            draft = store.get_latest_draft(30052, d_value)
+            base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+            base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
+            if not draft:
+                json_path = _prompt_value("Import JSON path (optional)", default=None, required=False)
+                if not json_path:
+                    print("Cancelled.")
+                    continue
+                payload = _load_json(json_path)
+                tags = _tags_from_payload(payload)
+                content_seed = payload.get("content", "")
+                draft_id = store.insert_draft(
+                    kind=30052,
+                    d=d_value,
+                    title=None,
+                    content=content_seed,
+                    tags=tags,
+                )
+                draft = {"id": draft_id, "content": content_seed}
+            else:
+                tags = store.get_tags(draft["id"])
+            tag_map = _tags_to_map(tags)
+            if base_is_published and base_event_id:
+                print(f"Note: editing a published endorsement will create a new draft superseding event {base_event_id}.")
+            endorses_default = _strip_event_prefix(tag_map.get("endorses", [None])[0])
+            endorses_event = _prompt_value("Endorses event id", endorses_default, required=True)
+            default_content_path = _default_ncc_content_path(d_value)
+            content_path = _prompt_value("Content path", default_content_path, required=True)
+            _write_text_file(content_path, draft["content"] or "Endorsed.")
+            open_now = _prompt_value("Open editor now? (y/n)", "y", required=False)
+            if _is_truthy_response(open_now):
+                _open_in_editor(content_path)
+            content = _load_content_from_path(content_path)
+            roles = _prompt_value(
+                "Role (author/client/user, comma-separated, optional)",
+                _format_list_default(tag_map.get("role")),
+                required=False,
+            )
+            implementation = _prompt_value(
+                "Implementation (optional)",
+                tag_map.get("implementation", [None])[0],
+                required=False,
+            )
+            note = _prompt_value("Note (optional)", tag_map.get("note", [None])[0], required=False)
+            topics = _prompt_value(
+                "Topics (comma-separated, optional)",
+                _format_list_default(tag_map.get("t")),
+                required=False,
+            )
+            try:
+                roles_list = _normalize_role_values(_parse_list_value(roles))
+                tags = _endorsement_tags_from_inputs(
+                    endorses_event=endorses_event,
+                    roles=roles_list,
+                    implementation=_normalize_optional_str(implementation),
+                    note=_normalize_optional_str(note),
+                    topics=_parse_list_value(topics),
+                )
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                continue
+            if base_is_published:
+                new_id = store.insert_draft(
+                    kind=30052,
+                    d=d_value,
+                    title=None,
+                    content=content,
+                    tags=tags,
+                )
+                draft = {"id": new_id, "content": content}
+                print(f"Created new endorsement draft (id {new_id}) superseding event {base_event_id}.")
+            else:
+                store.update_draft(
+                    draft_id=int(draft["id"]),
+                    title=None,
+                    content=content,
+                    tags=tags,
+                )
+            export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
+            if export_path:
+                payload = _payload_from_draft(30052, d_value, None, content, tags, _now())
+                _write_json(export_path, payload)
+                print(f"Wrote endorsement JSON to {export_path}")
+            if not base_is_published:
+                print("Updated endorsement in database.")
+            continue
+
         if command == "/create-nsr":
             default_path = _default_config_path()
             config_path = default_path
@@ -2055,8 +2264,54 @@ def _interactive_cli() -> None:
             print(f"Saved succession record to database (id {draft_id}).")
             continue
 
-        if command in ("/list-ncc", "/list-nsr"):
-            kind = 30050 if command == "/list-ncc" else 30051
+        if command == "/create-endorsement":
+            config_path = _default_config_path()
+            store = DraftStore(config_path)
+            d_value = _prompt_value("NCC number (e.g. 01)", required=True)
+            d_value = _format_ncc_identifier(d_value)
+            if not d_value:
+                print("Cancelled.")
+                continue
+            endorses_event = _prompt_value("Endorses event id", required=True)
+            content_value = _prompt_value("Content", "Endorsed.", required=True)
+            role_raw = _prompt_value("Role (author/client/user, comma-separated, optional)", required=False)
+            implementation = _prompt_value("Implementation (optional)", required=False)
+            note = _prompt_value("Note (optional)", required=False)
+            topics_raw = _prompt_value("Topics (comma-separated, optional)", required=False)
+            try:
+                roles = _normalize_role_values(_parse_list_value(role_raw))
+                tags = _endorsement_tags_from_inputs(
+                    endorses_event=endorses_event,
+                    roles=roles,
+                    implementation=_normalize_optional_str(implementation),
+                    note=_normalize_optional_str(note),
+                    topics=_parse_list_value(topics_raw),
+                )
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                continue
+            draft_id = store.insert_draft(
+                kind=30052,
+                d=d_value,
+                title=None,
+                content=content_value,
+                tags=tags,
+            )
+            export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
+            if export_path:
+                payload = _payload_from_draft(30052, d_value, None, content_value, tags, _now())
+                _write_json(export_path, payload)
+                print(f"Wrote endorsement JSON to {export_path}")
+            print(f"Saved endorsement to database (id {draft_id}).")
+            continue
+
+        if command in ("/list-ncc", "/list-nsr", "/list-endorsements"):
+            if command == "/list-ncc":
+                kind = 30050
+            elif command == "/list-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             if kind == 30050:
@@ -2068,7 +2323,12 @@ def _interactive_cli() -> None:
                     except Exception as exc:
                         print(f"Relay fetch failed: {exc}")
             rows = store.list_drafts(kind)
-            label = "NCC drafts" if kind == 30050 else "NSR drafts"
+            if kind == 30050:
+                label = "NCC drafts"
+            elif kind == 30051:
+                label = "NSR drafts"
+            else:
+                label = "Endorsement drafts"
             print(f"{label}:")
             if not rows:
                 print("  (none)")
@@ -2102,20 +2362,36 @@ def _interactive_cli() -> None:
                     print(
                         f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
                     )
-                else:
+                elif kind == 30051:
                     print(
                         f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
                     )
+                else:
+                    tags = store.get_tags(row["id"])
+                    endorses = _extract_endorsement_fields_from_tags(tags)[0] or "-"
+                    print(
+                        f"  #{row['id']} {row['d']} endorses {endorses} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                    )
             continue
 
-        if command in ("/publish-ncc", "/publish-nsr"):
-            kind = 30050 if command == "/publish-ncc" else 30051
+        if command in ("/publish-ncc", "/publish-nsr", "/publish-endorsement"):
+            if command == "/publish-ncc":
+                kind = 30050
+            elif command == "/publish-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             service = PublishService(config_path)
             config = store.load_config()
             unpublished = store.list_unpublished_drafts(kind)
-            label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
+            if kind == 30050:
+                label = "Unpublished NCC drafts"
+            elif kind == 30051:
+                label = "Unpublished NSR drafts"
+            else:
+                label = "Unpublished endorsement drafts"
             print(f"{label}:")
             if not unpublished:
                 print("  (none)")
@@ -2127,7 +2403,14 @@ def _interactive_cli() -> None:
             if selection.isdigit():
                 draft = store.get_draft(int(selection))
                 if draft and draft["kind"] != kind:
-                    draft = None
+                    if kind == 30050:
+                        label = "NCC"
+                    elif kind == 30051:
+                        label = "NSR"
+                    else:
+                        label = "endorsement"
+                    print(f"Draft #{selection} is not a {label} draft.")
+                    continue
                 if not draft:
                     print("Draft id not found.")
                     continue
@@ -2155,7 +2438,19 @@ def _interactive_cli() -> None:
                 if not json_path:
                     print("Cancelled.")
                     continue
+                payload_kind = None
+                payload = None
+                try:
+                    payload = _load_json(json_path)
+                    payload_kind = payload.get("kind") if isinstance(payload, dict) else None
+                except Exception:
+                    payload = None
+                if payload_kind and payload_kind != kind:
+                    print(f"JSON kind {payload_kind} does not match this command.")
+                    continue
                 if kind == 30051:
+                    if payload is None:
+                        payload = _load_json(json_path)
                     payload = _load_json(json_path)
                     authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
                     try:
@@ -2165,6 +2460,15 @@ def _interactive_cli() -> None:
                         continue
                     if not _check_succession_not_self(config_path, succession_info[0], keys):
                         print("Error: succession should not acknowledge your own NCC.")
+                        continue
+                if kind == 30052:
+                    if payload is None:
+                        payload = _load_json(json_path)
+                    endorses_event, roles, _, _, _ = _extract_endorsement_fields_from_tags(payload.get("tags", []))
+                    try:
+                        _validate_endorsement_fields(endorses_event, roles)
+                    except ValueError as exc:
+                        print(f"Error: {exc}")
                         continue
                 print("Publishing event...")
                 try:
@@ -2192,6 +2496,16 @@ def _interactive_cli() -> None:
                     )
                 continue
             tags = store.get_tags(draft["id"])
+            draft_kind = draft["kind"]
+            if draft_kind != kind:
+                if kind == 30050:
+                    label = "NCC"
+                elif kind == 30051:
+                    label = "NSR"
+                else:
+                    label = "endorsement"
+                print(f"Draft #{draft['id']} is not a {label} draft.")
+                continue
             if kind == 30051:
                 authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
                 try:
@@ -2201,6 +2515,13 @@ def _interactive_cli() -> None:
                     continue
                 if not _check_succession_not_self(config_path, succession_info[0], keys):
                     print("Error: succession should not acknowledge your own NCC.")
+                    continue
+            if kind == 30052:
+                endorses_event, roles, _, _, _ = _extract_endorsement_fields_from_tags(tags)
+                try:
+                    _validate_endorsement_fields(endorses_event, roles)
+                except ValueError as exc:
+                    print(f"Error: {exc}")
                     continue
             payload = _payload_from_draft(draft["kind"], draft["d"], draft["title"], draft["content"], tags, _now())
             print("Publishing event...")
@@ -2244,14 +2565,24 @@ def _interactive_cli() -> None:
             )
             continue
 
-        if command in ("/verify-ncc", "/verify-nsr"):
-            kind = 30050 if command == "/verify-ncc" else 30051
+        if command in ("/verify-ncc", "/verify-nsr", "/verify-endorsement"):
+            if command == "/verify-ncc":
+                kind = 30050
+            elif command == "/verify-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             service = PublishService(config_path)
             config = store.load_config()
             published = store.list_published_drafts(kind)
-            label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
+            if kind == 30050:
+                label = "Published NCC drafts"
+            elif kind == 30051:
+                label = "Published NSR drafts"
+            else:
+                label = "Published endorsement drafts"
             print(f"{label}:")
             if not published:
                 print("  (none)")
@@ -2371,14 +2702,19 @@ def _interactive_tui() -> None:
         "/edit-config": "Edit config stored in the database (prompted).",
         "/create-ncc": "Create a draft NCC JSON file.",
         "/create-nsr": "Create a draft succession record JSON file.",
+        "/create-endorsement": "Create a draft endorsement JSON file.",
         "/revise-ncc": "Revise an existing NCC draft JSON file.",
         "/revise-nsr": "Revise an existing succession record JSON file.",
+        "/revise-endorsement": "Revise an existing endorsement JSON file.",
         "/list-ncc": "List NCC drafts in the database.",
         "/list-nsr": "List succession record drafts in the database.",
+        "/list-endorsements": "List endorsement drafts in the database.",
         "/publish-ncc": "Publish the latest NCC draft JSON file.",
         "/publish-nsr": "Publish the latest succession record JSON file.",
+        "/publish-endorsement": "Publish the latest endorsement JSON file.",
         "/verify-ncc": "Verify published NCC event id on relays.",
         "/verify-nsr": "Verify published NSR event id on relays.",
+        "/verify-endorsement": "Verify published endorsement event id on relays.",
         "/add-relay": "Add a relay to config.",
         "/remove-relay": "Remove a relay from config.",
         "/help": "Show available commands.",
@@ -2485,7 +2821,14 @@ def _interactive_tui() -> None:
                 append_line(f"Error: {exc}")
                 append_line(format_prompt(step["label"], default))
                 return
-        if flow.get("mode") in ("revise-ncc", "revise-nsr") and step.get("key") == "d":
+        if step.get("key") == "roles":
+            try:
+                _normalize_role_values(_parse_list_value(value))
+            except ValueError as exc:
+                append_line(f"Error: {exc}")
+                append_line(format_prompt(step["label"], default))
+                return
+        if flow.get("mode") in ("revise-ncc", "revise-nsr", "revise-endorsement") and step.get("key") == "d":
             identifier = _format_ncc_identifier(value)
             if not identifier:
                 append_line("Cancelled.")
@@ -2495,7 +2838,12 @@ def _interactive_tui() -> None:
                 set_completer(True)
                 set_input_placeholder(None)
                 return
-            kind = 30050 if flow.get("mode") == "revise-ncc" else 30051
+            if flow.get("mode") == "revise-ncc":
+                kind = 30050
+            elif flow.get("mode") == "revise-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             draft = store.get_latest_draft(kind, identifier)
@@ -2510,7 +2858,12 @@ def _interactive_tui() -> None:
                 ]
                 flow["index"] = 0
                 flow["answers"] = {"d": identifier, "config_path": config_path}
-                flow["mode"] = "revise-ncc-path" if kind == 30050 else "revise-nsr-path"
+                if kind == 30050:
+                    flow["mode"] = "revise-ncc-path"
+                elif kind == 30051:
+                    flow["mode"] = "revise-nsr-path"
+                else:
+                    flow["mode"] = "revise-endorsement-path"
                 step = flow["steps"][0]
                 set_input_placeholder(step.get("default"))
                 append_line(format_prompt(step["label"], step.get("default")))
@@ -2576,37 +2929,85 @@ def _interactive_tui() -> None:
                     },
                 )
                 return
+            if kind == 30051:
+                steps = [
+                    {
+                        "key": "authoritative_event",
+                        "label": "Authoritative event id",
+                        "default": _strip_event_prefix(tag_map.get("authoritative", [None])[0]),
+                        "required": True,
+                    },
+                    {"key": "content_path", "label": "Content path", "default": None, "required": True},
+                    {"key": "open_editor", "label": "Open editor now? (y/n)", "default": "y", "required": False},
+                    {
+                        "key": "steward",
+                        "label": "Steward (optional)",
+                        "default": tag_map.get("steward", [None])[0],
+                        "required": False,
+                    },
+                    {
+                        "key": "previous",
+                        "label": "Previous event id (optional)",
+                        "default": _strip_event_prefix(tag_map.get("previous", [None])[0]),
+                        "required": False,
+                    },
+                    {
+                        "key": "reason",
+                        "label": "Reason (optional)",
+                        "default": tag_map.get("reason", [None])[0],
+                        "required": False,
+                    },
+                    {
+                        "key": "effective_at",
+                        "label": "Effective at (optional)",
+                        "default": tag_map.get("effective_at", [None])[0],
+                        "required": False,
+                    },
+                    {"key": "out_path", "label": "Export JSON path (optional)", "default": None, "required": False},
+                ]
+                restart_flow(
+                    steps,
+                    flow["on_complete"],
+                    "revise-nsr-edit",
+                    {
+                        "d": identifier,
+                        "draft_id": draft["id"],
+                        "content_seed": draft["content"] or "",
+                        "config_path": config_path,
+                    },
+                )
+                return
             steps = [
                 {
-                    "key": "authoritative_event",
-                    "label": "Authoritative event id",
-                    "default": _strip_event_prefix(tag_map.get("authoritative", [None])[0]),
+                    "key": "endorses_event",
+                    "label": "Endorses event id",
+                    "default": _strip_event_prefix(tag_map.get("endorses", [None])[0]),
                     "required": True,
                 },
                 {"key": "content_path", "label": "Content path", "default": None, "required": True},
                 {"key": "open_editor", "label": "Open editor now? (y/n)", "default": "y", "required": False},
                 {
-                    "key": "steward",
-                    "label": "Steward (optional)",
-                    "default": tag_map.get("steward", [None])[0],
+                    "key": "roles",
+                    "label": "Role (author/client/user, comma-separated, optional)",
+                    "default": _format_list_default(tag_map.get("role")),
                     "required": False,
                 },
                 {
-                    "key": "previous",
-                    "label": "Previous event id (optional)",
-                    "default": _strip_event_prefix(tag_map.get("previous", [None])[0]),
+                    "key": "implementation",
+                    "label": "Implementation (optional)",
+                    "default": tag_map.get("implementation", [None])[0],
                     "required": False,
                 },
                 {
-                    "key": "reason",
-                    "label": "Reason (optional)",
-                    "default": tag_map.get("reason", [None])[0],
+                    "key": "note",
+                    "label": "Note (optional)",
+                    "default": tag_map.get("note", [None])[0],
                     "required": False,
                 },
                 {
-                    "key": "effective_at",
-                    "label": "Effective at (optional)",
-                    "default": tag_map.get("effective_at", [None])[0],
+                    "key": "topics",
+                    "label": "Topics (comma-separated, optional)",
+                    "default": _format_list_default(tag_map.get("t")),
                     "required": False,
                 },
                 {"key": "out_path", "label": "Export JSON path (optional)", "default": None, "required": False},
@@ -2614,7 +3015,7 @@ def _interactive_tui() -> None:
             restart_flow(
                 steps,
                 flow["on_complete"],
-                "revise-nsr-edit",
+                "revise-endorsement-edit",
                 {
                     "d": identifier,
                     "draft_id": draft["id"],
@@ -2623,8 +3024,13 @@ def _interactive_tui() -> None:
                 },
             )
             return
-        if flow.get("mode") in ("publish-ncc", "publish-nsr") and step.get("key") == "d":
-            kind = 30050 if flow.get("mode") == "publish-ncc" else 30051
+        if flow.get("mode") in ("publish-ncc", "publish-nsr", "publish-endorsement") and step.get("key") == "d":
+            if flow.get("mode") == "publish-ncc":
+                kind = 30050
+            elif flow.get("mode") == "publish-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             draft = None
@@ -2660,7 +3066,12 @@ def _interactive_tui() -> None:
                 ]
                 flow["index"] = 0
                 flow["answers"] = {"d": identifier}
-                flow["mode"] = "publish-ncc-path" if kind == 30050 else "publish-nsr-path"
+                if kind == 30050:
+                    flow["mode"] = "publish-ncc-path"
+                elif kind == 30051:
+                    flow["mode"] = "publish-nsr-path"
+                else:
+                    flow["mode"] = "publish-endorsement-path"
                 step = flow["steps"][0]
                 set_custom_completer(None)
                 set_input_placeholder(step.get("default"))
@@ -2688,7 +3099,7 @@ def _interactive_tui() -> None:
             )
             set_custom_completer(None)
             return
-        if flow.get("mode") in ("revise-ncc-path", "revise-nsr-path") and step.get("key") == "json_path":
+        if flow.get("mode") in ("revise-ncc-path", "revise-nsr-path", "revise-endorsement-path") and step.get("key") == "json_path":
             if not value:
                 append_line("Cancelled.")
                 flow["steps"] = []
@@ -2698,7 +3109,12 @@ def _interactive_tui() -> None:
                 set_input_placeholder(None)
                 return
             payload = _load_json(value)
-            kind = 30050 if flow.get("mode") == "revise-ncc-path" else 30051
+            if flow.get("mode") == "revise-ncc-path":
+                kind = 30050
+            elif flow.get("mode") == "revise-nsr-path":
+                kind = 30051
+            else:
+                kind = 30052
             identifier = flow["answers"].get("d") or ""
             tags = _tags_from_payload(payload)
             title = None
@@ -2771,37 +3187,85 @@ def _interactive_tui() -> None:
                     },
                 )
                 return
+            if kind == 30051:
+                steps = [
+                    {
+                        "key": "authoritative_event",
+                        "label": "Authoritative event id",
+                        "default": _strip_event_prefix(tag_map.get("authoritative", [None])[0]),
+                        "required": True,
+                    },
+                    {"key": "content_path", "label": "Content path", "default": None, "required": True},
+                    {"key": "open_editor", "label": "Open editor now? (y/n)", "default": "y", "required": False},
+                    {
+                        "key": "steward",
+                        "label": "Steward (optional)",
+                        "default": tag_map.get("steward", [None])[0],
+                        "required": False,
+                    },
+                    {
+                        "key": "previous",
+                        "label": "Previous event id (optional)",
+                        "default": _strip_event_prefix(tag_map.get("previous", [None])[0]),
+                        "required": False,
+                    },
+                    {
+                        "key": "reason",
+                        "label": "Reason (optional)",
+                        "default": tag_map.get("reason", [None])[0],
+                        "required": False,
+                    },
+                    {
+                        "key": "effective_at",
+                        "label": "Effective at (optional)",
+                        "default": tag_map.get("effective_at", [None])[0],
+                        "required": False,
+                    },
+                    {"key": "out_path", "label": "Export JSON path (optional)", "default": None, "required": False},
+                ]
+                restart_flow(
+                    steps,
+                    flow["on_complete"],
+                    "revise-nsr-edit",
+                    {
+                        "d": identifier,
+                        "draft_id": draft_id,
+                        "content_seed": content,
+                        "config_path": config_path,
+                    },
+                )
+                return
             steps = [
                 {
-                    "key": "authoritative_event",
-                    "label": "Authoritative event id",
-                    "default": _strip_event_prefix(tag_map.get("authoritative", [None])[0]),
+                    "key": "endorses_event",
+                    "label": "Endorses event id",
+                    "default": _strip_event_prefix(tag_map.get("endorses", [None])[0]),
                     "required": True,
                 },
                 {"key": "content_path", "label": "Content path", "default": None, "required": True},
                 {"key": "open_editor", "label": "Open editor now? (y/n)", "default": "y", "required": False},
                 {
-                    "key": "steward",
-                    "label": "Steward (optional)",
-                    "default": tag_map.get("steward", [None])[0],
+                    "key": "roles",
+                    "label": "Role (author/client/user, comma-separated, optional)",
+                    "default": _format_list_default(tag_map.get("role")),
                     "required": False,
                 },
                 {
-                    "key": "previous",
-                    "label": "Previous event id (optional)",
-                    "default": _strip_event_prefix(tag_map.get("previous", [None])[0]),
+                    "key": "implementation",
+                    "label": "Implementation (optional)",
+                    "default": tag_map.get("implementation", [None])[0],
                     "required": False,
                 },
                 {
-                    "key": "reason",
-                    "label": "Reason (optional)",
-                    "default": tag_map.get("reason", [None])[0],
+                    "key": "note",
+                    "label": "Note (optional)",
+                    "default": tag_map.get("note", [None])[0],
                     "required": False,
                 },
                 {
-                    "key": "effective_at",
-                    "label": "Effective at (optional)",
-                    "default": tag_map.get("effective_at", [None])[0],
+                    "key": "topics",
+                    "label": "Topics (comma-separated, optional)",
+                    "default": _format_list_default(tag_map.get("t")),
                     "required": False,
                 },
                 {"key": "out_path", "label": "Export JSON path (optional)", "default": None, "required": False},
@@ -2809,7 +3273,7 @@ def _interactive_tui() -> None:
             restart_flow(
                 steps,
                 flow["on_complete"],
-                "revise-nsr-edit",
+                "revise-endorsement-edit",
                 {
                     "d": identifier,
                     "draft_id": draft_id,
@@ -2818,7 +3282,7 @@ def _interactive_tui() -> None:
                 },
             )
             return
-        if flow.get("mode") in ("publish-ncc-path", "publish-nsr-path") and step.get("key") == "json_path":
+        if flow.get("mode") in ("publish-ncc-path", "publish-nsr-path", "publish-endorsement-path") and step.get("key") == "json_path":
             if not value:
                 append_line("Cancelled.")
                 flow["steps"] = []
@@ -2828,8 +3292,15 @@ def _interactive_tui() -> None:
                 set_input_placeholder(None)
                 return
             flow["answers"]["json_path"] = value
-            kind = 30050 if flow.get("mode") == "publish-ncc-path" else 30051
-            flow_mode = "publish-ncc" if kind == 30050 else "publish-nsr"
+            if flow.get("mode") == "publish-ncc-path":
+                kind = 30050
+                flow_mode = "publish-ncc"
+            elif flow.get("mode") == "publish-nsr-path":
+                kind = 30051
+                flow_mode = "publish-nsr"
+            else:
+                kind = 30052
+                flow_mode = "publish-endorsement"
             config_defaults = _load_config_db(_default_config_path())
             restart_flow(
                 [
@@ -2852,11 +3323,11 @@ def _interactive_tui() -> None:
                 flow["answers"],
             )
             return
-        if flow.get("mode") in ("create-ncc", "create-nsr") and step.get("key") == "d":
+        if flow.get("mode") in ("create-ncc", "create-nsr", "create-endorsement") and step.get("key") == "d":
             value = _format_ncc_identifier(value)
             config_path = _default_config_path()
             collision = _find_ncc_collision(config_path, value)
-            if collision:
+            if collision and flow.get("mode") in ("create-ncc", "create-nsr"):
                 if flow.get("mode") == "create-ncc":
                     append_line(f"Error: NCC {value} already exists (draft #{collision['id']}).")
                     append_line(format_prompt(step["label"], default))
@@ -2900,7 +3371,7 @@ def _interactive_tui() -> None:
                 if flow_step.get("key") == "privkey":
                     flow_step["default"] = privkey_default
         flow["answers"][step["key"]] = value
-        if flow.get("mode") in ("verify-ncc", "verify-nsr") and step.get("key") == "selection":
+        if flow.get("mode") in ("verify-ncc", "verify-nsr", "verify-endorsement") and step.get("key") == "selection":
             set_custom_completer(None)
         if flow.get("mode") == "remove-relay" and step.get("key") == "relay":
             set_custom_completer(None)
@@ -2916,7 +3387,7 @@ def _interactive_tui() -> None:
                 on_complete(flow["answers"])
             return
         next_step = flow["steps"][flow["index"]]
-        if not (flow.get("mode") in ("publish-ncc", "publish-nsr") and next_step.get("key") == "d"):
+        if not (flow.get("mode") in ("publish-ncc", "publish-nsr", "publish-endorsement") and next_step.get("key") == "d"):
             if input_field.completer is not None and input_field.completer is not completer:
                 set_custom_completer(None)
         if flow.get("mode") == "create-ncc" and next_step.get("key") == "out_path":
@@ -2931,7 +3402,7 @@ def _interactive_tui() -> None:
             if next_step.get("default") is None:
                 identifier = flow["answers"].get("d") or "ncc"
                 next_step["default"] = _default_ncc_content_path(identifier)
-        if flow.get("mode") in ("revise-ncc-edit", "revise-nsr-edit") and next_step.get("key") == "content_path":
+        if flow.get("mode") in ("revise-ncc-edit", "revise-nsr-edit", "revise-endorsement-edit") and next_step.get("key") == "content_path":
             if next_step.get("default") is None:
                 identifier = flow["answers"].get("d") or "ncc"
                 next_step["default"] = _default_ncc_content_path(identifier)
@@ -2949,14 +3420,19 @@ def _interactive_tui() -> None:
             append_line("  /edit-config")
             append_line("  /create-ncc")
             append_line("  /create-nsr")
+            append_line("  /create-endorsement")
             append_line("  /revise-ncc")
             append_line("  /revise-nsr")
+            append_line("  /revise-endorsement")
             append_line("  /list-ncc")
             append_line("  /list-nsr")
+            append_line("  /list-endorsements")
             append_line("  /publish-ncc")
             append_line("  /publish-nsr")
+            append_line("  /publish-endorsement")
             append_line("  /verify-ncc")
             append_line("  /verify-nsr")
+            append_line("  /verify-endorsement")
             append_line("  /add-relay")
             append_line("  /remove-relay")
             append_line("  /quit")
@@ -2966,14 +3442,19 @@ def _interactive_tui() -> None:
             append_line("  /edit-config  Edit config stored in the database (prompted).")
             append_line("  /create-ncc   Create a draft NCC JSON file.")
             append_line("  /create-nsr   Create a draft succession record JSON file.")
+            append_line("  /create-endorsement   Create a draft endorsement JSON file.")
             append_line("  /revise-ncc   Revise an existing NCC draft JSON file.")
             append_line("  /revise-nsr   Revise an existing succession record JSON file.")
+            append_line("  /revise-endorsement   Revise an existing endorsement JSON file.")
             append_line("  /list-ncc     List NCC drafts in the database.")
             append_line("  /list-nsr     List succession record drafts in the database.")
+            append_line("  /list-endorsements     List endorsement drafts in the database.")
             append_line("  /publish-ncc  Publish the latest NCC draft JSON file.")
             append_line("  /publish-nsr  Publish the latest succession record JSON file.")
+            append_line("  /publish-endorsement  Publish the latest endorsement JSON file.")
             append_line("  /verify-ncc   Verify published NCC event id on relays.")
             append_line("  /verify-nsr   Verify published NSR event id on relays.")
+            append_line("  /verify-endorsement   Verify published endorsement event id on relays.")
             append_line("  /add-relay    Add a relay to config.")
             append_line("  /remove-relay Remove a relay from config.")
             append_line("  /quit         Exit interactive mode.")
@@ -3329,6 +3810,60 @@ def _interactive_tui() -> None:
             start_flow(steps, _complete_revise_nsr)
             return
 
+        if command == "/revise-endorsement":
+            def _complete_revise_endorsement(answers: dict) -> None:
+                content_path = answers.get("content_path")
+                if content_path and os.path.exists(content_path):
+                    content = _load_content_from_path(content_path)
+                else:
+                    content = answers.get("content") or "Endorsed."
+                try:
+                    roles = _normalize_role_values(_parse_list_value(answers.get("roles") or ""))
+                    tags = _endorsement_tags_from_inputs(
+                        endorses_event=answers["endorses_event"],
+                        roles=roles,
+                        implementation=_normalize_optional_str(answers.get("implementation")),
+                        note=_normalize_optional_str(answers.get("note")),
+                        topics=_parse_list_value(answers.get("topics") or ""),
+                    )
+                except ValueError as exc:
+                    append_line(f"Error: {exc}")
+                    return
+                store = DraftStore(answers.get("config_path") or _default_config_path())
+                draft = store.get_draft(int(answers["draft_id"]))
+                base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+                base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
+                if base_is_published:
+                    new_id = store.insert_draft(
+                        kind=30052,
+                        d=answers["d"],
+                        title=None,
+                        content=content,
+                        tags=tags,
+                    )
+                    append_line(f"Created new endorsement draft (id {new_id}) superseding event {base_event_id}.")
+                else:
+                    store.update_draft(
+                        draft_id=int(answers["draft_id"]),
+                        title=None,
+                        content=content,
+                        tags=tags,
+                    )
+                export_path = _normalize_optional_str(answers.get("out_path"))
+                if export_path:
+                    payload = _payload_from_draft(30052, answers["d"], None, content, tags, _now())
+                    _write_json(export_path, payload)
+                    append_line(f"Wrote endorsement JSON to {export_path}")
+                if not base_is_published:
+                    append_line("Updated endorsement in database.")
+
+            steps = [
+                {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
+            ]
+            flow["mode"] = "revise-endorsement"
+            start_flow(steps, _complete_revise_endorsement)
+            return
+
         if command == "/create-nsr":
             def _complete_create_nsr(answers: dict) -> None:
                 config_path = _default_config_path()
@@ -3372,13 +3907,78 @@ def _interactive_tui() -> None:
             start_flow(steps, _complete_create_nsr)
             return
 
-        if command in ("/list-ncc", "/list-nsr"):
-            kind = 30050 if command == "/list-ncc" else 30051
+        if command == "/create-endorsement":
+            def _complete_create_endorsement(answers: dict) -> None:
+                config_path = _default_config_path()
+                store = DraftStore(config_path)
+                content = answers.get("content") or "Endorsed."
+                try:
+                    roles = _normalize_role_values(_parse_list_value(answers.get("roles") or ""))
+                    tags = _endorsement_tags_from_inputs(
+                        endorses_event=answers["endorses_event"],
+                        roles=roles,
+                        implementation=_normalize_optional_str(answers.get("implementation")),
+                        note=_normalize_optional_str(answers.get("note")),
+                        topics=_parse_list_value(answers.get("topics") or ""),
+                    )
+                except ValueError as exc:
+                    append_line(f"Error: {exc}")
+                    return
+                draft_id = store.insert_draft(
+                    kind=30052,
+                    d=answers["d"],
+                    title=None,
+                    content=content,
+                    tags=tags,
+                )
+                export_path = _normalize_optional_str(answers.get("out_path"))
+                if export_path:
+                    payload = _payload_from_draft(30052, answers["d"], None, content, tags, _now())
+                    _write_json(export_path, payload)
+                    append_line(f"Wrote endorsement JSON to {export_path}")
+                append_line(f"Saved endorsement to database (id {draft_id}).")
+
+            steps = [
+                {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
+                {"key": "endorses_event", "label": "Endorses event id", "default": None, "required": True},
+                {"key": "content", "label": "Content", "default": "Endorsed.", "required": True},
+                {
+                    "key": "roles",
+                    "label": "Role (author/client/user, comma-separated, optional)",
+                    "default": None,
+                    "required": False,
+                },
+                {"key": "implementation", "label": "Implementation (optional)", "default": None, "required": False},
+                {"key": "note", "label": "Note (optional)", "default": None, "required": False},
+                {
+                    "key": "topics",
+                    "label": "Topics (comma-separated, optional)",
+                    "default": None,
+                    "required": False,
+                },
+                {"key": "out_path", "label": "Export JSON path (optional)", "default": None, "required": False},
+            ]
+            flow["mode"] = "create-endorsement"
+            start_flow(steps, _complete_create_endorsement)
+            return
+
+        if command in ("/list-ncc", "/list-nsr", "/list-endorsements"):
+            if command == "/list-ncc":
+                kind = 30050
+            elif command == "/list-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             def _render_list() -> None:
                 store = DraftStore(config_path)
                 rows = store.list_drafts(kind)
-                label = "NCC drafts" if kind == 30050 else "NSR drafts"
+                if kind == 30050:
+                    label = "NCC drafts"
+                elif kind == 30051:
+                    label = "NSR drafts"
+                else:
+                    label = "Endorsement drafts"
                 append_line(f"{label}:")
                 if not rows:
                     append_line("  (none)")
@@ -3412,9 +4012,15 @@ def _interactive_tui() -> None:
                         append_line(
                             f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
                         )
-                    else:
+                    elif kind == 30051:
                         append_line(
                             f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                        )
+                    else:
+                        tags = store.get_tags(row["id"])
+                        endorses = _extract_endorsement_fields_from_tags(tags)[0] or "-"
+                        append_line(
+                            f"  #{row['id']} {row['d']} endorses {endorses} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
                         )
 
             if kind == 30050:
@@ -3442,7 +4048,14 @@ def _interactive_tui() -> None:
             _render_list()
             return
 
-        if command in ("/publish-ncc", "/publish-nsr"):
+        if command in ("/publish-ncc", "/publish-nsr", "/publish-endorsement"):
+            if command == "/publish-ncc":
+                publish_kind = 30050
+            elif command == "/publish-nsr":
+                publish_kind = 30051
+            else:
+                publish_kind = 30052
+
             def _complete_publish_latest(answers: dict) -> None:
                 config_path = _default_config_path()
                 store = DraftStore(config_path)
@@ -3456,10 +4069,20 @@ def _interactive_tui() -> None:
                     append_line("Error: privkey is required.")
                     return
                 keys = Keys.parse(privkey)
-                kind = 30050 if flow.get("mode") == "publish-ncc" else 30051
+                kind = publish_kind
                 succession_info: Optional[tuple[str, Optional[str], Optional[str]]] = None
                 draft_id = answers.get("draft_id")
                 if draft_id:
+                    draft = store.get_draft(int(draft_id))
+                    if draft and draft["kind"] != kind:
+                        if kind == 30050:
+                            label = "NCC"
+                        elif kind == 30051:
+                            label = "NSR"
+                        else:
+                            label = "endorsement"
+                        append_line(f"Error: draft #{draft_id} is not a {label} draft.")
+                        return
                     if kind == 30051:
                         tags = store.get_tags(int(draft_id))
                         authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
@@ -3470,6 +4093,14 @@ def _interactive_tui() -> None:
                             return
                         if not _check_succession_not_self(config_path, succession_info[0], keys):
                             append_line("Error: succession should not acknowledge your own NCC.")
+                            return
+                    if kind == 30052:
+                        tags = store.get_tags(int(draft_id))
+                        endorses_event, roles, _, _, _ = _extract_endorsement_fields_from_tags(tags)
+                        try:
+                            _validate_endorsement_fields(endorses_event, roles)
+                        except ValueError as exc:
+                            append_line(f"Error: {exc}")
                             return
                     append_line("Publishing event...")
                     try:
@@ -3499,8 +4130,19 @@ def _interactive_tui() -> None:
                 if not json_path:
                     append_line("Error: JSON path is required.")
                     return
-                if kind == 30051:
+                payload_kind = None
+                payload = None
+                try:
                     payload = _load_json(json_path)
+                    payload_kind = payload.get("kind") if isinstance(payload, dict) else None
+                except Exception:
+                    payload = None
+                if payload_kind and payload_kind != kind:
+                    append_line(f"Error: JSON kind {payload_kind} does not match this command.")
+                    return
+                if kind == 30051:
+                    if payload is None:
+                        payload = _load_json(json_path)
                     authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
                     try:
                         succession_info = _validate_succession_fields(authoritative, previous, steward)
@@ -3509,6 +4151,15 @@ def _interactive_tui() -> None:
                         return
                     if not _check_succession_not_self(config_path, succession_info[0], keys):
                         append_line("Error: succession should not acknowledge your own NCC.")
+                        return
+                if kind == 30052:
+                    if payload is None:
+                        payload = _load_json(json_path)
+                    endorses_event, roles, _, _, _ = _extract_endorsement_fields_from_tags(payload.get("tags", []))
+                    try:
+                        _validate_endorsement_fields(endorses_event, roles)
+                    except ValueError as exc:
+                        append_line(f"Error: {exc}")
                         return
                 append_line("Publishing event...")
                 try:
@@ -3535,10 +4186,14 @@ def _interactive_tui() -> None:
                         succession_event_id=event_id,
                     )
 
-            kind = 30050 if command == "/publish-ncc" else 30051
             store = DraftStore(_default_config_path())
-            unpublished = store.list_unpublished_drafts(kind)
-            label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
+            unpublished = store.list_unpublished_drafts(publish_kind)
+            if publish_kind == 30050:
+                label = "Unpublished NCC drafts"
+            elif publish_kind == 30051:
+                label = "Unpublished NSR drafts"
+            else:
+                label = "Unpublished endorsement drafts"
             append_line(f"{label}:")
             if not unpublished:
                 append_line("  (none)")
@@ -3556,7 +4211,12 @@ def _interactive_tui() -> None:
                 draft_meta[d_value] = f"#{draft_id} {title}"
             if draft_options:
                 set_custom_completer(_CommandCompleter(draft_options, meta=draft_meta))
-            flow["mode"] = "publish-ncc" if command == "/publish-ncc" else "publish-nsr"
+            if command == "/publish-ncc":
+                flow["mode"] = "publish-ncc"
+            elif command == "/publish-nsr":
+                flow["mode"] = "publish-nsr"
+            else:
+                flow["mode"] = "publish-endorsement"
             start_flow(
                 [
                     {"key": "d", "label": "Draft id or NCC number (e.g. 01)", "default": None, "required": True},
@@ -3565,13 +4225,23 @@ def _interactive_tui() -> None:
             )
             return
 
-        if command in ("/verify-ncc", "/verify-nsr"):
-            kind = 30050 if command == "/verify-ncc" else 30051
+        if command in ("/verify-ncc", "/verify-nsr", "/verify-endorsement"):
+            if command == "/verify-ncc":
+                kind = 30050
+            elif command == "/verify-nsr":
+                kind = 30051
+            else:
+                kind = 30052
             config_path = _default_config_path()
             store = DraftStore(config_path)
             config = store.load_config()
             published = store.list_published_drafts(kind)
-            label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
+            if kind == 30050:
+                label = "Published NCC drafts"
+            elif kind == 30051:
+                label = "Published NSR drafts"
+            else:
+                label = "Published endorsement drafts"
             append_line(f"{label}:")
             if not published:
                 append_line("  (none)")
@@ -3628,7 +4298,12 @@ def _interactive_tui() -> None:
                     append_line(f"Event not found on relays: {event_id}")
 
             config_defaults = DraftStore(config_path).load_config()
-            flow["mode"] = "verify-ncc" if command == "/verify-ncc" else "verify-nsr"
+            if command == "/verify-ncc":
+                flow["mode"] = "verify-ncc"
+            elif command == "/verify-nsr":
+                flow["mode"] = "verify-nsr"
+            else:
+                flow["mode"] = "verify-endorsement"
             start_flow(
                 [
                     {"key": "selection", "label": "Draft id or NCC number (e.g. 01)", "default": None, "required": True},
@@ -3962,6 +4637,33 @@ def build_succession_json(
     }
 
 
+def build_endorsement_json(
+    *,
+    d: str,
+    endorses_event: str,
+    content: str,
+    created_at: int,
+    roles: Optional[List[str]],
+    implementation: Optional[str],
+    note: Optional[str],
+    topics: Optional[List[str]],
+) -> dict:
+    tags = _endorsement_tags_from_inputs(
+        endorses_event=endorses_event,
+        roles=roles,
+        implementation=implementation,
+        note=note,
+        topics=topics or [],
+    )
+
+    return {
+        "kind": 30052,
+        "created_at": created_at,
+        "tags": _json_tags_from_tuples(30052, d, None, tags),
+        "content": content,
+    }
+
+
 def build_document_event(
     *,
     d: str,
@@ -4011,6 +4713,29 @@ def build_succession_event(
     )
 
     builder = EventBuilder(Kind(30051), content).tags(_event_tags_from_tuples(30051, d, None, tags))
+    return _set_builder_created_at(builder, created_at)
+
+
+def build_endorsement_event(
+    *,
+    d: str,
+    endorses_event: str,
+    content: str,
+    created_at: int,
+    roles: Optional[List[str]],
+    implementation: Optional[str],
+    note: Optional[str],
+    topics: Optional[List[str]],
+) -> EventBuilder:
+    tags = _endorsement_tags_from_inputs(
+        endorses_event=endorses_event,
+        roles=roles,
+        implementation=implementation,
+        note=note,
+        topics=topics or [],
+    )
+
+    builder = EventBuilder(Kind(30052), content).tags(_event_tags_from_tuples(30052, d, None, tags))
     return _set_builder_created_at(builder, created_at)
 
 
@@ -4089,6 +4814,10 @@ def main() -> None:
     create_nsr.add_argument("--config", default=_default_config_path(), help="config db path")
     create_nsr.add_argument("--out", help="output json path")
 
+    create_endorsement = subparsers.add_parser("create-endorsement", help="create an endorsement JSON file")
+    create_endorsement.add_argument("--config", default=_default_config_path(), help="config db path")
+    create_endorsement.add_argument("--out", help="output json path")
+
     doc = subparsers.add_parser("document", help="publish NCC document (kind 30050)")
     doc.add_argument("--d", required=True, help="NCC identifier, e.g. ncc-01")
     doc.add_argument("--title", required=True)
@@ -4113,6 +4842,17 @@ def main() -> None:
     succ.add_argument("--reason")
     succ.add_argument("--effective-at", type=int)
     _common_args(succ)
+
+    endorse = subparsers.add_parser("endorsement", help="publish NCC endorsement (kind 30052)")
+    endorse.add_argument("--d", required=True, help="NCC identifier, e.g. ncc-01")
+    endorse.add_argument("--endorses-event-id", required=True, dest="endorses_event")
+    endorse.add_argument("--content", default="Endorsed.")
+    endorse.add_argument("--created-at", type=int, default=_now())
+    endorse.add_argument("--role", action="append")
+    endorse.add_argument("--implementation")
+    endorse.add_argument("--note")
+    endorse.add_argument("--topic", action="append")
+    _common_args(endorse)
 
     args = parser.parse_args()
 
@@ -4287,6 +5027,46 @@ def main() -> None:
         print(f"Saved succession record to database (id {draft_id}).")
         return
 
+    if args.command == "create-endorsement":
+        d_value = input("NCC number (e.g. 01): ").strip()
+        d_value = _format_ncc_identifier(d_value)
+        if not d_value:
+            raise SystemExit("NCC identifier is required")
+        endorses_event = input("Endorses event id: ").strip()
+        if not endorses_event:
+            raise SystemExit("Endorses event id is required")
+        content_value = input("Content [Endorsed.]: ").strip() or "Endorsed."
+        roles_raw = input("Role (author/client/user, comma-separated, optional): ").strip()
+        implementation = input("Implementation (optional): ").strip()
+        note = input("Note (optional): ").strip()
+        topics_raw = input("Topics (comma-separated, optional): ").strip()
+        try:
+            roles_list = _normalize_role_values(_parse_list_value(roles_raw))
+            tags = _endorsement_tags_from_inputs(
+                endorses_event=endorses_event,
+                roles=roles_list,
+                implementation=_normalize_optional_str(implementation),
+                note=_normalize_optional_str(note),
+                topics=_parse_list_value(topics_raw),
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        store = DraftStore(args.config)
+        draft_id = store.insert_draft(
+            kind=30052,
+            d=d_value,
+            title=None,
+            content=content_value,
+            tags=tags,
+        )
+        export_path = args.out or input("Export JSON path (optional): ").strip() or None
+        if export_path:
+            payload = _payload_from_draft(30052, d_value, None, content_value, tags, _now())
+            _write_json(export_path, payload)
+            print(f"Wrote endorsement JSON to {export_path}")
+        print(f"Saved endorsement to database (id {draft_id}).")
+        return
+
     config = _load_config_db(args.config)
     config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
     relays = _merge_optional_list(args.relay, config.get("relays") if isinstance(config, dict) else None) or []
@@ -4315,7 +5095,7 @@ def main() -> None:
             license_id=_merge_optional(args.license, config_tags.get("license")),
             authors=authors_list,
         )
-    else:
+    elif args.command == "succession":
         payload = build_succession_json(
             d=args.d,
             authoritative_event=args.authoritative_event,
@@ -4333,6 +5113,26 @@ def main() -> None:
             raise SystemExit(str(exc))
         if not _check_succession_not_self(args.config, authoritative, keys):
             raise SystemExit("Succession should not acknowledge your own NCC.")
+    else:
+        try:
+            roles = _normalize_role_values(args.role)
+            payload = build_endorsement_json(
+                d=args.d,
+                endorses_event=args.endorses_event,
+                content=args.content,
+                created_at=args.created_at,
+                roles=roles,
+                implementation=_merge_optional(args.implementation, None),
+                note=_merge_optional(args.note, None),
+                topics=_merge_optional_list(args.topic, None),
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        endorses_event, roles, _, _, _ = _extract_endorsement_fields_from_tags(payload.get("tags", []))
+        try:
+            _validate_endorsement_fields(endorses_event, roles)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
 
     service = PublishService(args.config)
     try:
