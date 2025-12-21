@@ -51,7 +51,11 @@ async function load() {
     titleEl.textContent = `${details.d.toUpperCase()} · ${details.title}`;
     subtitleEl.textContent = `Event: ${shorten(details.event_id)} · Pubkey: ${shorten(details.pubkey)}`;
     summaryEl.textContent = details.summary || "No summary provided.";
-    contentEl.textContent = details.content || "No document content available.";
+    if (details.content_html) {
+      contentEl.innerHTML = details.content_html;
+    } else {
+      contentEl.textContent = details.content || "No document content available.";
+    }
     stewardEl.textContent = details.steward ? shorten(details.steward) : "Unknown";
     publishedEl.textContent = formatTimestamp(details.published_at) || "unknown";
     endorsementsEl.textContent = details.endorsements_count ?? 0;

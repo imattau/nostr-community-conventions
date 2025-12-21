@@ -162,6 +162,28 @@ header p {
   font-size: 0.98rem;
 }
 
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 24px 0 12px;
+}
+
+.markdown pre {
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  overflow: auto;
+}
+
+.markdown code {
+  font-family: "IBM Plex Mono", "Fira Mono", monospace;
+}
+
 .empty {
   padding: 32px;
   text-align: center;

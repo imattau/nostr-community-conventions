@@ -1,5 +1,7 @@
 import express from "express";
 import WebSocket from "ws";
+import { marked } from "marked";
+import sanitizeHtml from "sanitize-html";
 
 global.WebSocket = WebSocket;
 
@@ -49,6 +51,44 @@ function normalizeId(value) {
 
 function isNccDTag(value) {
   return normalizeId(value).startsWith("ncc-");
+}
+
+const markdownOptions = {
+  headerIds: false,
+  mangle: false
+};
+
+const markdownSanitizeOptions = {
+  allowedTags: [
+    "a",
+    "p",
+    "br",
+    "strong",
+    "em",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "code",
+    "pre",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr"
+  ],
+  allowedAttributes: {
+    a: ["href", "name", "target", "rel"],
+    code: ["class"]
+  }
+};
+
+function renderMarkdown(content) {
+  if (!content) return "";
+  const raw = marked.parse(content, markdownOptions);
+  return sanitizeHtml(raw, markdownSanitizeOptions);
 }
 
 function parseStewardTag(tag) {
@@ -222,6 +262,7 @@ function buildDetails(dTag, index) {
     license: getTagValue(current, "license"),
     authors: getTagValues(current, "authors"),
     content: current.content || "",
+    content_html: renderMarkdown(current.content || ""),
     steward: resolveSteward(current, index.nsrByD.get(dTag) || []),
     endorsements_count: endorsements.length,
     endorsements_by_role: endorsementsByRole,
