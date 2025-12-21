@@ -24,7 +24,7 @@ import tempfile
 import queue as queue_module
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
 
-from nostr_sdk import Client, EventBuilder, Keys, Kind, PublicKey, Tag, Timestamp
+from nostr_sdk import Client, EventBuilder, Keys, Kind, NostrSigner, PublicKey, Tag, Timestamp
 
 
 def _now() -> int:
@@ -2847,12 +2847,13 @@ def build_succession_event(
 async def publish_event(builder: EventBuilder, *, relays: List[str], keys: Keys) -> str:
     if not relays:
         raise SystemExit("At least one --relay is required to publish.")
-    client = Client(keys)
+    signer = NostrSigner.keys(keys)
+    client = Client(signer)
     for relay in relays:
         await client.add_relay(relay)
     await client.connect()
 
-    event = builder.to_event(keys)
+    event = client.sign_event_builder(builder)
     await client.send_event(event)
     await client.disconnect()
 
