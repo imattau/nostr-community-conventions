@@ -40,6 +40,8 @@ function renderList(items, dTag) {
     .join("");
 }
 
+let defaultRelays = [];
+
 async function load() {
   const dTag = getQueryParam("d");
   if (!dTag) {
@@ -54,6 +56,7 @@ async function load() {
     const response = await fetch(buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}/proposals`));
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
+    defaultRelays = data.default_relays || defaultRelays;
     setRelayCount(data.relays.length);
     renderList(data.proposals || [], dTag);
   } catch (error) {
@@ -61,5 +64,5 @@ async function load() {
   }
 }
 
-initRelayControls(() => load());
+initRelayControls(() => defaultRelays, () => load());
 load();

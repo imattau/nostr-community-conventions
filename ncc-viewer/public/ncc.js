@@ -46,6 +46,8 @@ function renderNSR(records) {
     .join("");
 }
 
+let defaultRelays = [];
+
 async function load() {
   const dTag = getQueryParam("d");
   const eventId = getQueryParam("event");
@@ -58,6 +60,7 @@ async function load() {
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
     const details = data.details;
+    defaultRelays = data.default_relays || defaultRelays;
     setRelayCount(data.relays.length);
 
     titleEl.textContent = `${details.d.toUpperCase()} · ${details.title}`;
@@ -81,5 +84,5 @@ async function load() {
   }
 }
 
-initRelayControls(() => load());
+initRelayControls(() => defaultRelays, () => load());
 load();

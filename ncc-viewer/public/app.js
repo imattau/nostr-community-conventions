@@ -72,21 +72,37 @@ export function setRelayCount(count) {
   if (toggle) toggle.textContent = `Relays: ${count}`;
 }
 
-export function initRelayControls(onRelaysChange) {
+export function initRelayControls(getDefaultRelays, onRelaysChange) {
   const toggle = document.getElementById("relay-toggle");
   const panel = document.getElementById("relay-panel");
   const listEl = document.getElementById("relay-list");
+  const defaultListEl = document.getElementById("relay-default-list");
   const inputEl = document.getElementById("relay-input");
   const addBtn = document.getElementById("relay-add");
   const clearBtn = document.getElementById("relay-clear");
   const closeBtn = document.getElementById("relay-close");
 
-  if (!toggle || !panel || !listEl || !inputEl || !addBtn || !clearBtn || !closeBtn) {
+  if (
+    !toggle ||
+    !panel ||
+    !listEl ||
+    !defaultListEl ||
+    !inputEl ||
+    !addBtn ||
+    !clearBtn ||
+    !closeBtn
+  ) {
     return;
   }
 
   function render() {
     const relays = getRelayOverrides();
+    const defaults = (typeof getDefaultRelays === "function" && getDefaultRelays()) || [];
+
+    defaultListEl.innerHTML = defaults.length
+      ? defaults.map((relay) => `<li><span>${relay}</span></li>`).join("")
+      : `<li class="muted">Loading defaults…</li>`;
+
     if (!relays.length) {
       listEl.innerHTML = `<li class="muted">No extra relays added.</li>`;
       return;
