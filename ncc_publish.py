@@ -677,6 +677,23 @@ def _db_set_tags(conn: sqlite3.Connection, draft_id: int, tags: List[tuple[str, 
         )
 
 
+def _db_delete_draft(conn: sqlite3.Connection, draft_id: int) -> None:
+    conn.execute("delete from tags where draft_id = ?", (draft_id,))
+    conn.execute("delete from drafts where id = ?", (draft_id,))
+    conn.commit()
+
+
+def _db_delete_endorsements_for_author(conn: sqlite3.Connection, d: str, author_pubkey: str) -> None:
+    rows = conn.execute(
+        "select id from drafts where kind = 30052 and d = ? and author_pubkey = ?",
+        (d, author_pubkey),
+    ).fetchall()
+    for row in rows:
+        conn.execute("delete from tags where draft_id = ?", (row["id"],))
+        conn.execute("delete from drafts where id = ?", (row["id"],))
+    conn.commit()
+
+
 def _db_get_latest_draft(conn: sqlite3.Connection, kind: int, d: str) -> Optional[sqlite3.Row]:
     cur = conn.execute(
         """
@@ -686,6 +703,25 @@ def _db_get_latest_draft(conn: sqlite3.Connection, kind: int, d: str) -> Optiona
         limit 1
         """,
         (kind, d),
+    )
+    return cur.fetchone()
+
+
+def _db_get_latest_endorsement_by_author(
+    conn: sqlite3.Connection,
+    *,
+    d: str,
+    author_pubkey: str,
+) -> Optional[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        select *
+        from drafts
+        where kind = 30052 and d = ? and author_pubkey = ?
+        order by created_at desc, updated_at desc
+        limit 1
+        """,
+        (d, author_pubkey),
     )
     return cur.fetchone()
 
@@ -795,6 +831,23 @@ def _get_local_ncc_targets(config_path: str, pubkey_hex: Optional[str]) -> tuple
     return identifiers, event_ids
 
 
+def _endorsement_counts_by_identifier(config_path: str) -> Dict[str, int]:
+    store = DraftStore(config_path)
+    conn = store.connect()
+    try:
+        cur = conn.execute(
+            """
+            select d, count(distinct author_pubkey) as count
+            from drafts
+            where kind = 30052 and author_pubkey is not null and author_pubkey != ''
+            group by d
+            """
+        )
+        return {row["d"]: int(row["count"]) for row in cur.fetchall() if row["d"]}
+    finally:
+        conn.close()
+
+
 def _classify_ncc_row(
     row: sqlite3.Row,
     tags: List[tuple[str, str]],
@@ -866,6 +919,48 @@ def _store_remote_ncc_payload(config_path: str, payload: dict) -> bool:
     return True
 
 
+def _store_remote_endorsement_payload(config_path: str, payload: dict) -> bool:
+    tags_list = payload.get("tags", [])
+    if not isinstance(tags_list, list):
+        return False
+    d_value = _extract_tag_value(tags_list, "d")
+    if not d_value:
+        return False
+    content = payload.get("content", "") if isinstance(payload, dict) else ""
+    event_id = payload.get("event_id")
+    if not event_id:
+        return False
+    created_at = payload.get("created_at")
+    author_pubkey = payload.get("author_pubkey")
+    if not author_pubkey:
+        return False
+    store = DraftStore(config_path)
+    existing = store.get_draft_by_event_id(30052, event_id)
+    if existing:
+        return False
+    latest = store.get_latest_endorsement_by_author(d_value, author_pubkey)
+    if latest:
+        latest_created = latest["created_at"] or 0
+        incoming_created = int(created_at) if created_at else 0
+        if incoming_created <= latest_created:
+            return False
+    store.delete_endorsements_for_author(d_value, author_pubkey)
+    tags = _tags_from_payload(payload)
+    store.insert_draft(
+        kind=30052,
+        d=d_value,
+        title=None,
+        content=content,
+        tags=tags,
+        status="endorsement",
+        published_at=int(created_at) if created_at else None,
+        created_at=int(created_at) if created_at else None,
+        source="relay",
+        author_pubkey=author_pubkey,
+    )
+    return True
+
+
 async def _fetch_remote_ncc_events(relays: List[str], limit: int) -> List[dict]:
     if not relays:
         return []
@@ -876,6 +971,23 @@ async def _fetch_remote_ncc_events(relays: List[str], limit: int) -> List[dict]:
     try:
         events = await client.fetch_events(
             Filter().kinds([Kind(30050)]).limit(limit),
+            timedelta(seconds=5),
+        )
+        return [_event_to_payload(event) for event in events.to_vec()]
+    finally:
+        await client.disconnect()
+
+
+async def _fetch_remote_endorsement_events(relays: List[str], limit: int) -> List[dict]:
+    if not relays:
+        return []
+    client = Client()
+    for relay in relays:
+        await client.add_relay(RelayUrl.parse(relay))
+    await client.connect()
+    try:
+        events = await client.fetch_events(
+            Filter().kinds([Kind(30052)]).limit(limit),
             timedelta(seconds=5),
         )
         return [_event_to_payload(event) for event in events.to_vec()]
@@ -914,6 +1026,57 @@ def _sync_remote_ncc_proposals(config_path: str) -> int:
         if not matches:
             continue
         if _store_remote_ncc_payload(config_path, payload):
+            added += 1
+    return added
+
+
+def _sync_remote_endorsements(config_path: str) -> int:
+    store = DraftStore(config_path)
+    config = store.load_config_or_default({})
+    relays = config.get("relays", []) if isinstance(config, dict) else []
+    privkey = config.get("privkey") if isinstance(config, dict) else None
+    pubkey_hex = None
+    if privkey:
+        try:
+            pubkey_hex = Keys.parse(privkey).public_key().to_hex()
+        except Exception:
+            pubkey_hex = None
+    identifiers, event_ids = _get_local_ncc_targets(config_path, pubkey_hex)
+    if not identifiers and not event_ids:
+        return 0
+    payloads = _run_async(_fetch_remote_endorsement_events(relays, limit=500))
+    latest_by_author: Dict[tuple[str, str], dict] = {}
+    for payload in payloads:
+        author_pubkey = payload.get("author_pubkey")
+        if not author_pubkey:
+            continue
+        tags = payload.get("tags", [])
+        if not isinstance(tags, list):
+            continue
+        d_value = _extract_tag_value(tags, "d")
+        if not d_value:
+            continue
+        created_at = payload.get("created_at")
+        created_value = int(created_at) if created_at else 0
+        key = (author_pubkey, d_value)
+        existing = latest_by_author.get(key)
+        if existing:
+            existing_created = int(existing.get("created_at") or 0)
+            if created_value <= existing_created:
+                continue
+        latest_by_author[key] = payload
+    added = 0
+    for payload in latest_by_author.values():
+        if payload.get("author_pubkey") == pubkey_hex:
+            continue
+        tags = payload.get("tags", [])
+        if not isinstance(tags, list):
+            continue
+        d_value = _extract_tag_value(tags, "d")
+        endorses_event, _, _, _, _ = _extract_endorsement_fields_from_tags(tags)
+        if d_value not in identifiers and (endorses_event or "") not in event_ids:
+            continue
+        if _store_remote_endorsement_payload(config_path, payload):
             added += 1
     return added
 
@@ -1151,6 +1314,13 @@ class DraftStore:
         finally:
             conn.close()
 
+    def get_latest_endorsement_by_author(self, d: str, author_pubkey: str) -> Optional[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return _db_get_latest_endorsement_by_author(conn, d=d, author_pubkey=author_pubkey)
+        finally:
+            conn.close()
+
     def get_tags(self, draft_id: int) -> List[tuple[str, str]]:
         conn = self.connect()
         try:
@@ -1217,6 +1387,20 @@ class DraftStore:
                 source=source,
                 author_pubkey=author_pubkey,
             )
+        finally:
+            conn.close()
+
+    def delete_draft(self, draft_id: int) -> None:
+        conn = self.connect()
+        try:
+            _db_delete_draft(conn, int(draft_id))
+        finally:
+            conn.close()
+
+    def delete_endorsements_for_author(self, d: str, author_pubkey: str) -> None:
+        conn = self.connect()
+        try:
+            _db_delete_endorsements_for_author(conn, d, author_pubkey)
         finally:
             conn.close()
 
@@ -2322,7 +2506,16 @@ def _interactive_cli() -> None:
                         print(f"Fetched {added} proposal(s) from relays.")
                     except Exception as exc:
                         print(f"Relay fetch failed: {exc}")
+            if kind == 30052:
+                fetch = _prompt_value("Fetch endorsements from relays? (y/n)", "n", required=False)
+                if _is_truthy_response(fetch):
+                    try:
+                        added = _sync_remote_endorsements(config_path)
+                        print(f"Fetched {added} endorsement(s) from relays.")
+                    except Exception as exc:
+                        print(f"Relay fetch failed: {exc}")
             rows = store.list_drafts(kind)
+            endorsement_counts = _endorsement_counts_by_identifier(config_path) if kind == 30050 else {}
             if kind == 30050:
                 label = "NCC drafts"
             elif kind == 30051:
@@ -2359,8 +2552,9 @@ def _interactive_cli() -> None:
                         local_event_ids=local_event_ids,
                     )
                     label_text = ", ".join(labels)
+                    endorsement_count = endorsement_counts.get(row["d"], 0)
                     print(
-                        f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
+                        f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | endorsements {endorsement_count} | updated {updated_at} | published {published_at} | event {event_id}"
                     )
                 elif kind == 30051:
                     print(
@@ -3973,6 +4167,7 @@ def _interactive_tui() -> None:
             def _render_list() -> None:
                 store = DraftStore(config_path)
                 rows = store.list_drafts(kind)
+                endorsement_counts = _endorsement_counts_by_identifier(config_path) if kind == 30050 else {}
                 if kind == 30050:
                     label = "NCC drafts"
                 elif kind == 30051:
@@ -4009,8 +4204,9 @@ def _interactive_tui() -> None:
                             local_event_ids=local_event_ids,
                         )
                         label_text = ", ".join(labels)
+                        endorsement_count = endorsement_counts.get(row["d"], 0)
                         append_line(
-                            f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
+                            f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | endorsements {endorsement_count} | updated {updated_at} | published {published_at} | event {event_id}"
                         )
                     elif kind == 30051:
                         append_line(
@@ -4038,6 +4234,28 @@ def _interactive_tui() -> None:
                         {
                             "key": "fetch",
                             "label": "Fetch proposals from relays? (y/n)",
+                            "default": "n",
+                            "required": False,
+                        }
+                    ],
+                    _complete_fetch,
+                )
+                return
+            if kind == 30052:
+                def _complete_fetch(answers: dict) -> None:
+                    if _is_truthy_response(answers.get("fetch") or ""):
+                        try:
+                            added = _sync_remote_endorsements(config_path)
+                            append_line(f"Fetched {added} endorsement(s) from relays.")
+                        except Exception as exc:
+                            append_line(f"Relay fetch failed: {exc}")
+                    _render_list()
+
+                start_flow(
+                    [
+                        {
+                            "key": "fetch",
+                            "label": "Fetch endorsements from relays? (y/n)",
                             "default": "n",
                             "required": False,
                         }
