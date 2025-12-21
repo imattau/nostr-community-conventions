@@ -23,7 +23,7 @@ import uuid
 import tempfile
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
 
-from nostr_sdk import Client, EventBuilder, Keys, Kind, PublicKey, Tag
+from nostr_sdk import Client, EventBuilder, Keys, Kind, PublicKey, Tag, Timestamp
 
 
 def _now() -> int:
@@ -2644,9 +2644,10 @@ def _add_tag_many(tags: List[Tag], key: str, values: Optional[List[str]]) -> Non
 def _set_builder_created_at(builder: EventBuilder, created_at: Optional[int]) -> EventBuilder:
     if created_at is None:
         return builder
+    timestamp = Timestamp.from_secs(int(created_at))
     if hasattr(builder, "created_at"):
-        return builder.created_at(int(created_at))
-    return builder.custom_created_at(int(created_at))
+        return builder.created_at(timestamp)
+    return builder.custom_created_at(timestamp)
 
 
 def _merge_optional(value: Optional[str], fallback: Optional[str]) -> Optional[str]:
