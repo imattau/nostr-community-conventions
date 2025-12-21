@@ -2,6 +2,8 @@ import { shorten, formatTimestamp } from "./app.js";
 
 const listEl = document.getElementById("ncc-list");
 const relayCount = document.getElementById("relay-count");
+const CACHE_KEY = "ncc-viewer-cache";
+const CACHE_TTL_MS = 60_000;
 
 function renderEmpty(message) {
   listEl.innerHTML = `<div class="empty">${message}</div>`;
@@ -38,12 +40,30 @@ function renderList(items) {
 }
 
 async function load() {
+  const cachedRaw = window.localStorage.getItem(CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      const cached = JSON.parse(cachedRaw);
+      if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+        relayCount.textContent = `Relays: ${cached.relays?.length || 0}`;
+        renderList(cached.items || []);
+        return;
+      }
+    } catch (error) {
+      window.localStorage.removeItem(CACHE_KEY);
+    }
+  }
+
   try {
     const response = await fetch("/api/nccs");
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
     relayCount.textContent = `Relays: ${data.relays.length}`;
     renderList(data.items || []);
+    window.localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ at: Date.now(), relays: data.relays, items: data.items })
+    );
   } catch (error) {
     renderEmpty("Unable to fetch NCC data right now.");
   }
