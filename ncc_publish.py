@@ -683,10 +683,23 @@ def _db_delete_draft(conn: sqlite3.Connection, draft_id: int) -> None:
     conn.commit()
 
 
-def _db_delete_endorsements_for_author(conn: sqlite3.Connection, d: str, author_pubkey: str) -> None:
+def _db_delete_endorsements_for_author_and_event(
+    conn: sqlite3.Connection,
+    *,
+    author_pubkey: str,
+    endorses_event: str,
+) -> None:
     rows = conn.execute(
-        "select id from drafts where kind = 30052 and d = ? and author_pubkey = ?",
-        (d, author_pubkey),
+        """
+        select drafts.id
+        from drafts
+        join tags on tags.draft_id = drafts.id
+        where drafts.kind = 30052
+          and drafts.author_pubkey = ?
+          and tags.key = 'endorses'
+          and tags.value = ?
+        """,
+        (author_pubkey, endorses_event),
     ).fetchall()
     for row in rows:
         conn.execute("delete from tags where draft_id = ?", (row["id"],))
@@ -707,21 +720,25 @@ def _db_get_latest_draft(conn: sqlite3.Connection, kind: int, d: str) -> Optiona
     return cur.fetchone()
 
 
-def _db_get_latest_endorsement_by_author(
+def _db_get_latest_endorsement_by_author_and_event(
     conn: sqlite3.Connection,
     *,
-    d: str,
     author_pubkey: str,
+    endorses_event: str,
 ) -> Optional[sqlite3.Row]:
     cur = conn.execute(
         """
-        select *
+        select drafts.*
         from drafts
-        where kind = 30052 and d = ? and author_pubkey = ?
-        order by created_at desc, updated_at desc
+        join tags on tags.draft_id = drafts.id
+        where drafts.kind = 30052
+          and drafts.author_pubkey = ?
+          and tags.key = 'endorses'
+          and tags.value = ?
+        order by drafts.created_at desc, drafts.updated_at desc
         limit 1
         """,
-        (d, author_pubkey),
+        (author_pubkey, endorses_event),
     )
     return cur.fetchone()
 
@@ -865,19 +882,33 @@ def _get_local_ncc_targets(config_path: str, pubkey_hex: Optional[str]) -> tuple
     return identifiers, event_ids
 
 
-def _endorsement_counts_by_identifier(config_path: str) -> Dict[str, int]:
+def _endorsement_counts_by_event(config_path: str) -> Dict[str, int]:
     store = DraftStore(config_path)
     conn = store.connect()
     try:
         cur = conn.execute(
             """
-            select d, count(distinct author_pubkey) as count
+            select tags.value as endorses_value, count(distinct drafts.author_pubkey) as count
             from drafts
-            where kind = 30052 and author_pubkey is not null and author_pubkey != ''
-            group by d
+            join tags on tags.draft_id = drafts.id
+            where drafts.kind = 30052
+              and drafts.author_pubkey is not null
+              and drafts.author_pubkey != ''
+              and tags.key = 'endorses'
+            group by tags.value
             """
         )
-        return {row["d"]: int(row["count"]) for row in cur.fetchall() if row["d"]}
+        results: Dict[str, int] = {}
+        for row in cur.fetchall():
+            raw_value = row["endorses_value"] or ""
+            if raw_value.startswith("event:"):
+                event_id = raw_value.split(":", 1)[1]
+            else:
+                event_id = raw_value
+            if not event_id:
+                continue
+            results[event_id] = int(row["count"])
+        return results
     finally:
         conn.close()
 
@@ -972,13 +1003,17 @@ def _store_remote_endorsement_payload(config_path: str, payload: dict) -> bool:
     existing = store.get_draft_by_event_id(30052, event_id)
     if existing:
         return False
-    latest = store.get_latest_endorsement_by_author(d_value, author_pubkey)
+    endorses_event, _, _, _, _ = _extract_endorsement_fields_from_tags(tags_list)
+    if not endorses_event:
+        return False
+    endorses_event = f"event:{endorses_event}" if not endorses_event.startswith("event:") else endorses_event
+    latest = store.get_latest_endorsement_by_author_and_event(author_pubkey, endorses_event)
     if latest:
         latest_created = latest["created_at"] or 0
         incoming_created = int(created_at) if created_at else 0
         if incoming_created <= latest_created:
             return False
-    store.delete_endorsements_for_author(d_value, author_pubkey)
+    store.delete_endorsements_for_author_and_event(author_pubkey, endorses_event)
     tags = _tags_from_payload(payload)
     store.insert_draft(
         kind=30052,
@@ -1088,11 +1123,12 @@ def _sync_remote_endorsements(config_path: str) -> int:
         if not isinstance(tags, list):
             continue
         d_value = _extract_tag_value(tags, "d")
-        if not d_value:
+        endorses_event, _, _, _, _ = _extract_endorsement_fields_from_tags(tags)
+        if not d_value or not endorses_event:
             continue
         created_at = payload.get("created_at")
         created_value = int(created_at) if created_at else 0
-        key = (author_pubkey, d_value)
+        key = (author_pubkey, endorses_event)
         existing = latest_by_author.get(key)
         if existing:
             existing_created = int(existing.get("created_at") or 0)
@@ -1348,10 +1384,14 @@ class DraftStore:
         finally:
             conn.close()
 
-    def get_latest_endorsement_by_author(self, d: str, author_pubkey: str) -> Optional[sqlite3.Row]:
+    def get_latest_endorsement_by_author_and_event(self, author_pubkey: str, endorses_event: str) -> Optional[sqlite3.Row]:
         conn = self.connect()
         try:
-            return _db_get_latest_endorsement_by_author(conn, d=d, author_pubkey=author_pubkey)
+            return _db_get_latest_endorsement_by_author_and_event(
+                conn,
+                author_pubkey=author_pubkey,
+                endorses_event=endorses_event,
+            )
         finally:
             conn.close()
 
@@ -1431,10 +1471,14 @@ class DraftStore:
         finally:
             conn.close()
 
-    def delete_endorsements_for_author(self, d: str, author_pubkey: str) -> None:
+    def delete_endorsements_for_author_and_event(self, author_pubkey: str, endorses_event: str) -> None:
         conn = self.connect()
         try:
-            _db_delete_endorsements_for_author(conn, d, author_pubkey)
+            _db_delete_endorsements_for_author_and_event(
+                conn,
+                author_pubkey=author_pubkey,
+                endorses_event=endorses_event,
+            )
         finally:
             conn.close()
 
@@ -2563,7 +2607,7 @@ def _interactive_cli() -> None:
                     except Exception as exc:
                         print(f"Relay fetch failed: {exc}")
             rows = store.list_drafts(kind)
-            endorsement_counts = _endorsement_counts_by_identifier(config_path) if kind == 30050 else {}
+            endorsement_counts = _endorsement_counts_by_event(config_path) if kind == 30050 else {}
             if kind == 30050:
                 label = "NCC drafts"
             elif kind == 30051:
@@ -2600,7 +2644,7 @@ def _interactive_cli() -> None:
                         local_event_ids=local_event_ids,
                     )
                     label_text = ", ".join(labels)
-                    endorsement_count = endorsement_counts.get(row["d"], 0)
+                    endorsement_count = endorsement_counts.get(row["event_id"] or "", 0)
                     print(
                         f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | endorsements {endorsement_count} | updated {updated_at} | published {published_at} | event {event_id}"
                     )
@@ -4244,7 +4288,7 @@ def _interactive_tui() -> None:
             def _render_list() -> None:
                 store = DraftStore(config_path)
                 rows = store.list_drafts(kind)
-                endorsement_counts = _endorsement_counts_by_identifier(config_path) if kind == 30050 else {}
+                endorsement_counts = _endorsement_counts_by_event(config_path) if kind == 30050 else {}
                 if kind == 30050:
                     label = "NCC drafts"
                 elif kind == 30051:
@@ -4281,7 +4325,7 @@ def _interactive_tui() -> None:
                             local_event_ids=local_event_ids,
                         )
                         label_text = ", ".join(labels)
-                        endorsement_count = endorsement_counts.get(row["d"], 0)
+                        endorsement_count = endorsement_counts.get(row["event_id"] or "", 0)
                         append_line(
                             f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | endorsements {endorsement_count} | updated {updated_at} | published {published_at} | event {event_id}"
                         )
