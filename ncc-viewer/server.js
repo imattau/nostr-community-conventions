@@ -1,8 +1,9 @@
 import express from "express";
-import { SimplePool } from "nostr-tools";
 import WebSocket from "ws";
 
 global.WebSocket = WebSocket;
+
+const { SimplePool } = await import("nostr-tools/pool");
 
 const app = express();
 const pool = new SimplePool();
@@ -46,6 +47,10 @@ function normalizeId(value) {
   return (value || "").trim().toLowerCase();
 }
 
+function isNccDTag(value) {
+  return normalizeId(value).startsWith("ncc-");
+}
+
 function parseStewardTag(tag) {
   if (!tag) return "";
   const parts = tag.split(":");
@@ -77,8 +82,13 @@ async function fetchEvents() {
   };
   if (SINCE_SECONDS > 0) filter.since = SINCE_SECONDS;
 
-  const events = await pool.list(RELAYS, [filter], { timeout: 4000 });
-  return dedupe(events);
+  try {
+    const events = await pool.querySync(RELAYS, filter, { maxWait: 4000 });
+    return dedupe(events);
+  } catch (error) {
+    console.error("Failed to fetch NCC events from relays:", error);
+    throw error;
+  }
 }
 
 function buildIndex(events) {
@@ -88,7 +98,7 @@ function buildIndex(events) {
 
   for (const event of events) {
     const dTag = getTagValue(event, "d");
-    if (!dTag) continue;
+    if (!dTag || !isNccDTag(dTag)) continue;
     const key = normalizeId(dTag);
 
     if (event.kind === KIND_NCC) {
