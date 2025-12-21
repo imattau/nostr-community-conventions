@@ -802,6 +802,40 @@ def _format_published_drafts(rows: List[sqlite3.Row]) -> List[str]:
     return lines
 
 
+def _get_published_ncc_events(config_path: str, identifier: str) -> List[sqlite3.Row]:
+    store = DraftStore(config_path)
+    rows = store.list_published_drafts(30050)
+    return [row for row in rows if row["d"] == identifier and row["event_id"]]
+
+
+def _format_published_ncc_event_choices(rows: List[sqlite3.Row]) -> List[str]:
+    lines = []
+    for row in rows:
+        title = row["title"] or "-"
+        published_at = _format_ts(row["published_at"])
+        event_id = row["event_id"] or "-"
+        lines.append(f"  {event_id} | {title} | published {published_at}")
+    return lines
+
+
+def _published_ncc_event_completer(rows: List[sqlite3.Row]) -> Optional["_CommandCompleter"]:
+    if not rows:
+        return None
+    options: List[str] = []
+    meta: Dict[str, str] = {}
+    for row in rows:
+        event_id = row["event_id"] or ""
+        if not event_id:
+            continue
+        title = row["title"] or "-"
+        published_at = _format_ts(row["published_at"])
+        options.append(event_id)
+        meta[event_id] = f"{row['d']} {title} | {published_at}"
+    if not options:
+        return None
+    return _CommandCompleter(options, meta=meta)
+
+
 def _format_relay_list(relays: List[str]) -> List[str]:
     return [f"  {idx}. {relay}" for idx, relay in enumerate(relays, start=1)]
 
@@ -2346,6 +2380,13 @@ def _interactive_cli() -> None:
             tag_map = _tags_to_map(tags)
             if base_is_published and base_event_id:
                 print(f"Note: editing a published endorsement will create a new draft superseding event {base_event_id}.")
+            published = _get_published_ncc_events(config_path, d_value)
+            if published:
+                print("Published NCC events:")
+                for line in _format_published_ncc_event_choices(published):
+                    print(line)
+            else:
+                print("No published NCC events found for that identifier.")
             endorses_default = _strip_event_prefix(tag_map.get("endorses", [None])[0])
             endorses_event = _prompt_value("Endorses event id", endorses_default, required=True)
             default_content_path = _default_ncc_content_path(d_value)
@@ -2456,6 +2497,13 @@ def _interactive_cli() -> None:
             if not d_value:
                 print("Cancelled.")
                 continue
+            published = _get_published_ncc_events(config_path, d_value)
+            if published:
+                print("Published NCC events:")
+                for line in _format_published_ncc_event_choices(published):
+                    print(line)
+            else:
+                print("No published NCC events found for that identifier.")
             endorses_event = _prompt_value("Endorses event id", required=True)
             content_value = _prompt_value("Content", "Endorsed.", required=True)
             role_raw = _prompt_value("Role (author/client/user, comma-separated, optional)", required=False)
@@ -3217,6 +3265,15 @@ def _interactive_tui() -> None:
                     "config_path": config_path,
                 },
             )
+            published = _get_published_ncc_events(config_path, identifier)
+            if published:
+                append_line("Published NCC events:")
+                for line in _format_published_ncc_event_choices(published):
+                    append_line(line)
+                set_custom_completer(_published_ncc_event_completer(published))
+            else:
+                append_line("No published NCC events found for that identifier.")
+                set_custom_completer(None)
             return
         if flow.get("mode") in ("publish-ncc", "publish-nsr", "publish-endorsement") and step.get("key") == "d":
             if flow.get("mode") == "publish-ncc":
@@ -3475,6 +3532,15 @@ def _interactive_tui() -> None:
                     "config_path": config_path,
                 },
             )
+            published = _get_published_ncc_events(config_path, identifier)
+            if published:
+                append_line("Published NCC events:")
+                for line in _format_published_ncc_event_choices(published):
+                    append_line(line)
+                set_custom_completer(_published_ncc_event_completer(published))
+            else:
+                append_line("No published NCC events found for that identifier.")
+                set_custom_completer(None)
             return
         if flow.get("mode") in ("publish-ncc-path", "publish-nsr-path", "publish-endorsement-path") and step.get("key") == "json_path":
             if not value:
@@ -3581,7 +3647,18 @@ def _interactive_tui() -> None:
                 on_complete(flow["answers"])
             return
         next_step = flow["steps"][flow["index"]]
-        if not (flow.get("mode") in ("publish-ncc", "publish-nsr", "publish-endorsement") and next_step.get("key") == "d"):
+        if next_step.get("key") == "endorses_event":
+            identifier = flow["answers"].get("d") or ""
+            published = _get_published_ncc_events(_default_config_path(), identifier) if identifier else []
+            if published:
+                append_line("Published NCC events:")
+                for line in _format_published_ncc_event_choices(published):
+                    append_line(line)
+                set_custom_completer(_published_ncc_event_completer(published))
+            else:
+                append_line("No published NCC events found for that identifier.")
+                set_custom_completer(None)
+        if not (flow.get("mode") in ("publish-ncc", "publish-nsr", "publish-endorsement") and next_step.get("key") == "d") and next_step.get("key") != "endorses_event":
             if input_field.completer is not None and input_field.completer is not completer:
                 set_custom_completer(None)
         if flow.get("mode") == "create-ncc" and next_step.get("key") == "out_path":
