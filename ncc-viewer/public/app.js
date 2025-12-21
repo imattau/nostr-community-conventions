@@ -119,7 +119,9 @@ export function initRelayControls(onRelaysChange) {
     else closePanel();
   });
 
-  closeBtn.addEventListener("click", () => {
+  closeBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     closePanel();
   });
 
@@ -151,6 +153,10 @@ export function initRelayControls(onRelaysChange) {
     if (!(event.target instanceof HTMLElement)) return;
     if (panel.contains(event.target) || toggle.contains(event.target)) return;
     closePanel();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePanel();
   });
 
   render();
