@@ -97,6 +97,23 @@ def _normalize_optional_str(value: Optional[str]) -> Optional[str]:
     return stripped or None
 
 
+def _content_byte_len(value: str) -> int:
+    return len(value.encode("utf-8"))
+
+
+def _max_content_bytes(kind: Optional[int]) -> Optional[int]:
+    if kind is None:
+        return None
+    return _CONTENT_MAX_BYTES.get(int(kind))
+
+
+def _content_too_large(kind: Optional[int], content: str) -> bool:
+    limit = _max_content_bytes(kind)
+    if limit is None:
+        return False
+    return _content_byte_len(content) > limit
+
+
 def _format_list_default(values: Optional[List[str]]) -> Optional[str]:
     if not values:
         return None
@@ -139,6 +156,12 @@ _QUEUE_MAX_DELAY = 3600
 _QUEUE_JITTER = 0.2
 
 _CONFIG_KEY = "root"
+
+_CONTENT_MAX_BYTES = {
+    30050: 256 * 1024,  # NCC document
+    30051: 32 * 1024,   # succession record
+    30052: 8 * 1024,    # endorsement
+}
 
 
 def _load_config_db(config_path: Optional[str]) -> dict:
@@ -958,6 +981,8 @@ def _store_remote_ncc_payload(config_path: str, payload: dict) -> bool:
     if not d_value:
         return False
     content = payload.get("content", "") if isinstance(payload, dict) else ""
+    if _content_too_large(30050, content):
+        return False
     event_id = payload.get("event_id")
     if not event_id:
         return False
@@ -992,6 +1017,8 @@ def _store_remote_endorsement_payload(config_path: str, payload: dict) -> bool:
     if not d_value:
         return False
     content = payload.get("content", "") if isinstance(payload, dict) else ""
+    if _content_too_large(30052, content):
+        return False
     event_id = payload.get("event_id")
     if not event_id:
         return False
@@ -1692,6 +1719,11 @@ def _upsert_single_tag(tags: List[List[str]], key: str, value: str) -> List[List
 
 def _prepare_payload_for_publish(payload: dict) -> int:
     now = _now()
+    kind = payload.get("kind")
+    content = payload.get("content", "")
+    if isinstance(content, str) and _content_too_large(kind, content):
+        limit = _max_content_bytes(kind)
+        raise SystemExit(f"Content exceeds limit ({limit} bytes) for kind {kind}.")
     payload["created_at"] = now
     tags = _ensure_tags(payload)
     if payload.get("kind") == 30050:
