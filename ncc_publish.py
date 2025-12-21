@@ -367,6 +367,8 @@ def _attempt_publish_draft(config_path: str, draft_id: int, *, relays: List[str]
         status="published",
         published_at=published_at,
         event_id=event_id,
+        source="local",
+        author_pubkey=keys.public_key().to_hex(),
     )
     conn.close()
     return event_id
@@ -382,14 +384,63 @@ def _run_publish_task(task: dict) -> str:
     keys = Keys.parse(privkey)
     kind = task.get("type")
     if kind == "draft":
-        return _attempt_publish_draft(config_path, int(task["draft_id"]), relays=relays, keys=keys)
+        event_id = _attempt_publish_draft(config_path, int(task["draft_id"]), relays=relays, keys=keys)
+        conn = _db_connect(config_path)
+        draft = conn.execute("select * from drafts where id = ?", (int(task["draft_id"]),)).fetchone()
+        tags = _db_get_tags(conn, int(task["draft_id"])) if draft else []
+        conn.close()
+        if draft and draft["kind"] == 30051:
+            authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
+            try:
+                authoritative, previous, steward = _validate_succession_fields(authoritative, previous, steward)
+                _apply_succession_updates(
+                    config_path=config_path,
+                    authoritative_event=authoritative,
+                    previous_event=previous,
+                    steward=steward,
+                    succession_event_id=event_id,
+                )
+            except ValueError:
+                pass
+        return event_id
     if kind == "json":
-        return _attempt_publish_json(task["json_path"], relays=relays, keys=keys)
+        payload = _load_json(task["json_path"])
+        event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
+        _finalize_payload_publish(payload, event_id)
+        _write_json(task["json_path"], payload)
+        if payload.get("kind") == 30051:
+            authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+            try:
+                authoritative, previous, steward = _validate_succession_fields(authoritative, previous, steward)
+                _apply_succession_updates(
+                    config_path=config_path,
+                    authoritative_event=authoritative,
+                    previous_event=previous,
+                    steward=steward,
+                    succession_event_id=event_id,
+                )
+            except ValueError:
+                pass
+        return event_id
     if kind == "payload":
         payload = task.get("payload")
         if not isinstance(payload, dict):
             raise SystemExit("Queued payload is invalid.")
-        return _attempt_publish_payload(payload, relays=relays, keys=keys)
+        event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
+        if payload.get("kind") == 30051:
+            authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+            try:
+                authoritative, previous, steward = _validate_succession_fields(authoritative, previous, steward)
+                _apply_succession_updates(
+                    config_path=config_path,
+                    authoritative_event=authoritative,
+                    previous_event=previous,
+                    steward=steward,
+                    succession_event_id=event_id,
+                )
+            except ValueError:
+                pass
+        return event_id
     raise SystemExit("Unknown queued publish type.")
 
 
@@ -563,7 +614,16 @@ def _db_init(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("create index if not exists idx_publish_queue_next on publish_queue(next_attempt_at)")
+    _db_ensure_columns(conn, "drafts", {"source": "text", "author_pubkey": "text"})
+    conn.execute("update drafts set source = 'local' where source is null")
     conn.commit()
+
+
+def _db_ensure_columns(conn: sqlite3.Connection, table: str, columns: Dict[str, str]) -> None:
+    existing = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
+    for name, col_type in columns.items():
+        if name not in existing:
+            conn.execute(f"alter table {table} add column {name} {col_type}")
 
 
 def _db_insert_draft(
@@ -576,14 +636,17 @@ def _db_insert_draft(
     tags: List[tuple[str, str]],
     status: str = "draft",
     published_at: Optional[int] = None,
+    created_at: Optional[int] = None,
+    source: str = "local",
+    author_pubkey: Optional[str] = None,
 ) -> int:
-    now = _now()
+    now = created_at if created_at is not None else _now()
     cur = conn.execute(
         """
-        insert into drafts (kind, d, title, content, created_at, updated_at, published_at, status)
-        values (?, ?, ?, ?, ?, ?, ?, ?)
+        insert into drafts (kind, d, title, content, created_at, updated_at, published_at, status, source, author_pubkey)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (kind, d, title, content, now, now, published_at, status),
+        (kind, d, title, content, now, now, published_at, status, source, author_pubkey),
     )
     draft_id = int(cur.lastrowid)
     _db_set_tags(conn, draft_id, tags)
@@ -601,16 +664,33 @@ def _db_update_draft(
     status: Optional[str] = None,
     published_at: Optional[int] = None,
     event_id: Optional[str] = None,
+    source: Optional[str] = None,
+    author_pubkey: Optional[str] = None,
 ) -> None:
     now = _now()
+    fields = [
+        "title = ?",
+        "content = ?",
+        "updated_at = ?",
+        "published_at = coalesce(?, published_at)",
+        "event_id = coalesce(?, event_id)",
+        "status = coalesce(?, status)",
+    ]
+    values: List[object] = [title, content, now, published_at, event_id, status]
+    if source is not None:
+        fields.append("source = ?")
+        values.append(source)
+    if author_pubkey is not None:
+        fields.append("author_pubkey = ?")
+        values.append(author_pubkey)
+    values.append(draft_id)
     conn.execute(
-        """
+        f"""
         update drafts
-        set title = ?, content = ?, updated_at = ?, published_at = coalesce(?, published_at),
-            event_id = coalesce(?, event_id), status = coalesce(?, status)
+        set {", ".join(fields)}
         where id = ?
         """,
-        (title, content, now, published_at, event_id, status, draft_id),
+        values,
     )
     _db_set_tags(conn, draft_id, tags)
     conn.commit()
@@ -649,6 +729,43 @@ def _format_ts(value: Optional[int]) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(value)))
 
 
+def _is_valid_relay_url(url: str) -> bool:
+    try:
+        RelayUrl.parse(url)
+    except Exception:
+        return False
+    return url.startswith(("ws://", "wss://"))
+
+
+def _validate_event_id(value: Optional[str], *, label: str) -> str:
+    if not value:
+        raise ValueError(f"{label} is required.")
+    try:
+        EventId.parse(value)
+    except Exception as exc:
+        raise ValueError(f"{label} must be a valid event id.") from exc
+    return value
+
+
+def _normalize_steward_tag(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.startswith("npub:"):
+        PublicKey.parse(raw.split(":", 1)[1])
+        return raw
+    if raw.startswith("pubkey:"):
+        PublicKey.parse(raw.split(":", 1)[1])
+        return raw
+    if raw.startswith("npub"):
+        PublicKey.parse(raw)
+        return f"npub:{raw}"
+    PublicKey.parse(raw)
+    return f"pubkey:{raw}"
+
+
 def _format_unpublished_drafts(rows: List[sqlite3.Row]) -> List[str]:
     lines = []
     for row in rows:
@@ -672,10 +789,282 @@ def _format_published_drafts(rows: List[sqlite3.Row]) -> List[str]:
     return lines
 
 
+def _format_relay_list(relays: List[str]) -> List[str]:
+    return [f"  {idx}. {relay}" for idx, relay in enumerate(relays, start=1)]
+
+
+def _extract_supersedes_values(tags: List) -> List[str]:
+    if tags and isinstance(tags[0], list):
+        return _extract_tag_values(tags, "supersedes")
+    tag_map = _tags_to_map(tags or [])
+    return tag_map.get("supersedes", [])
+
+
+def _get_local_ncc_targets(config_path: str, pubkey_hex: Optional[str]) -> tuple[set[str], set[str]]:
+    conn = _db_connect(config_path)
+    rows = conn.execute(
+        "select d, event_id, source, author_pubkey from drafts where kind = 30050",
+    ).fetchall()
+    conn.close()
+    identifiers: set[str] = set()
+    event_ids: set[str] = set()
+    for row in rows:
+        is_local = row["source"] == "local"
+        if pubkey_hex and row["author_pubkey"] == pubkey_hex:
+            is_local = True
+        if not is_local:
+            continue
+        if row["d"]:
+            identifiers.add(row["d"])
+        if row["event_id"]:
+            event_ids.add(row["event_id"])
+    return identifiers, event_ids
+
+
+def _classify_ncc_row(
+    row: sqlite3.Row,
+    tags: List[tuple[str, str]],
+    *,
+    pubkey_hex: Optional[str],
+    local_identifiers: set[str],
+    local_event_ids: set[str],
+) -> List[str]:
+    labels = []
+    is_local = row["source"] == "local"
+    if pubkey_hex and row["author_pubkey"] == pubkey_hex:
+        is_local = True
+    labels.append("ours" if is_local else "theirs")
+    supersedes = _tags_to_map(tags).get("supersedes", [])
+    for value in supersedes:
+        if value in local_identifiers or value in local_event_ids:
+            labels.append("proposal-for-us")
+            break
+        if value.startswith("event:") and value.split(":", 1)[1] in local_event_ids:
+            labels.append("proposal-for-us")
+            break
+    return labels
+
+
+def _event_to_payload(event) -> dict:
+    tags = [tag.as_vec() for tag in event.tags().to_vec()]
+    return {
+        "kind": event.kind().as_u16(),
+        "created_at": event.created_at().as_secs(),
+        "tags": tags,
+        "content": event.content(),
+        "event_id": event.id().to_hex(),
+        "author_pubkey": event.author().to_hex(),
+    }
+
+
+def _store_remote_ncc_payload(config_path: str, payload: dict) -> bool:
+    tags_list = payload.get("tags", [])
+    if not isinstance(tags_list, list):
+        return False
+    d_value = _extract_tag_value(tags_list, "d")
+    title_value = _extract_tag_value(tags_list, "title")
+    if not d_value:
+        return False
+    content = payload.get("content", "") if isinstance(payload, dict) else ""
+    event_id = payload.get("event_id")
+    if not event_id:
+        return False
+    created_at = payload.get("created_at")
+    published_at = _extract_tag_value(tags_list, "published_at")
+    published_at_int = int(published_at) if published_at and str(published_at).isdigit() else None
+    conn = _db_connect(config_path)
+    existing = conn.execute(
+        "select id from drafts where event_id = ?",
+        (event_id,),
+    ).fetchone()
+    if existing:
+        conn.close()
+        return False
+    tags = _tags_from_payload(payload)
+    _db_insert_draft(
+        conn,
+        kind=30050,
+        d=d_value,
+        title=title_value,
+        content=content,
+        tags=tags,
+        status="proposal",
+        published_at=published_at_int,
+        created_at=int(created_at) if created_at else None,
+        source="relay",
+        author_pubkey=payload.get("author_pubkey"),
+    )
+    conn.close()
+    return True
+
+
+async def _fetch_remote_ncc_events(relays: List[str], limit: int) -> List[dict]:
+    if not relays:
+        return []
+    client = Client()
+    for relay in relays:
+        await client.add_relay(RelayUrl.parse(relay))
+    await client.connect()
+    try:
+        events = await client.fetch_events(
+            Filter().kinds([Kind(30050)]).limit(limit),
+            timedelta(seconds=5),
+        )
+        return [_event_to_payload(event) for event in events.to_vec()]
+    finally:
+        await client.disconnect()
+
+
+def _sync_remote_ncc_proposals(config_path: str) -> int:
+    config = _load_config_db(config_path) or {}
+    relays = config.get("relays", []) if isinstance(config, dict) else []
+    privkey = config.get("privkey") if isinstance(config, dict) else None
+    pubkey_hex = None
+    if privkey:
+        try:
+            pubkey_hex = Keys.parse(privkey).public_key().to_hex()
+        except Exception:
+            pubkey_hex = None
+    identifiers, event_ids = _get_local_ncc_targets(config_path, pubkey_hex)
+    if not identifiers and not event_ids:
+        return 0
+    payloads = _run_async(_fetch_remote_ncc_events(relays, limit=500))
+    added = 0
+    for payload in payloads:
+        if payload.get("author_pubkey") == pubkey_hex:
+            continue
+        supersedes = _extract_supersedes_values(payload.get("tags", []))
+        matches = False
+        for value in supersedes:
+            if value in identifiers or value in event_ids:
+                matches = True
+                break
+            if value.startswith("event:") and value.split(":", 1)[1] in event_ids:
+                matches = True
+                break
+        if not matches:
+            continue
+        if _store_remote_ncc_payload(config_path, payload):
+            added += 1
+    return added
+
+
+def _extract_succession_fields_from_tags(tags: List) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    authoritative = None
+    previous = None
+    steward = None
+    if tags and isinstance(tags[0], list):
+        authoritative = _extract_tag_value(tags, "authoritative")
+        previous = _extract_tag_value(tags, "previous")
+        steward = _extract_tag_value(tags, "steward")
+    else:
+        tag_map = _tags_to_map(tags or [])
+        authoritative = tag_map.get("authoritative", [None])[0]
+        previous = tag_map.get("previous", [None])[0]
+        steward = tag_map.get("steward", [None])[0]
+    return (
+        _strip_event_prefix(authoritative),
+        _strip_event_prefix(previous),
+        steward,
+    )
+
+
+def _validate_succession_fields(
+    authoritative_event: Optional[str],
+    previous_event: Optional[str],
+    steward: Optional[str],
+) -> tuple[str, Optional[str], Optional[str]]:
+    authoritative_event = _validate_event_id(authoritative_event, label="Authoritative event id")
+    if previous_event:
+        _validate_event_id(previous_event, label="Previous event id")
+    steward = _normalize_steward_tag(steward)
+    return authoritative_event, previous_event, steward
+
+
+def _apply_succession_updates(
+    *,
+    config_path: str,
+    authoritative_event: str,
+    previous_event: Optional[str],
+    steward: Optional[str],
+    succession_event_id: str,
+) -> None:
+    conn = _db_connect(config_path)
+    authoritative_draft = conn.execute(
+        "select * from drafts where kind = 30050 and event_id = ?",
+        (authoritative_event,),
+    ).fetchone()
+    previous_draft = None
+    if previous_event:
+        previous_draft = conn.execute(
+            "select * from drafts where kind = 30050 and event_id = ?",
+            (previous_event,),
+        ).fetchone()
+    if authoritative_draft:
+        tags = _db_get_tags(conn, authoritative_draft["id"])
+        tag_map = _tags_to_map(tags)
+        updated = list(tags)
+        if steward:
+            updated = _add_or_replace_tag(updated, "steward", steward)
+        if previous_draft:
+            prev_identifier = previous_draft["d"]
+            if prev_identifier and prev_identifier not in tag_map.get("supersedes", []):
+                updated.append(("supersedes", prev_identifier))
+        _db_update_draft(
+            conn,
+            draft_id=int(authoritative_draft["id"]),
+            title=authoritative_draft["title"],
+            content=authoritative_draft["content"],
+            tags=updated,
+        )
+    if previous_draft:
+        prev_tags = _db_get_tags(conn, previous_draft["id"])
+        prev_tags = _add_or_replace_tag(prev_tags, "superseded_by", f"event:{authoritative_event}")
+        prev_tags = _add_or_replace_tag(prev_tags, "succession", f"event:{succession_event_id}")
+        _db_update_draft(
+            conn,
+            draft_id=int(previous_draft["id"]),
+            title=previous_draft["title"],
+            content=previous_draft["content"],
+            tags=prev_tags,
+        )
+    conn.close()
+
+
+def _is_author_self(authors: List[str], keys: Keys) -> bool:
+    pubkey = keys.public_key()
+    candidates = {pubkey.to_hex(), pubkey.to_bech32()}
+    for value in authors:
+        raw = value.strip()
+        if raw.startswith("npub:"):
+            raw = raw.split(":", 1)[1]
+        if raw.startswith("pubkey:"):
+            raw = raw.split(":", 1)[1]
+        if raw in candidates:
+            return True
+    return False
+
+
+def _check_succession_not_self(config_path: str, authoritative_event: str, keys: Keys) -> bool:
+    conn = _db_connect(config_path)
+    draft = conn.execute(
+        "select * from drafts where kind = 30050 and event_id = ?",
+        (authoritative_event,),
+    ).fetchone()
+    if not draft:
+        conn.close()
+        return True
+    tags = _db_get_tags(conn, int(draft["id"]))
+    conn.close()
+    tag_map = _tags_to_map(tags)
+    authors = tag_map.get("authors", [])
+    return not _is_author_self(authors, keys)
+
+
 def _db_list_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlite3.Row]:
     cur = conn.execute(
         """
-        select id, d, title, status, updated_at, published_at, event_id
+        select id, d, title, status, updated_at, published_at, event_id, source, author_pubkey
         from drafts
         where kind = ?
         order by updated_at desc
@@ -690,7 +1079,7 @@ def _db_list_unpublished_drafts(conn: sqlite3.Connection, kind: int) -> List[sql
         """
         select id, d, title, status, updated_at, published_at
         from drafts
-        where kind = ? and (status is null or status != 'published')
+        where kind = ? and (status is null or status != 'published') and (source is null or source = 'local')
         order by updated_at desc
         """,
         (kind,),
@@ -703,7 +1092,7 @@ def _db_list_published_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlit
         """
         select id, d, title, status, updated_at, published_at, event_id
         from drafts
-        where kind = ? and event_id is not null and event_id != ''
+        where kind = ? and event_id is not null and event_id != '' and (source is null or source = 'local')
         order by updated_at desc
         """,
         (kind,),
@@ -1054,6 +1443,8 @@ def _interactive_cli() -> None:
         "/publish-nsr": "Publish the latest succession record JSON file.",
         "/verify-ncc": "Verify published NCC event id on relays.",
         "/verify-nsr": "Verify published NSR event id on relays.",
+        "/add-relay": "Add a relay to config.",
+        "/remove-relay": "Remove a relay from config.",
         "/help": "Show available commands.",
         "/quit": "Exit interactive mode.",
     }
@@ -1089,6 +1480,8 @@ def _interactive_cli() -> None:
             print("  /publish-nsr")
             print("  /verify-ncc")
             print("  /verify-nsr")
+            print("  /add-relay")
+            print("  /remove-relay")
             print("  /quit")
             print("")
             print("Details:")
@@ -1104,6 +1497,8 @@ def _interactive_cli() -> None:
             print("  /publish-nsr  Publish the latest succession record JSON file.")
             print("  /verify-ncc   Verify published NCC event id on relays.")
             print("  /verify-nsr   Verify published NSR event id on relays.")
+            print("  /add-relay    Add a relay to config.")
+            print("  /remove-relay Remove a relay from config.")
             print("  /quit         Exit interactive mode.")
             print("")
             print("Getting started:")
@@ -1466,23 +1861,56 @@ def _interactive_cli() -> None:
         if command in ("/list-ncc", "/list-nsr"):
             kind = 30050 if command == "/list-ncc" else 30051
             config_path = _default_config_path()
+            if kind == 30050:
+                fetch = _prompt_value("Fetch proposals from relays? (y/n)", "n", required=False)
+                if _is_truthy_response(fetch):
+                    try:
+                        added = _sync_remote_ncc_proposals(config_path)
+                        print(f"Fetched {added} proposal(s) from relays.")
+                    except Exception as exc:
+                        print(f"Relay fetch failed: {exc}")
             conn = _db_connect(config_path)
             rows = _db_list_drafts(conn, kind)
-            conn.close()
             label = "NCC drafts" if kind == 30050 else "NSR drafts"
             print(f"{label}:")
             if not rows:
+                conn.close()
                 print("  (none)")
                 continue
+            pubkey_hex = None
+            if kind == 30050:
+                config = _load_config_db(config_path)
+                privkey = config.get("privkey") if isinstance(config, dict) else None
+                if privkey:
+                    try:
+                        pubkey_hex = Keys.parse(privkey).public_key().to_hex()
+                    except Exception:
+                        pubkey_hex = None
+                local_identifiers, local_event_ids = _get_local_ncc_targets(config_path, pubkey_hex)
             for row in rows:
                 title = row["title"] or "-"
                 updated_at = _format_ts(row["updated_at"])
                 status = row["status"] or "draft"
                 published_at = _format_ts(row["published_at"])
                 event_id = row["event_id"] or "-"
-                print(
-                    f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
-                )
+                if kind == 30050:
+                    tags = _db_get_tags(conn, row["id"])
+                    labels = _classify_ncc_row(
+                        row,
+                        tags,
+                        pubkey_hex=pubkey_hex,
+                        local_identifiers=local_identifiers,
+                        local_event_ids=local_event_ids,
+                    )
+                    label_text = ", ".join(labels)
+                    print(
+                        f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
+                    )
+                else:
+                    print(
+                        f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                    )
+            conn.close()
             continue
 
         if command in ("/publish-ncc", "/publish-nsr"):
@@ -1527,6 +1955,7 @@ def _interactive_cli() -> None:
                 required=True,
             )
             keys = Keys.parse(privkey)
+            succession_info: Optional[tuple[str, Optional[str], Optional[str]]] = None
             if draft is None:
                 conn = _db_connect(config_path)
                 draft = _db_get_latest_draft(conn, kind, d_value)
@@ -1536,10 +1965,21 @@ def _interactive_cli() -> None:
                 if not json_path:
                     print("Cancelled.")
                     continue
+                if kind == 30051:
+                    payload = _load_json(json_path)
+                    authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+                    try:
+                        succession_info = _validate_succession_fields(authoritative, previous, steward)
+                    except ValueError as exc:
+                        print(f"Error: {exc}")
+                        continue
+                    if not _check_succession_not_self(config_path, succession_info[0], keys):
+                        print("Error: succession should not acknowledge your own NCC.")
+                        continue
                 print("Publishing event...")
                 try:
                     with _PUBLISH_LOCK:
-                        _attempt_publish_json(json_path, relays=relays, keys=keys)
+                        event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
                 except Exception as exc:
                     _enqueue_publish_task(
                         {
@@ -1550,10 +1990,30 @@ def _interactive_cli() -> None:
                         }
                     )
                     print(f"Publish failed: {exc}. Queued for retry.")
+                    continue
+                if kind == 30051 and succession_info:
+                    authoritative, previous, steward = succession_info
+                    _apply_succession_updates(
+                        config_path=config_path,
+                        authoritative_event=authoritative,
+                        previous_event=previous,
+                        steward=steward,
+                        succession_event_id=event_id,
+                    )
                 continue
             conn = _db_connect(config_path)
             tags = _db_get_tags(conn, draft["id"])
             conn.close()
+            if kind == 30051:
+                authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
+                try:
+                    succession_info = _validate_succession_fields(authoritative, previous, steward)
+                except ValueError as exc:
+                    print(f"Error: {exc}")
+                    continue
+                if not _check_succession_not_self(config_path, succession_info[0], keys):
+                    print("Error: succession should not acknowledge your own NCC.")
+                    continue
             payload = _payload_from_draft(draft["kind"], draft["d"], draft["title"], draft["content"], tags, _now())
             print("Publishing event...")
             try:
@@ -1568,8 +2028,17 @@ def _interactive_cli() -> None:
                         "relays": relays,
                     }
                 )
-                print(f"Publish failed: {exc}. Queued for retry.")
-                continue
+                    print(f"Publish failed: {exc}. Queued for retry.")
+                    continue
+            if kind == 30051 and succession_info:
+                authoritative, previous, steward = succession_info
+                _apply_succession_updates(
+                    config_path=config_path,
+                    authoritative_event=authoritative,
+                    previous_event=previous,
+                    steward=steward,
+                    succession_event_id=event_id,
+                )
             published_at = _now() if draft["kind"] == 30050 else None
             tags = _add_or_replace_tag(tags, "eventid", event_id)
             if published_at is not None:
@@ -1584,6 +2053,8 @@ def _interactive_cli() -> None:
                 status="published",
                 published_at=published_at,
                 event_id=event_id,
+                source="local",
+                author_pubkey=keys.public_key().to_hex(),
             )
             conn.close()
             continue
@@ -1645,6 +2116,52 @@ def _interactive_cli() -> None:
                 print(f"Event not found on relays: {event_id}")
             continue
 
+        if command == "/add-relay":
+            config_path = _default_config_path()
+            config = _load_config_db(config_path) or _default_config()
+            relays = config.get("relays") if isinstance(config, dict) else []
+            relays = list(relays or [])
+            relay = _prompt_value("Relay url (wss://...)", required=True)
+            if not _is_valid_relay_url(relay):
+                print("Invalid relay url. Use ws:// or wss://.")
+                continue
+            if relay in relays:
+                print("Relay already exists.")
+                continue
+            relays.append(relay)
+            config["relays"] = relays
+            _write_config_db(config_path, config)
+            print(f"Added relay: {relay}")
+            continue
+
+        if command == "/remove-relay":
+            config_path = _default_config_path()
+            config = _load_config_db(config_path) or _default_config()
+            relays = config.get("relays") if isinstance(config, dict) else []
+            relays = list(relays or [])
+            if not relays:
+                print("No relays configured.")
+                continue
+            print("Configured relays:")
+            for line in _format_relay_list(relays):
+                print(line)
+            selection = _prompt_value("Relay index or url to remove", required=True)
+            relay = selection
+            if selection.isdigit():
+                index = int(selection) - 1
+                if index < 0 or index >= len(relays):
+                    print("Relay index out of range.")
+                    continue
+                relay = relays[index]
+            if relay not in relays:
+                print("Relay not found.")
+                continue
+            relays = [item for item in relays if item != relay]
+            config["relays"] = relays
+            _write_config_db(config_path, config)
+            print(f"Removed relay: {relay}")
+            continue
+
         print("Error: unknown command. Type /help for options.")
 
 
@@ -1682,6 +2199,8 @@ def _interactive_tui() -> None:
         "/publish-nsr": "Publish the latest succession record JSON file.",
         "/verify-ncc": "Verify published NCC event id on relays.",
         "/verify-nsr": "Verify published NSR event id on relays.",
+        "/add-relay": "Add a relay to config.",
+        "/remove-relay": "Remove a relay from config.",
         "/help": "Show available commands.",
         "/quit": "Exit interactive mode.",
     }
@@ -2201,6 +2720,8 @@ def _interactive_tui() -> None:
         flow["answers"][step["key"]] = value
         if flow.get("mode") in ("verify-ncc", "verify-nsr") and step.get("key") == "selection":
             set_custom_completer(None)
+        if flow.get("mode") == "remove-relay" and step.get("key") == "relay":
+            set_custom_completer(None)
         flow["index"] += 1
         if flow["index"] >= len(flow["steps"]):
             on_complete = flow["on_complete"]
@@ -2254,6 +2775,8 @@ def _interactive_tui() -> None:
             append_line("  /publish-nsr")
             append_line("  /verify-ncc")
             append_line("  /verify-nsr")
+            append_line("  /add-relay")
+            append_line("  /remove-relay")
             append_line("  /quit")
             append_line("")
             append_line("Details:")
@@ -2269,6 +2792,8 @@ def _interactive_tui() -> None:
             append_line("  /publish-nsr  Publish the latest succession record JSON file.")
             append_line("  /verify-ncc   Verify published NCC event id on relays.")
             append_line("  /verify-nsr   Verify published NSR event id on relays.")
+            append_line("  /add-relay    Add a relay to config.")
+            append_line("  /remove-relay Remove a relay from config.")
             append_line("  /quit         Exit interactive mode.")
             append_line("")
             append_line("Getting started:")
@@ -2644,23 +3169,73 @@ def _interactive_tui() -> None:
         if command in ("/list-ncc", "/list-nsr"):
             kind = 30050 if command == "/list-ncc" else 30051
             config_path = _default_config_path()
-            conn = _db_connect(config_path)
-            rows = _db_list_drafts(conn, kind)
-            conn.close()
-            label = "NCC drafts" if kind == 30050 else "NSR drafts"
-            append_line(f"{label}:")
-            if not rows:
-                append_line("  (none)")
-                return
-            for row in rows:
-                title = row["title"] or "-"
-                updated_at = _format_ts(row["updated_at"])
-                status = row["status"] or "draft"
-                published_at = _format_ts(row["published_at"])
-                event_id = row["event_id"] or "-"
-                append_line(
-                    f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+            def _render_list() -> None:
+                conn = _db_connect(config_path)
+                rows = _db_list_drafts(conn, kind)
+                label = "NCC drafts" if kind == 30050 else "NSR drafts"
+                append_line(f"{label}:")
+                if not rows:
+                    conn.close()
+                    append_line("  (none)")
+                    return
+                pubkey_hex = None
+                if kind == 30050:
+                    config = _load_config_db(config_path)
+                    privkey = config.get("privkey") if isinstance(config, dict) else None
+                    if privkey:
+                        try:
+                            pubkey_hex = Keys.parse(privkey).public_key().to_hex()
+                        except Exception:
+                            pubkey_hex = None
+                    local_identifiers, local_event_ids = _get_local_ncc_targets(config_path, pubkey_hex)
+                for row in rows:
+                    title = row["title"] or "-"
+                    updated_at = _format_ts(row["updated_at"])
+                    status = row["status"] or "draft"
+                    published_at = _format_ts(row["published_at"])
+                    event_id = row["event_id"] or "-"
+                    if kind == 30050:
+                        tags = _db_get_tags(conn, row["id"])
+                        labels = _classify_ncc_row(
+                            row,
+                            tags,
+                            pubkey_hex=pubkey_hex,
+                            local_identifiers=local_identifiers,
+                            local_event_ids=local_event_ids,
+                        )
+                        label_text = ", ".join(labels)
+                        append_line(
+                            f"  #{row['id']} {row['d']} {title} | {status} | {label_text} | updated {updated_at} | published {published_at} | event {event_id}"
+                        )
+                    else:
+                        append_line(
+                            f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                        )
+                conn.close()
+
+            if kind == 30050:
+                def _complete_fetch(answers: dict) -> None:
+                    if _is_truthy_response(answers.get("fetch") or ""):
+                        try:
+                            added = _sync_remote_ncc_proposals(config_path)
+                            append_line(f"Fetched {added} proposal(s) from relays.")
+                        except Exception as exc:
+                            append_line(f"Relay fetch failed: {exc}")
+                    _render_list()
+
+                start_flow(
+                    [
+                        {
+                            "key": "fetch",
+                            "label": "Fetch proposals from relays? (y/n)",
+                            "default": "n",
+                            "required": False,
+                        }
+                    ],
+                    _complete_fetch,
                 )
+                return
+            _render_list()
             return
 
         if command in ("/publish-ncc", "/publish-nsr"):
@@ -2675,12 +3250,27 @@ def _interactive_tui() -> None:
                     append_line("Error: privkey is required.")
                     return
                 keys = Keys.parse(privkey)
+                kind = 30050 if flow.get("mode") == "publish-ncc" else 30051
+                succession_info: Optional[tuple[str, Optional[str], Optional[str]]] = None
                 draft_id = answers.get("draft_id")
                 if draft_id:
+                    if kind == 30051:
+                        conn = _db_connect(config_path)
+                        tags = _db_get_tags(conn, int(draft_id))
+                        conn.close()
+                        authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
+                        try:
+                            succession_info = _validate_succession_fields(authoritative, previous, steward)
+                        except ValueError as exc:
+                            append_line(f"Error: {exc}")
+                            return
+                        if not _check_succession_not_self(config_path, succession_info[0], keys):
+                            append_line("Error: succession should not acknowledge your own NCC.")
+                            return
                     append_line("Publishing event...")
                     try:
                         with _PUBLISH_LOCK:
-                            _attempt_publish_draft(config_path, int(draft_id), relays=relays, keys=keys)
+                            event_id = _attempt_publish_draft(config_path, int(draft_id), relays=relays, keys=keys)
                     except Exception as exc:
                         _enqueue_publish_task(
                             {
@@ -2691,16 +3281,36 @@ def _interactive_tui() -> None:
                             }
                         )
                         append_line(f"Publish failed: {exc}. Queued for retry.")
+                    if kind == 30051 and succession_info:
+                        authoritative, previous, steward = succession_info
+                        _apply_succession_updates(
+                            config_path=config_path,
+                            authoritative_event=authoritative,
+                            previous_event=previous,
+                            steward=steward,
+                            succession_event_id=event_id,
+                        )
                     return
                 json_path = answers.get("json_path")
                 if not json_path:
                     append_line("Error: JSON path is required.")
                     return
+                if kind == 30051:
+                    payload = _load_json(json_path)
+                    authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+                    try:
+                        succession_info = _validate_succession_fields(authoritative, previous, steward)
+                    except ValueError as exc:
+                        append_line(f"Error: {exc}")
+                        return
+                    if not _check_succession_not_self(config_path, succession_info[0], keys):
+                        append_line("Error: succession should not acknowledge your own NCC.")
+                        return
                 append_line("Publishing event...")
-                try:
-                    with _PUBLISH_LOCK:
-                        _attempt_publish_json(json_path, relays=relays, keys=keys)
-                except Exception as exc:
+                    try:
+                        with _PUBLISH_LOCK:
+                            event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
+                    except Exception as exc:
                     _enqueue_publish_task(
                         {
                             "type": "json",
@@ -2710,6 +3320,16 @@ def _interactive_tui() -> None:
                         }
                     )
                     append_line(f"Publish failed: {exc}. Queued for retry.")
+                    return
+                if kind == 30051 and succession_info:
+                    authoritative, previous, steward = succession_info
+                    _apply_succession_updates(
+                        config_path=config_path,
+                        authoritative_event=authoritative,
+                        previous_event=previous,
+                        steward=steward,
+                        succession_event_id=event_id,
+                    )
 
             kind = 30050 if command == "/publish-ncc" else 30051
             conn = _db_connect(_default_config_path())
@@ -2821,6 +3441,83 @@ def _interactive_tui() -> None:
                     },
                 ],
                 _complete_verify,
+            )
+            return
+
+        if command == "/add-relay":
+            config_path = _default_config_path()
+            config = _load_config_db(config_path) or _default_config()
+            relays = config.get("relays") if isinstance(config, dict) else []
+            relays = list(relays or [])
+
+            def _complete_add_relay(answers: dict) -> None:
+                relay = (answers.get("relay") or "").strip()
+                if not relay:
+                    append_line("Error: relay url is required.")
+                    return
+                if not _is_valid_relay_url(relay):
+                    append_line("Error: invalid relay url. Use ws:// or wss://.")
+                    return
+                if relay in relays:
+                    append_line("Relay already exists.")
+                    return
+                relays.append(relay)
+                config["relays"] = relays
+                _write_config_db(config_path, config)
+                append_line(f"Added relay: {relay}")
+
+            start_flow(
+                [
+                    {"key": "relay", "label": "Relay url (wss://...)", "default": None, "required": True},
+                ],
+                _complete_add_relay,
+            )
+            return
+
+        if command == "/remove-relay":
+            config_path = _default_config_path()
+            config = _load_config_db(config_path) or _default_config()
+            relays = config.get("relays") if isinstance(config, dict) else []
+            relays = list(relays or [])
+            append_line("Configured relays:")
+            if not relays:
+                append_line("  (none)")
+                return
+            for line in _format_relay_list(relays):
+                append_line(line)
+            relay_meta: Dict[str, str] = {}
+            relay_options: List[str] = []
+            for idx, relay in enumerate(relays, start=1):
+                key = str(idx)
+                relay_options.extend([key, relay])
+                relay_meta[key] = relay
+                relay_meta[relay] = f"#{key}"
+            if relay_options:
+                set_custom_completer(_CommandCompleter(relay_options, meta=relay_meta))
+
+            def _complete_remove_relay(answers: dict) -> None:
+                selection = (answers.get("relay") or "").strip()
+                relay = selection
+                if selection.isdigit():
+                    index = int(selection) - 1
+                    if index < 0 or index >= len(relays):
+                        append_line("Relay index out of range.")
+                        return
+                    relay = relays[index]
+                if relay not in relays:
+                    append_line("Relay not found.")
+                    return
+                updated = [item for item in relays if item != relay]
+                config["relays"] = updated
+                _write_config_db(config_path, config)
+                append_line(f"Removed relay: {relay}")
+
+            flow["mode"] = "remove-relay"
+            start_flow(
+                [
+                    {"key": "relay", "label": "Relay index or url to remove", "default": None, "required": True},
+                ],
+                _complete_remove_relay,
             )
             return
 
@@ -3454,10 +4151,17 @@ def main() -> None:
             reason=_merge_optional(args.reason, config_tags.get("reason")),
             effective_at=_merge_optional(args.effective_at, config_tags.get("effective_at")),
         )
+        authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+        try:
+            authoritative, previous, steward = _validate_succession_fields(authoritative, previous, steward)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        if not _check_succession_not_self(args.config, authoritative, keys):
+            raise SystemExit("Succession should not acknowledge your own NCC.")
 
     try:
         with _PUBLISH_LOCK:
-            _attempt_publish_payload(payload, relays=relays, keys=keys)
+            event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
     except Exception as exc:
         _enqueue_publish_task(
             {
@@ -3468,6 +4172,20 @@ def main() -> None:
             }
         )
         print(f"Publish failed: {exc}. Queued for retry.")
+        return
+    if args.command == "succession":
+        authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
+        try:
+            authoritative, previous, steward = _validate_succession_fields(authoritative, previous, steward)
+            _apply_succession_updates(
+                config_path=args.config,
+                authoritative_event=authoritative,
+                previous_event=previous,
+                steward=steward,
+                succession_event_id=event_id,
+            )
+        except ValueError:
+            pass
 
 
 if __name__ == "__main__":
