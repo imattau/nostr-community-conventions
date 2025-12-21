@@ -3307,10 +3307,10 @@ def _interactive_tui() -> None:
                         append_line("Error: succession should not acknowledge your own NCC.")
                         return
                 append_line("Publishing event...")
-                    try:
-                        with _PUBLISH_LOCK:
-                            event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
-                    except Exception as exc:
+                try:
+                    with _PUBLISH_LOCK:
+                        event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
+                except Exception as exc:
                     _enqueue_publish_task(
                         {
                             "type": "json",
