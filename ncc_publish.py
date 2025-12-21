@@ -938,6 +938,19 @@ def _extract_succession_fields_from_tags(tags: List) -> tuple[Optional[str], Opt
     )
 
 
+def _normalize_event_reference(value: Optional[str], *, label: str) -> Optional[str]:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    raw = _strip_event_prefix(raw) or ""
+    if not raw:
+        return None
+    _validate_event_id(raw, label=label)
+    return f"event:{raw}"
+
+
 def _validate_succession_fields(
     authoritative_event: Optional[str],
     previous_event: Optional[str],
@@ -1445,7 +1458,9 @@ def _ncc_tags_from_inputs(
     if version:
         tags.append(("version", version))
     for item in supersedes:
-        tags.append(("supersedes", item))
+        normalized = _normalize_event_reference(item, label="Supersedes event id")
+        if normalized:
+            tags.append(("supersedes", normalized))
     if license_id:
         tags.append(("license", license_id))
     for author in authors:
@@ -1463,11 +1478,15 @@ def _nsr_tags_from_inputs(
     reason: Optional[str],
     effective_at: Optional[str],
 ) -> List[tuple[str, str]]:
-    tags: List[tuple[str, str]] = [("authoritative", f"event:{authoritative_event}")]
+    authoritative = _normalize_event_reference(authoritative_event, label="Authoritative event id")
+    if not authoritative:
+        raise ValueError("Authoritative event id is required.")
+    tags: List[tuple[str, str]] = [("authoritative", authoritative)]
     if steward:
         tags.append(("steward", steward))
-    if previous:
-        tags.append(("previous", f"event:{previous}"))
+    previous_value = _normalize_event_reference(previous, label="Previous event id")
+    if previous_value:
+        tags.append(("previous", previous_value))
     if reason:
         tags.append(("reason", reason))
     if effective_at:
@@ -1851,9 +1870,12 @@ def _interactive_cli() -> None:
             topics = _prompt_value("Topics (comma-separated, optional)", _format_list_default(tag_map.get("t")), required=False)
             lang = _prompt_value("Lang (optional)", tag_map.get("lang", [None])[0], required=False)
             version = _prompt_value("Version (optional)", tag_map.get("version", [None])[0], required=False)
+            supersedes_default = list(tag_map.get("supersedes", []))
+            if base_is_published and base_event_id:
+                supersedes_default.append(f"event:{base_event_id}")
             supersedes = _prompt_value(
                 "Supersedes (event id, optional)",
-                _format_list_default(tag_map.get("supersedes")),
+                _format_list_default(supersedes_default),
                 required=False,
             )
             license_id = _prompt_value("License (optional)", tag_map.get("license", [None])[0], required=False)
@@ -2495,6 +2517,9 @@ def _interactive_tui() -> None:
                 return
             tags = store.get_tags(draft["id"])
             tag_map = _tags_to_map(tags)
+            supersedes_default = list(tag_map.get("supersedes", []))
+            if draft.get("event_id"):
+                supersedes_default.append(f"event:{draft['event_id']}")
             if kind == 30050:
                 steps = [
                     {"key": "title", "label": "Title", "default": draft["title"], "required": True},
@@ -2522,7 +2547,7 @@ def _interactive_tui() -> None:
                     {
                         "key": "supersedes",
                         "label": "Supersedes (event id, optional)",
-                        "default": _format_list_default(tag_map.get("supersedes")),
+                        "default": _format_list_default(supersedes_default),
                         "required": False,
                     },
                     {
