@@ -175,6 +175,12 @@ function pickCurrentDoc(docs) {
   });
 }
 
+function pickDocById(docs, eventId) {
+  if (!docs || !eventId) return null;
+  const target = normalizeId(eventId);
+  return docs.find((event) => normalizeId(event.id) === target) || null;
+}
+
 function resolveSteward(currentDoc, nsrList) {
   if (!currentDoc) return "";
   if (!nsrList || nsrList.length === 0) return currentDoc.pubkey;
@@ -220,9 +226,10 @@ function buildList(index) {
   });
 }
 
-function buildDetails(dTag, index) {
+function buildDetails(dTag, index, eventId = "") {
   const docs = index.docsByD.get(dTag) || [];
-  const current = pickCurrentDoc(docs);
+  const selected = pickDocById(docs, eventId);
+  const current = selected || pickCurrentDoc(docs);
   if (!current) return null;
 
   const nsrList = (index.nsrByD.get(dTag) || [])
@@ -249,6 +256,17 @@ function buildDetails(dTag, index) {
     {}
   );
 
+  const proposals = docs
+    .filter((event) => normalizeId(event.id) !== normalizeId(current.id))
+    .map((event) => ({
+      event_id: event.id,
+      published_at: getPublishedAt(event),
+      title: getTagValue(event, "title") || "Untitled",
+      summary: getTagValue(event, "summary"),
+      pubkey: event.pubkey
+    }))
+    .sort((a, b) => b.published_at - a.published_at);
+
   return {
     d: dTag,
     title: getTagValue(current, "title") || "Untitled",
@@ -266,6 +284,8 @@ function buildDetails(dTag, index) {
     steward: resolveSteward(current, index.nsrByD.get(dTag) || []),
     endorsements_count: endorsements.length,
     endorsements_by_role: endorsementsByRole,
+    proposals_count: proposals.length,
+    proposals,
     nsr: nsrList,
     documents: docs
       .map((event) => ({
@@ -295,6 +315,24 @@ function buildEndorsements(dTag, index) {
       content: event.content || ""
     }))
     .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+}
+
+function buildProposals(dTag, index) {
+  const docs = index.docsByD.get(dTag) || [];
+  const current = pickCurrentDoc(docs);
+  if (!current) return null;
+
+  return docs
+    .filter((event) => normalizeId(event.id) !== normalizeId(current.id))
+    .map((event) => ({
+      event_id: event.id,
+      published_at: getPublishedAt(event),
+      title: getTagValue(event, "title") || "Untitled",
+      summary: getTagValue(event, "summary"),
+      pubkey: event.pubkey,
+      content_html: renderMarkdown(event.content || "")
+    }))
+    .sort((a, b) => b.published_at - a.published_at);
 }
 
 async function getData() {
@@ -333,7 +371,8 @@ app.get("/api/nccs/:d", async (req, res) => {
   try {
     const data = await getData();
     const dTag = normalizeId(req.params.d);
-    const details = buildDetails(dTag, data.index);
+    const eventId = normalizeId(req.query.event_id || "");
+    const details = buildDetails(dTag, data.index, eventId);
     if (!details) return res.status(404).json({ error: "NCC not found" });
     res.json({ relays: RELAYS, details });
   } catch (error) {
@@ -350,6 +389,18 @@ app.get("/api/nccs/:d/endorsements", async (req, res) => {
     res.json({ relays: RELAYS, endorsements });
   } catch (error) {
     res.status(500).json({ error: "Failed to load endorsements", detail: error.message });
+  }
+});
+
+app.get("/api/nccs/:d/proposals", async (req, res) => {
+  try {
+    const data = await getData();
+    const dTag = normalizeId(req.params.d);
+    const proposals = buildProposals(dTag, data.index);
+    if (!proposals) return res.status(404).json({ error: "NCC not found" });
+    res.json({ relays: RELAYS, proposals });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to load proposals", detail: error.message });
   }
 });
 

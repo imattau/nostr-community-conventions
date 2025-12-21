@@ -7,6 +7,7 @@ const contentEl = document.getElementById("ncc-content");
 const stewardEl = document.getElementById("ncc-steward");
 const publishedEl = document.getElementById("ncc-published");
 const endorsementsEl = document.getElementById("ncc-endorsements");
+const proposalsEl = document.getElementById("ncc-proposals");
 const nsrEl = document.getElementById("ncc-nsr");
 
 function renderEmpty() {
@@ -40,10 +41,13 @@ function renderNSR(records) {
 
 async function load() {
   const dTag = getQueryParam("d");
+  const eventId = getQueryParam("event");
   if (!dTag) return renderEmpty();
 
   try {
-    const response = await fetch(`/api/nccs/${encodeURIComponent(dTag)}`);
+    const params = new URLSearchParams();
+    if (eventId) params.set("event_id", eventId);
+    const response = await fetch(`/api/nccs/${encodeURIComponent(dTag)}?${params.toString()}`);
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
     const details = data.details;
@@ -60,6 +64,8 @@ async function load() {
     publishedEl.textContent = formatTimestamp(details.published_at) || "unknown";
     endorsementsEl.textContent = details.endorsements_count ?? 0;
     endorsementsEl.href = `/endorsements.html?d=${encodeURIComponent(details.d)}`;
+    proposalsEl.textContent = details.proposals_count ?? 0;
+    proposalsEl.href = `/proposals.html?d=${encodeURIComponent(details.d)}`;
 
     renderNSR(details.nsr || []);
   } catch (error) {
