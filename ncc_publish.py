@@ -3934,7 +3934,11 @@ def _interactive_tui() -> None:
                 summary = _normalize_optional_str(answers.get("summary")) or config_tags.get("summary")
                 lang = _normalize_optional_str(answers.get("lang")) or config_tags.get("lang")
                 version = _normalize_optional_str(answers.get("version")) or config_tags.get("version")
-                supersedes = _normalize_optional_str(answers.get("supersedes")) or config_tags.get("supersedes")
+                supersedes_answer = answers.get("supersedes")
+                if isinstance(supersedes_answer, list):
+                    supersedes = supersedes_answer
+                else:
+                    supersedes = _normalize_optional_str(supersedes_answer) or config_tags.get("supersedes")
                 license_id = _normalize_optional_str(answers.get("license")) or config_tags.get("license")
                 topics = _parse_list_value(answers.get("topics") or "")
                 authors = _parse_list_value(answers.get("authors") or "")
