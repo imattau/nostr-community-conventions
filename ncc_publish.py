@@ -20,7 +20,6 @@ import sqlite3
 import random
 import threading
 import uuid
-import tempfile
 import queue as queue_module
 from datetime import timedelta
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
@@ -116,13 +115,6 @@ def _load_json(path: str) -> dict:
         return {}
 
 
-def _load_json_safe(path: str) -> dict:
-    try:
-        return _load_json(path)
-    except json.JSONDecodeError:
-        return {}
-
-
 def _write_json(path: str, data: dict) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
@@ -161,6 +153,13 @@ def _load_config_db(config_path: Optional[str]) -> dict:
         return {}
 
 
+def _load_config_or_default(config_path: Optional[str], default: Optional[dict] = None) -> dict:
+    config = _load_config_db(config_path) if config_path else {}
+    if isinstance(config, dict) and config:
+        return config
+    return default if default is not None else {}
+
+
 def _write_config_db(config_path: str, data: dict) -> None:
     conn = _db_connect(config_path)
     payload = json.dumps(data, indent=2, ensure_ascii=True)
@@ -173,26 +172,6 @@ def _write_config_db(config_path: str, data: dict) -> None:
     )
     conn.commit()
     conn.close()
-
-
-def _edit_config_db(config_path: str, open_editor: Callable[[str], None]) -> None:
-    config = _load_config_db(config_path) or _default_config()
-    with tempfile.NamedTemporaryFile(prefix="ncc-config-", suffix=".json", delete=False) as handle:
-        temp_path = handle.name
-    _write_json(temp_path, config)
-    open_editor(temp_path)
-    try:
-        edited = _load_json(temp_path)
-    except json.JSONDecodeError:
-        raise SystemExit("Edited config is not valid JSON.")
-    finally:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-    if not isinstance(edited, dict):
-        raise SystemExit("Edited config must be a JSON object.")
-    _write_config_db(config_path, edited)
 
 
 def _config_exists(config_path: str) -> bool:
@@ -344,22 +323,18 @@ def _attempt_publish_json(json_path: str, *, relays: List[str], keys: Keys) -> s
 
 
 def _attempt_publish_draft(config_path: str, draft_id: int, *, relays: List[str], keys: Keys) -> str:
-    conn = _db_connect(config_path)
-    draft = conn.execute("select * from drafts where id = ?", (int(draft_id),)).fetchone()
+    store = DraftStore(config_path)
+    draft = store.get_draft(draft_id)
     if not draft:
-        conn.close()
         raise SystemExit("Draft not found.")
-    tags = _db_get_tags(conn, draft["id"])
-    conn.close()
+    tags = store.get_tags(draft["id"])
     payload = _payload_from_draft(draft["kind"], draft["d"], draft["title"], draft["content"], tags, _now())
     event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
     published_at = _now() if draft["kind"] == 30050 else None
     tags = _add_or_replace_tag(tags, "eventid", event_id)
     if published_at is not None:
         tags = _add_or_replace_tag(tags, "published_at", str(published_at))
-    conn = _db_connect(config_path)
-    _db_update_draft(
-        conn,
+    store.update_draft(
         draft_id=int(draft["id"]),
         title=draft["title"],
         content=draft["content"],
@@ -370,25 +345,24 @@ def _attempt_publish_draft(config_path: str, draft_id: int, *, relays: List[str]
         source="local",
         author_pubkey=keys.public_key().to_hex(),
     )
-    conn.close()
     return event_id
 
 
 def _run_publish_task(task: dict) -> str:
     config_path = task.get("config_path")
-    config = _load_config_db(config_path) if config_path else {}
-    relays = _resolve_relays(task.get("relays"), config)
+    service = PublishService(config_path)
+    config = service.load_config() if config_path else {}
+    relays = service.resolve_relays(task.get("relays"), config)
     privkey = _load_privkey_from_config(config_path)
     if not privkey:
         raise SystemExit("Missing privkey for queued publish.")
     keys = Keys.parse(privkey)
     kind = task.get("type")
     if kind == "draft":
-        event_id = _attempt_publish_draft(config_path, int(task["draft_id"]), relays=relays, keys=keys)
-        conn = _db_connect(config_path)
-        draft = conn.execute("select * from drafts where id = ?", (int(task["draft_id"]),)).fetchone()
-        tags = _db_get_tags(conn, int(task["draft_id"])) if draft else []
-        conn.close()
+        event_id = service.publish_draft(int(task["draft_id"]), relays=relays, keys=keys)
+        store = DraftStore(config_path)
+        draft = store.get_draft(int(task["draft_id"]))
+        tags = store.get_tags(int(task["draft_id"])) if draft else []
         if draft and draft["kind"] == 30051:
             authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
             try:
@@ -404,10 +378,8 @@ def _run_publish_task(task: dict) -> str:
                 pass
         return event_id
     if kind == "json":
+        event_id = service.publish_json(task["json_path"], relays=relays, keys=keys)
         payload = _load_json(task["json_path"])
-        event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
-        _finalize_payload_publish(payload, event_id)
-        _write_json(task["json_path"], payload)
         if payload.get("kind") == 30051:
             authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
             try:
@@ -426,7 +398,7 @@ def _run_publish_task(task: dict) -> str:
         payload = task.get("payload")
         if not isinstance(payload, dict):
             raise SystemExit("Queued payload is invalid.")
-        event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
+        event_id = service.publish_payload(payload, relays=relays, keys=keys)
         if payload.get("kind") == 30051:
             authoritative, previous, steward = _extract_succession_fields_from_tags(payload.get("tags", []))
             try:
@@ -766,6 +738,11 @@ def _normalize_steward_tag(value: Optional[str]) -> Optional[str]:
     return f"pubkey:{raw}"
 
 
+def _find_ncc_collision(config_path: str, identifier: str) -> Optional[sqlite3.Row]:
+    store = DraftStore(config_path)
+    return store.get_latest_draft(30050, identifier)
+
+
 def _format_unpublished_drafts(rows: List[sqlite3.Row]) -> List[str]:
     lines = []
     for row in rows:
@@ -801,11 +778,8 @@ def _extract_supersedes_values(tags: List) -> List[str]:
 
 
 def _get_local_ncc_targets(config_path: str, pubkey_hex: Optional[str]) -> tuple[set[str], set[str]]:
-    conn = _db_connect(config_path)
-    rows = conn.execute(
-        "select d, event_id, source, author_pubkey from drafts where kind = 30050",
-    ).fetchall()
-    conn.close()
+    store = DraftStore(config_path)
+    rows = store.list_drafts(30050)
     identifiers: set[str] = set()
     event_ids: set[str] = set()
     for row in rows:
@@ -872,17 +846,12 @@ def _store_remote_ncc_payload(config_path: str, payload: dict) -> bool:
     created_at = payload.get("created_at")
     published_at = _extract_tag_value(tags_list, "published_at")
     published_at_int = int(published_at) if published_at and str(published_at).isdigit() else None
-    conn = _db_connect(config_path)
-    existing = conn.execute(
-        "select id from drafts where event_id = ?",
-        (event_id,),
-    ).fetchone()
+    store = DraftStore(config_path)
+    existing = store.get_draft_by_event_id(30050, event_id)
     if existing:
-        conn.close()
         return False
     tags = _tags_from_payload(payload)
-    _db_insert_draft(
-        conn,
+    store.insert_draft(
         kind=30050,
         d=d_value,
         title=title_value,
@@ -894,7 +863,6 @@ def _store_remote_ncc_payload(config_path: str, payload: dict) -> bool:
         source="relay",
         author_pubkey=payload.get("author_pubkey"),
     )
-    conn.close()
     return True
 
 
@@ -916,7 +884,8 @@ async def _fetch_remote_ncc_events(relays: List[str], limit: int) -> List[dict]:
 
 
 def _sync_remote_ncc_proposals(config_path: str) -> int:
-    config = _load_config_db(config_path) or {}
+    store = DraftStore(config_path)
+    config = store.load_config_or_default({})
     relays = config.get("relays", []) if isinstance(config, dict) else []
     privkey = config.get("privkey") if isinstance(config, dict) else None
     pubkey_hex = None
@@ -989,19 +958,13 @@ def _apply_succession_updates(
     steward: Optional[str],
     succession_event_id: str,
 ) -> None:
-    conn = _db_connect(config_path)
-    authoritative_draft = conn.execute(
-        "select * from drafts where kind = 30050 and event_id = ?",
-        (authoritative_event,),
-    ).fetchone()
+    store = DraftStore(config_path)
+    authoritative_draft = store.get_draft_by_event_id(30050, authoritative_event)
     previous_draft = None
     if previous_event:
-        previous_draft = conn.execute(
-            "select * from drafts where kind = 30050 and event_id = ?",
-            (previous_event,),
-        ).fetchone()
+        previous_draft = store.get_draft_by_event_id(30050, previous_event)
     if authoritative_draft:
-        tags = _db_get_tags(conn, authoritative_draft["id"])
+        tags = store.get_tags(authoritative_draft["id"])
         tag_map = _tags_to_map(tags)
         updated = list(tags)
         if steward:
@@ -1010,25 +973,22 @@ def _apply_succession_updates(
             prev_identifier = previous_draft["d"]
             if prev_identifier and prev_identifier not in tag_map.get("supersedes", []):
                 updated.append(("supersedes", prev_identifier))
-        _db_update_draft(
-            conn,
+        store.update_draft(
             draft_id=int(authoritative_draft["id"]),
             title=authoritative_draft["title"],
             content=authoritative_draft["content"],
             tags=updated,
         )
     if previous_draft:
-        prev_tags = _db_get_tags(conn, previous_draft["id"])
+        prev_tags = store.get_tags(previous_draft["id"])
         prev_tags = _add_or_replace_tag(prev_tags, "superseded_by", f"event:{authoritative_event}")
         prev_tags = _add_or_replace_tag(prev_tags, "succession", f"event:{succession_event_id}")
-        _db_update_draft(
-            conn,
+        store.update_draft(
             draft_id=int(previous_draft["id"]),
             title=previous_draft["title"],
             content=previous_draft["content"],
             tags=prev_tags,
         )
-    conn.close()
 
 
 def _is_author_self(authors: List[str], keys: Keys) -> bool:
@@ -1046,16 +1006,11 @@ def _is_author_self(authors: List[str], keys: Keys) -> bool:
 
 
 def _check_succession_not_self(config_path: str, authoritative_event: str, keys: Keys) -> bool:
-    conn = _db_connect(config_path)
-    draft = conn.execute(
-        "select * from drafts where kind = 30050 and event_id = ?",
-        (authoritative_event,),
-    ).fetchone()
+    store = DraftStore(config_path)
+    draft = store.get_draft_by_event_id(30050, authoritative_event)
     if not draft:
-        conn.close()
         return True
-    tags = _db_get_tags(conn, int(draft["id"]))
-    conn.close()
+    tags = store.get_tags(int(draft["id"]))
     tag_map = _tags_to_map(tags)
     authors = tag_map.get("authors", [])
     return not _is_author_self(authors, keys)
@@ -1100,6 +1055,166 @@ def _db_list_published_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlit
     return cur.fetchall()
 
 
+class DraftStore:
+    def __init__(self, config_path: Optional[str]) -> None:
+        self.config_path = config_path
+        self.db_path = _resolve_db_path(config_path)
+
+    def connect(self) -> sqlite3.Connection:
+        return _db_connect_path(self.db_path)
+
+    def load_config(self) -> dict:
+        return _load_config_db(self.db_path)
+
+    def load_config_or_default(self, default: Optional[dict] = None) -> dict:
+        return _load_config_or_default(self.db_path, default)
+
+    def save_config(self, data: dict) -> None:
+        _write_config_db(self.db_path, data)
+
+    def config_exists(self) -> bool:
+        return _config_exists(self.db_path)
+
+    def get_draft(self, draft_id: int) -> Optional[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return conn.execute("select * from drafts where id = ?", (int(draft_id),)).fetchone()
+        finally:
+            conn.close()
+
+    def get_draft_by_event_id(self, kind: int, event_id: str) -> Optional[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return conn.execute(
+                "select * from drafts where kind = ? and event_id = ?",
+                (kind, event_id),
+            ).fetchone()
+        finally:
+            conn.close()
+
+    def get_latest_draft(self, kind: int, d: str) -> Optional[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return _db_get_latest_draft(conn, kind, d)
+        finally:
+            conn.close()
+
+    def get_tags(self, draft_id: int) -> List[tuple[str, str]]:
+        conn = self.connect()
+        try:
+            return _db_get_tags(conn, draft_id)
+        finally:
+            conn.close()
+
+    def insert_draft(
+        self,
+        *,
+        kind: int,
+        d: str,
+        title: Optional[str],
+        content: str,
+        tags: List[tuple[str, str]],
+        status: str = "draft",
+        published_at: Optional[int] = None,
+        created_at: Optional[int] = None,
+        source: str = "local",
+        author_pubkey: Optional[str] = None,
+    ) -> int:
+        conn = self.connect()
+        try:
+            return _db_insert_draft(
+                conn,
+                kind=kind,
+                d=d,
+                title=title,
+                content=content,
+                tags=tags,
+                status=status,
+                published_at=published_at,
+                created_at=created_at,
+                source=source,
+                author_pubkey=author_pubkey,
+            )
+        finally:
+            conn.close()
+
+    def update_draft(
+        self,
+        *,
+        draft_id: int,
+        title: Optional[str],
+        content: str,
+        tags: List[tuple[str, str]],
+        status: Optional[str] = None,
+        published_at: Optional[int] = None,
+        event_id: Optional[str] = None,
+        source: Optional[str] = None,
+        author_pubkey: Optional[str] = None,
+    ) -> None:
+        conn = self.connect()
+        try:
+            _db_update_draft(
+                conn,
+                draft_id=draft_id,
+                title=title,
+                content=content,
+                tags=tags,
+                status=status,
+                published_at=published_at,
+                event_id=event_id,
+                source=source,
+                author_pubkey=author_pubkey,
+            )
+        finally:
+            conn.close()
+
+    def list_drafts(self, kind: int) -> List[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return _db_list_drafts(conn, kind)
+        finally:
+            conn.close()
+
+    def list_unpublished_drafts(self, kind: int) -> List[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return _db_list_unpublished_drafts(conn, kind)
+        finally:
+            conn.close()
+
+    def list_published_drafts(self, kind: int) -> List[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return _db_list_published_drafts(conn, kind)
+        finally:
+            conn.close()
+
+
+class PublishService:
+    def __init__(self, config_path: Optional[str]) -> None:
+        self.config_path = config_path
+        self.store = DraftStore(config_path)
+
+    def load_config(self) -> dict:
+        return self.store.load_config()
+
+    def resolve_relays(self, relays: Optional[List[str]], config: dict) -> List[str]:
+        return _resolve_relays(relays, config)
+
+    def publish_payload(self, payload: dict, *, relays: List[str], keys: Keys) -> str:
+        return _attempt_publish_payload(payload, relays=relays, keys=keys)
+
+    def publish_json(self, json_path: str, *, relays: List[str], keys: Keys) -> str:
+        return _attempt_publish_json(json_path, relays=relays, keys=keys)
+
+    def publish_draft(self, draft_id: int, *, relays: List[str], keys: Keys) -> str:
+        return _attempt_publish_draft(self.store.db_path, draft_id, relays=relays, keys=keys)
+
+    def verify_event(self, event_id: str, relays: List[str]) -> bool:
+        return _verify_event_on_relays(event_id, relays)
+
+    def enqueue_task(self, task: dict) -> None:
+        _enqueue_publish_task(task)
 def _open_in_editor(path: str) -> None:
     raw_editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
     if raw_editor:
@@ -1188,23 +1303,29 @@ def _prompt_list(label: str, default: Optional[List[str]] = None) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _prompt_config_path() -> str:
-    return _default_config_path()
-
-
-def _prompt_config_path_optional(default_path: str) -> Optional[str]:
-    return default_path
-
-
 def _load_content_from_path(path: str) -> str:
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read()
 
 
-def _parse_list_value(raw: str) -> List[str]:
-    if not raw:
+def _normalize_list(value: Optional[object]) -> List[str]:
+    if value is None:
         return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    if isinstance(value, list):
+        normalized: List[str] = []
+        for item in value:
+            item_value = str(item).strip()
+            if item_value:
+                normalized.append(item_value)
+        return normalized
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    value_str = str(value).strip()
+    return [value_str] if value_str else []
+
+
+def _parse_list_value(raw: str) -> List[str]:
+    return _normalize_list(raw)
 
 
 def _validate_author_keys(authors: Optional[List[str]]) -> List[str]:
@@ -1283,6 +1404,14 @@ def _add_or_replace_tag(tags: List[tuple[str, str]], key: str, value: str) -> Li
     return filtered
 
 
+def _add_tag_value(tags: List[tuple[str, str]], key: str, value: str) -> List[tuple[str, str]]:
+    for existing_key, existing_value in tags:
+        if existing_key == key and existing_value == value:
+            return tags
+    tags.append((key, value))
+    return tags
+
+
 def _tags_from_payload(payload: dict) -> List[tuple[str, str]]:
     tags: List[tuple[str, str]] = []
     for tag in payload.get("tags", []):
@@ -1346,14 +1475,13 @@ def _nsr_tags_from_inputs(
     return tags
 
 
-def _payload_from_draft(kind: int, d: str, title: Optional[str], content: str, tags: List[tuple[str, str]], created_at: int) -> dict:
+def _json_tags_from_tuples(
+    kind: int,
+    d: str,
+    title: Optional[str],
+    tags: List[tuple[str, str]],
+) -> List[List[str]]:
     tag_map = _tags_to_map(tags)
-    payload = {
-        "kind": kind,
-        "created_at": created_at,
-        "tags": [],
-        "content": content,
-    }
     tags_list: List[List[str]] = []
     tags_list.append(["d", d])
     if kind == 30050:
@@ -1361,7 +1489,7 @@ def _payload_from_draft(kind: int, d: str, title: Optional[str], content: str, t
             tags_list.append(["title", title])
         published_at = tag_map.get("published_at", [None])[0]
         if published_at:
-            tags_list.append(["published_at", published_at])
+            tags_list.append(["published_at", str(published_at)])
         if "summary" in tag_map:
             tags_list.append(["summary", tag_map["summary"][0]])
         for topic in tag_map.get("t", []):
@@ -1391,7 +1519,25 @@ def _payload_from_draft(kind: int, d: str, title: Optional[str], content: str, t
             tags_list.append(["effective_at", tag_map["effective_at"][0]])
         if "eventid" in tag_map:
             tags_list.append(["eventid", tag_map["eventid"][0]])
-    payload["tags"] = tags_list
+    return tags_list
+
+
+def _event_tags_from_tuples(
+    kind: int,
+    d: str,
+    title: Optional[str],
+    tags: List[tuple[str, str]],
+) -> List[Tag]:
+    return [Tag.parse(tag) for tag in _json_tags_from_tuples(kind, d, title, tags)]
+
+
+def _payload_from_draft(kind: int, d: str, title: Optional[str], content: str, tags: List[tuple[str, str]], created_at: int) -> dict:
+    payload = {
+        "kind": kind,
+        "created_at": created_at,
+        "tags": _json_tags_from_tuples(kind, d, title, tags),
+        "content": content,
+    }
     return payload
 def _find_latest_draft(kind: int, identifier: str, cwd: str) -> Optional[tuple[str, dict]]:
     candidates: List[tuple[str, int]] = []
@@ -1510,12 +1656,13 @@ def _interactive_cli() -> None:
 
         if command == "/init-config":
             config_path = _default_config_path()
-            if _config_exists(config_path):
+            store = DraftStore(config_path)
+            if store.config_exists():
                 confirm = _prompt_value("Config exists. Reset? (y/n)", "n", required=False)
                 if not _is_truthy_response(confirm):
                     print("Config unchanged.")
                     continue
-            _write_config_db(config_path, _default_config())
+            store.save_config(_default_config())
             print(f"Initialized config in database at {config_path}")
             configure_now = _prompt_value("Configure now? (y/n)", "y", required=False)
             if _is_truthy_response(configure_now):
@@ -1525,10 +1672,11 @@ def _interactive_cli() -> None:
 
         if command == "/edit-config":
             config_path = _default_config_path()
-            if not _config_exists(config_path):
-                _write_config_db(config_path, _default_config())
+            store = DraftStore(config_path)
+            if not store.config_exists():
+                store.save_config(_default_config())
                 print(f"Initialized config in database at {config_path}")
-            config = _load_config_db(config_path) or _default_config()
+            config = store.load_config_or_default(_default_config())
             relays = _prompt_list("Relays", config.get("relays") if isinstance(config, dict) else None)
             privkey = _prompt_value(
                 "Privkey (nsec or hex, used for signing)",
@@ -1550,7 +1698,7 @@ def _interactive_cli() -> None:
             )
             lang = _prompt_value("Lang (optional)", tags.get("lang"), required=False)
             version = _prompt_value("Version (optional)", tags.get("version"), required=False)
-            supersedes = _prompt_value("Supersedes (optional)", tags.get("supersedes"), required=False)
+            supersedes = _prompt_value("Supersedes (event id, optional)", tags.get("supersedes"), required=False)
             license_id = _prompt_value("License (optional)", tags.get("license"), required=False)
             authors = _prompt_value(
                 "Authors (npub or hex pubkey; comma-separated, optional)",
@@ -1561,7 +1709,7 @@ def _interactive_cli() -> None:
             previous = _prompt_value("Previous (optional)", tags.get("previous"), required=False)
             reason = _prompt_value("Reason (optional)", tags.get("reason"), required=False)
             effective_at = _prompt_value("Effective at (optional)", tags.get("effective_at"), required=False)
-            authors_list = _parse_list_value(authors)
+            authors_list = _normalize_list(authors)
             if authors_list:
                 authors_list = _validate_author_keys(authors_list)
             updated = {
@@ -1569,10 +1717,10 @@ def _interactive_cli() -> None:
                 "relays": relays or [],
                 "tags": {
                     "summary": _normalize_optional_str(summary) or "",
-                    "topics": _parse_list_value(topics) or [],
+                    "topics": _normalize_list(topics),
                     "lang": _normalize_optional_str(lang) or "",
                     "version": _normalize_optional_str(version) or "",
-                    "supersedes": _parse_list_value(supersedes) or [],
+                    "supersedes": _normalize_list(supersedes),
                     "license": _normalize_optional_str(license_id) or "",
                     "authors": authors_list or [],
                     "steward": _normalize_optional_str(steward) or "",
@@ -1581,17 +1729,28 @@ def _interactive_cli() -> None:
                     "effective_at": _normalize_optional_str(effective_at) or "",
                 },
             }
-            _write_config_db(config_path, updated)
+            store.save_config(updated)
             print(f"Updated config in database at {config_path}")
             continue
 
         if command == "/create-ncc":
             default_path = _default_config_path()
             config_path = default_path
-            config = _load_config_db(config_path)
+            store = DraftStore(config_path)
+            config = store.load_config()
             config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
             d_value = _prompt_value("NCC number (e.g. 01)", required=True)
             d_value = _format_ncc_identifier(d_value)
+            collision = _find_ncc_collision(config_path, d_value)
+            if collision:
+                confirm = _prompt_value(
+                    f"NCC {d_value} already exists (draft #{collision['id']}). Continue? (y/n)",
+                    "n",
+                    required=False,
+                )
+                if not _is_truthy_response(confirm):
+                    print("Cancelled.")
+                    continue
             title_value = _prompt_value("Title", required=True)
             default_content_path = _default_ncc_content_path(d_value)
             content_path = _prompt_value("Content path", default_content_path, required=True)
@@ -1609,14 +1768,14 @@ def _interactive_cli() -> None:
             )
             lang = _prompt_value("Lang (optional)", config_tags.get("lang"), required=False)
             version = _prompt_value("Version (optional)", config_tags.get("version"), required=False)
-            supersedes = _prompt_value("Supersedes (optional)", config_tags.get("supersedes"), required=False)
+            supersedes = _prompt_value("Supersedes (event id, optional)", config_tags.get("supersedes"), required=False)
             license_id = _prompt_value("License (optional)", config_tags.get("license"), required=False)
             authors = _prompt_value(
                 "Authors (npub or hex pubkey; comma-separated, optional)",
                 _format_list_default(config_tags.get("authors")),
                 required=False,
             )
-            authors_list = _parse_list_value(authors) or config_tags.get("authors") or []
+            authors_list = _normalize_list(authors) or _normalize_list(config_tags.get("authors"))
             try:
                 authors_list = _validate_author_keys(authors_list)
             except ValueError as exc:
@@ -1625,23 +1784,20 @@ def _interactive_cli() -> None:
             content = content.replace("# Title", f"# {title_value}", 1)
             tags = _ncc_tags_from_inputs(
                 summary=_normalize_optional_str(summary) or config_tags.get("summary"),
-                topics=_parse_list_value(topics) or config_tags.get("topics") or [],
+                topics=_normalize_list(topics) or _normalize_list(config_tags.get("topics")),
                 lang=_normalize_optional_str(lang) or config_tags.get("lang"),
                 version=_normalize_optional_str(version) or config_tags.get("version"),
-                supersedes=_parse_list_value(supersedes) or config_tags.get("supersedes") or [],
+                supersedes=_normalize_list(supersedes) or _normalize_list(config_tags.get("supersedes")),
                 license_id=_normalize_optional_str(license_id) or config_tags.get("license"),
                 authors=authors_list,
             )
-            conn = _db_connect(config_path)
-            draft_id = _db_insert_draft(
-                conn,
+            draft_id = store.insert_draft(
                 kind=30050,
                 d=d_value,
                 title=title_value,
                 content=content,
                 tags=tags,
             )
-            conn.close()
             export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
             if export_path:
                 payload = _payload_from_draft(30050, d_value, title_value, content, tags, _now())
@@ -1657,10 +1813,11 @@ def _interactive_cli() -> None:
                 print("Cancelled.")
                 continue
             config_path = _default_config_path()
-            conn = _db_connect(config_path)
-            draft = _db_get_latest_draft(conn, 30050, d_value)
+            store = DraftStore(config_path)
+            draft = store.get_latest_draft(30050, d_value)
+            base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+            base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
             if not draft:
-                conn.close()
                 json_path = _prompt_value("Import JSON path (optional)", default=None, required=False)
                 if not json_path:
                     print("Cancelled.")
@@ -1669,21 +1826,19 @@ def _interactive_cli() -> None:
                 tags = _tags_from_payload(payload)
                 title_value = _extract_tag_value(payload.get("tags", []), "title")
                 content_seed = payload.get("content", "")
-                conn = _db_connect(config_path)
-                draft_id = _db_insert_draft(
-                    conn,
+                draft_id = store.insert_draft(
                     kind=30050,
                     d=d_value,
                     title=title_value,
                     content=content_seed,
                     tags=tags,
                 )
-                conn.close()
                 draft = {"id": draft_id, "title": title_value, "content": content_seed}
             else:
-                tags = _db_get_tags(conn, draft["id"])
-                conn.close()
+                tags = store.get_tags(draft["id"])
             tag_map = _tags_to_map(tags)
+            if base_is_published and base_event_id:
+                print(f"Note: editing a published NCC will create a new draft superseding event {base_event_id}.")
             title_value = _prompt_value("Title", draft["title"], required=True)
             default_content_path = _default_ncc_content_path(d_value)
             content_path = _prompt_value("Content path", default_content_path, required=True)
@@ -1697,7 +1852,7 @@ def _interactive_cli() -> None:
             lang = _prompt_value("Lang (optional)", tag_map.get("lang", [None])[0], required=False)
             version = _prompt_value("Version (optional)", tag_map.get("version", [None])[0], required=False)
             supersedes = _prompt_value(
-                "Supersedes (optional)",
+                "Supersedes (event id, optional)",
                 _format_list_default(tag_map.get("supersedes")),
                 required=False,
             )
@@ -1722,21 +1877,31 @@ def _interactive_cli() -> None:
                 license_id=_normalize_optional_str(license_id),
                 authors=authors_list,
             )
-            conn = _db_connect(config_path)
-            _db_update_draft(
-                conn,
-                draft_id=int(draft["id"]),
-                title=title_value,
-                content=content,
-                tags=tags,
-            )
-            conn.close()
+            if base_is_published and base_event_id:
+                tags = _add_tag_value(tags, "supersedes", f"event:{base_event_id}")
+                new_id = store.insert_draft(
+                    kind=30050,
+                    d=d_value,
+                    title=title_value,
+                    content=content,
+                    tags=tags,
+                )
+                draft = {"id": new_id, "title": title_value, "content": content}
+                print(f"Created new NCC draft (id {new_id}) superseding event {base_event_id}.")
+            else:
+                store.update_draft(
+                    draft_id=int(draft["id"]),
+                    title=title_value,
+                    content=content,
+                    tags=tags,
+                )
             export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
             if export_path:
                 payload = _payload_from_draft(30050, d_value, title_value, content, tags, _now())
                 _write_json(export_path, payload)
                 print(f"Wrote NCC draft JSON to {export_path}")
-            print("Updated NCC draft in database.")
+            if not base_is_published:
+                print("Updated NCC draft in database.")
             continue
 
         if command == "/revise-nsr":
@@ -1746,10 +1911,11 @@ def _interactive_cli() -> None:
                 print("Cancelled.")
                 continue
             config_path = _default_config_path()
-            conn = _db_connect(config_path)
-            draft = _db_get_latest_draft(conn, 30051, d_value)
+            store = DraftStore(config_path)
+            draft = store.get_latest_draft(30051, d_value)
+            base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+            base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
             if not draft:
-                conn.close()
                 json_path = _prompt_value("Import JSON path (optional)", default=None, required=False)
                 if not json_path:
                     print("Cancelled.")
@@ -1757,21 +1923,19 @@ def _interactive_cli() -> None:
                 payload = _load_json(json_path)
                 tags = _tags_from_payload(payload)
                 content_seed = payload.get("content", "")
-                conn = _db_connect(config_path)
-                draft_id = _db_insert_draft(
-                    conn,
+                draft_id = store.insert_draft(
                     kind=30051,
                     d=d_value,
                     title=None,
                     content=content_seed,
                     tags=tags,
                 )
-                conn.close()
                 draft = {"id": draft_id, "content": content_seed}
             else:
-                tags = _db_get_tags(conn, draft["id"])
-                conn.close()
+                tags = store.get_tags(draft["id"])
             tag_map = _tags_to_map(tags)
+            if base_is_published and base_event_id:
+                print(f"Note: editing a published NSR will create a new draft superseding event {base_event_id}.")
             authoritative_event = _prompt_value(
                 "Authoritative event id",
                 _strip_event_prefix(tag_map.get("authoritative", [None])[0]),
@@ -1803,30 +1967,44 @@ def _interactive_cli() -> None:
                 reason=_normalize_optional_str(reason),
                 effective_at=_normalize_optional_str(effective_at),
             )
-            conn = _db_connect(config_path)
-            _db_update_draft(
-                conn,
-                draft_id=int(draft["id"]),
-                title=None,
-                content=content,
-                tags=tags,
-            )
-            conn.close()
+            if base_is_published and base_event_id:
+                tags = _add_or_replace_tag(tags, "previous", f"event:{base_event_id}")
+                new_id = store.insert_draft(
+                    kind=30051,
+                    d=d_value,
+                    title=None,
+                    content=content,
+                    tags=tags,
+                )
+                draft = {"id": new_id, "content": content}
+                print(f"Created new NSR draft (id {new_id}) superseding event {base_event_id}.")
+            else:
+                store.update_draft(
+                    draft_id=int(draft["id"]),
+                    title=None,
+                    content=content,
+                    tags=tags,
+                )
             export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
             if export_path:
                 payload = _payload_from_draft(30051, d_value, None, content, tags, _now())
                 _write_json(export_path, payload)
                 print(f"Wrote succession record JSON to {export_path}")
-            print("Updated succession record in database.")
+            if not base_is_published:
+                print("Updated succession record in database.")
             continue
 
         if command == "/create-nsr":
             default_path = _default_config_path()
             config_path = default_path
-            config = _load_config_db(config_path)
+            store = DraftStore(config_path)
+            config = store.load_config()
             config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
             d_value = _prompt_value("NCC number (e.g. 01)", required=True)
             d_value = _format_ncc_identifier(d_value)
+            collision = _find_ncc_collision(config_path, d_value)
+            if collision:
+                print(f"Note: NCC {d_value} already exists (draft #{collision['id']}).")
             authoritative_event = _prompt_value("Authoritative event id", required=True)
             content_value = _prompt_value(
                 "Content",
@@ -1840,16 +2018,13 @@ def _interactive_cli() -> None:
                 reason=_normalize_optional_str(config_tags.get("reason")),
                 effective_at=_normalize_optional_str(config_tags.get("effective_at")),
             )
-            conn = _db_connect(config_path)
-            draft_id = _db_insert_draft(
-                conn,
+            draft_id = store.insert_draft(
                 kind=30051,
                 d=d_value,
                 title=None,
                 content=content_value,
                 tags=tags,
             )
-            conn.close()
             export_path = _prompt_value("Export JSON path (optional)", default=None, required=False)
             if export_path:
                 payload = _payload_from_draft(30051, d_value, None, content_value, tags, _now())
@@ -1861,6 +2036,7 @@ def _interactive_cli() -> None:
         if command in ("/list-ncc", "/list-nsr"):
             kind = 30050 if command == "/list-ncc" else 30051
             config_path = _default_config_path()
+            store = DraftStore(config_path)
             if kind == 30050:
                 fetch = _prompt_value("Fetch proposals from relays? (y/n)", "n", required=False)
                 if _is_truthy_response(fetch):
@@ -1869,17 +2045,15 @@ def _interactive_cli() -> None:
                         print(f"Fetched {added} proposal(s) from relays.")
                     except Exception as exc:
                         print(f"Relay fetch failed: {exc}")
-            conn = _db_connect(config_path)
-            rows = _db_list_drafts(conn, kind)
+            rows = store.list_drafts(kind)
             label = "NCC drafts" if kind == 30050 else "NSR drafts"
             print(f"{label}:")
             if not rows:
-                conn.close()
                 print("  (none)")
                 continue
             pubkey_hex = None
             if kind == 30050:
-                config = _load_config_db(config_path)
+                config = store.load_config()
                 privkey = config.get("privkey") if isinstance(config, dict) else None
                 if privkey:
                     try:
@@ -1894,7 +2068,7 @@ def _interactive_cli() -> None:
                 published_at = _format_ts(row["published_at"])
                 event_id = row["event_id"] or "-"
                 if kind == 30050:
-                    tags = _db_get_tags(conn, row["id"])
+                    tags = store.get_tags(row["id"])
                     labels = _classify_ncc_row(
                         row,
                         tags,
@@ -1910,16 +2084,15 @@ def _interactive_cli() -> None:
                     print(
                         f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
                     )
-            conn.close()
             continue
 
         if command in ("/publish-ncc", "/publish-nsr"):
             kind = 30050 if command == "/publish-ncc" else 30051
             config_path = _default_config_path()
-            config = _load_config_db(config_path)
-            conn = _db_connect(config_path)
-            unpublished = _db_list_unpublished_drafts(conn, kind)
-            conn.close()
+            store = DraftStore(config_path)
+            service = PublishService(config_path)
+            config = store.load_config()
+            unpublished = store.list_unpublished_drafts(kind)
             label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
             print(f"{label}:")
             if not unpublished:
@@ -1930,12 +2103,9 @@ def _interactive_cli() -> None:
             selection = _prompt_value("Draft id or NCC number (e.g. 01)", required=True)
             draft = None
             if selection.isdigit():
-                conn = _db_connect(config_path)
-                draft = conn.execute(
-                    "select * from drafts where id = ? and kind = ?",
-                    (int(selection), kind),
-                ).fetchone()
-                conn.close()
+                draft = store.get_draft(int(selection))
+                if draft and draft["kind"] != kind:
+                    draft = None
                 if not draft:
                     print("Draft id not found.")
                     continue
@@ -1957,9 +2127,7 @@ def _interactive_cli() -> None:
             keys = Keys.parse(privkey)
             succession_info: Optional[tuple[str, Optional[str], Optional[str]]] = None
             if draft is None:
-                conn = _db_connect(config_path)
-                draft = _db_get_latest_draft(conn, kind, d_value)
-                conn.close()
+                draft = store.get_latest_draft(kind, d_value)
             if not draft:
                 json_path = _prompt_value("JSON path (optional)", default=None, required=False)
                 if not json_path:
@@ -1979,9 +2147,9 @@ def _interactive_cli() -> None:
                 print("Publishing event...")
                 try:
                     with _PUBLISH_LOCK:
-                        event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
+                        event_id = service.publish_json(json_path, relays=relays, keys=keys)
                 except Exception as exc:
-                    _enqueue_publish_task(
+                    service.enqueue_task(
                         {
                             "type": "json",
                             "config_path": config_path,
@@ -2001,9 +2169,7 @@ def _interactive_cli() -> None:
                         succession_event_id=event_id,
                     )
                 continue
-            conn = _db_connect(config_path)
-            tags = _db_get_tags(conn, draft["id"])
-            conn.close()
+            tags = store.get_tags(draft["id"])
             if kind == 30051:
                 authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
                 try:
@@ -2018,9 +2184,9 @@ def _interactive_cli() -> None:
             print("Publishing event...")
             try:
                 with _PUBLISH_LOCK:
-                    event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
+                    event_id = service.publish_payload(payload, relays=relays, keys=keys)
             except Exception as exc:
-                _enqueue_publish_task(
+                service.enqueue_task(
                     {
                         "type": "draft",
                         "config_path": config_path,
@@ -2043,9 +2209,7 @@ def _interactive_cli() -> None:
             tags = _add_or_replace_tag(tags, "eventid", event_id)
             if published_at is not None:
                 tags = _add_or_replace_tag(tags, "published_at", str(published_at))
-            conn = _db_connect(config_path)
-            _db_update_draft(
-                conn,
+            store.update_draft(
                 draft_id=int(draft["id"]),
                 title=draft["title"],
                 content=draft["content"],
@@ -2056,16 +2220,15 @@ def _interactive_cli() -> None:
                 source="local",
                 author_pubkey=keys.public_key().to_hex(),
             )
-            conn.close()
             continue
 
         if command in ("/verify-ncc", "/verify-nsr"):
             kind = 30050 if command == "/verify-ncc" else 30051
             config_path = _default_config_path()
-            config = _load_config_db(config_path)
-            conn = _db_connect(config_path)
-            published = _db_list_published_drafts(conn, kind)
-            conn.close()
+            store = DraftStore(config_path)
+            service = PublishService(config_path)
+            config = store.load_config()
+            published = store.list_published_drafts(kind)
             label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
             print(f"{label}:")
             if not published:
@@ -2076,20 +2239,15 @@ def _interactive_cli() -> None:
             selection = _prompt_value("Draft id or NCC number (e.g. 01)", required=True)
             draft = None
             if selection.isdigit():
-                conn = _db_connect(config_path)
-                draft = conn.execute(
-                    "select * from drafts where id = ? and kind = ?",
-                    (int(selection), kind),
-                ).fetchone()
-                conn.close()
+                draft = store.get_draft(int(selection))
+                if draft and draft["kind"] != kind:
+                    draft = None
             else:
                 identifier = _format_ncc_identifier(selection)
                 if not identifier:
                     print("Cancelled.")
                     continue
-                conn = _db_connect(config_path)
-                draft = _db_get_latest_draft(conn, kind, identifier)
-                conn.close()
+                draft = store.get_latest_draft(kind, identifier)
             if not draft:
                 print("Draft not found.")
                 continue
@@ -2106,7 +2264,7 @@ def _interactive_cli() -> None:
                 continue
             print("Checking event on relays...")
             try:
-                found = _verify_event_on_relays(event_id, relays)
+                found = service.verify_event(event_id, relays)
             except Exception as exc:
                 print(f"Verification failed: {exc}")
                 continue
@@ -2118,7 +2276,7 @@ def _interactive_cli() -> None:
 
         if command == "/add-relay":
             config_path = _default_config_path()
-            config = _load_config_db(config_path) or _default_config()
+            config = _load_config_or_default(config_path, _default_config())
             relays = config.get("relays") if isinstance(config, dict) else []
             relays = list(relays or [])
             relay = _prompt_value("Relay url (wss://...)", required=True)
@@ -2136,7 +2294,7 @@ def _interactive_cli() -> None:
 
         if command == "/remove-relay":
             config_path = _default_config_path()
-            config = _load_config_db(config_path) or _default_config()
+            config = _load_config_or_default(config_path, _default_config())
             relays = config.get("relays") if isinstance(config, dict) else []
             relays = list(relays or [])
             if not relays:
@@ -2317,10 +2475,9 @@ def _interactive_tui() -> None:
                 return
             kind = 30050 if flow.get("mode") == "revise-ncc" else 30051
             config_path = _default_config_path()
-            conn = _db_connect(config_path)
-            draft = _db_get_latest_draft(conn, kind, identifier)
+            store = DraftStore(config_path)
+            draft = store.get_latest_draft(kind, identifier)
             if not draft:
-                conn.close()
                 flow["steps"] = [
                     {
                         "key": "json_path",
@@ -2336,8 +2493,7 @@ def _interactive_tui() -> None:
                 set_input_placeholder(step.get("default"))
                 append_line(format_prompt(step["label"], step.get("default")))
                 return
-            tags = _db_get_tags(conn, draft["id"])
-            conn.close()
+            tags = store.get_tags(draft["id"])
             tag_map = _tags_to_map(tags)
             if kind == 30050:
                 steps = [
@@ -2365,7 +2521,7 @@ def _interactive_tui() -> None:
                     },
                     {
                         "key": "supersedes",
-                        "label": "Supersedes (optional)",
+                        "label": "Supersedes (event id, optional)",
                         "default": _format_list_default(tag_map.get("supersedes")),
                         "required": False,
                     },
@@ -2445,15 +2601,13 @@ def _interactive_tui() -> None:
         if flow.get("mode") in ("publish-ncc", "publish-nsr") and step.get("key") == "d":
             kind = 30050 if flow.get("mode") == "publish-ncc" else 30051
             config_path = _default_config_path()
+            store = DraftStore(config_path)
             draft = None
             identifier = ""
             if value.isdigit():
-                conn = _db_connect(config_path)
-                draft = conn.execute(
-                    "select * from drafts where id = ? and kind = ?",
-                    (int(value), kind),
-                ).fetchone()
-                conn.close()
+                draft = store.get_draft(int(value))
+                if draft and draft["kind"] != kind:
+                    draft = None
                 if not draft:
                     append_line("Error: draft id not found.")
                     append_line(format_prompt(step["label"], step.get("default")))
@@ -2469,9 +2623,7 @@ def _interactive_tui() -> None:
                     set_completer(True)
                     set_input_placeholder(None)
                     return
-                conn = _db_connect(config_path)
-                draft = _db_get_latest_draft(conn, kind, identifier)
-                conn.close()
+                draft = store.get_latest_draft(kind, identifier)
             if not draft:
                 flow["steps"] = [
                     {
@@ -2489,7 +2641,7 @@ def _interactive_tui() -> None:
                 set_input_placeholder(step.get("default"))
                 append_line(format_prompt(step["label"], step.get("default")))
                 return
-            config_defaults = _load_config_db(config_path)
+            config_defaults = store.load_config()
             restart_flow(
                 [
                     {
@@ -2529,16 +2681,14 @@ def _interactive_tui() -> None:
                 title = _extract_tag_value(payload.get("tags", []), "title")
             content = payload.get("content", "") if isinstance(payload, dict) else ""
             config_path = flow["answers"].get("config_path") or _default_config_path()
-            conn = _db_connect(config_path)
-            draft_id = _db_insert_draft(
-                conn,
+            store = DraftStore(config_path)
+            draft_id = store.insert_draft(
                 kind=kind,
                 d=identifier,
                 title=title,
                 content=content,
                 tags=tags,
             )
-            conn.close()
             tag_map = _tags_to_map(tags)
             if kind == 30050:
                 steps = [
@@ -2566,7 +2716,7 @@ def _interactive_tui() -> None:
                     },
                     {
                         "key": "supersedes",
-                        "label": "Supersedes (optional)",
+                        "label": "Supersedes (event id, optional)",
                         "default": _format_list_default(tag_map.get("supersedes")),
                         "required": False,
                     },
@@ -2679,17 +2829,24 @@ def _interactive_tui() -> None:
             return
         if flow.get("mode") in ("create-ncc", "create-nsr") and step.get("key") == "d":
             value = _format_ncc_identifier(value)
+            config_path = _default_config_path()
+            collision = _find_ncc_collision(config_path, value)
+            if collision:
+                if flow.get("mode") == "create-ncc":
+                    append_line(f"Error: NCC {value} already exists (draft #{collision['id']}).")
+                    append_line(format_prompt(step["label"], default))
+                    return
+                append_line(f"Note: NCC {value} already exists (draft #{collision['id']}).")
         if step.get("key") == "content_path":
             content_path = value
             seed = flow["answers"].get("content_seed")
             if seed is None:
                 draft_id = flow["answers"].get("draft_id")
                 if draft_id:
-                    conn = _db_connect(flow["answers"].get("config_path"))
-                    row = conn.execute("select content from drafts where id = ?", (int(draft_id),)).fetchone()
-                    conn.close()
-                    if row and row["content"] is not None:
-                        seed = row["content"]
+                    store = DraftStore(flow["answers"].get("config_path"))
+                    draft = store.get_draft(int(draft_id))
+                    if draft and draft["content"] is not None:
+                        seed = draft["content"]
                         flow["answers"]["content_seed"] = seed
             if seed is not None:
                 _write_text_file(content_path, seed)
@@ -2860,7 +3017,7 @@ def _interactive_tui() -> None:
             if not _config_exists(config_path):
                 _write_config_db(config_path, _default_config())
                 append_line(f"Initialized config in database at {config_path}")
-            config = _load_config_db(config_path) or _default_config()
+            config = _load_config_or_default(config_path, _default_config())
             config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
             steps = [
                 {
@@ -2886,7 +3043,7 @@ def _interactive_tui() -> None:
                 {"key": "version", "label": "Version (optional)", "default": config_tags.get("version"), "required": False},
                 {
                     "key": "supersedes",
-                    "label": "Supersedes (optional)",
+                    "label": "Supersedes (event id, optional)",
                     "default": _format_list_default(config_tags.get("supersedes")),
                     "required": False,
                 },
@@ -2911,7 +3068,7 @@ def _interactive_tui() -> None:
                     except Exception:
                         append_line("Error: privkey must be nsec or hex.")
                         return
-                authors = _parse_list_value(answers.get("authors") or "")
+                authors = _normalize_list(answers.get("authors"))
                 if authors:
                     try:
                         authors = _validate_author_keys(authors)
@@ -2920,13 +3077,13 @@ def _interactive_tui() -> None:
                         return
                 updated = {
                     "privkey": privkey,
-                    "relays": _parse_list_value(answers.get("relays") or ""),
+                    "relays": _normalize_list(answers.get("relays")),
                     "tags": {
                         "summary": _normalize_optional_str(answers.get("summary")) or "",
-                        "topics": _parse_list_value(answers.get("topics") or ""),
+                        "topics": _normalize_list(answers.get("topics")),
                         "lang": _normalize_optional_str(answers.get("lang")) or "",
                         "version": _normalize_optional_str(answers.get("version")) or "",
-                        "supersedes": _parse_list_value(answers.get("supersedes") or ""),
+                        "supersedes": _normalize_list(answers.get("supersedes")),
                         "license": _normalize_optional_str(answers.get("license")) or "",
                         "authors": authors or [],
                         "steward": _normalize_optional_str(answers.get("steward")) or "",
@@ -2944,7 +3101,8 @@ def _interactive_tui() -> None:
         if command == "/create-ncc":
             def _complete_create_ncc(answers: dict) -> None:
                 config_path = _default_config_path()
-                config = _load_config_db(config_path)
+                store = DraftStore(config_path)
+                config = store.load_config()
                 config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
                 content_path = answers.get("content_path")
                 if content_path and os.path.exists(content_path):
@@ -2977,16 +3135,13 @@ def _interactive_tui() -> None:
                     license_id=license_id,
                     authors=authors or [],
                 )
-                conn = _db_connect(config_path)
-                draft_id = _db_insert_draft(
-                    conn,
+                draft_id = store.insert_draft(
                     kind=30050,
                     d=answers["d"],
                     title=answers["title"],
                     content=content,
                     tags=tags,
                 )
-                conn.close()
                 export_path = _normalize_optional_str(answers.get("out_path"))
                 if export_path:
                     payload = _payload_from_draft(
@@ -3002,7 +3157,7 @@ def _interactive_tui() -> None:
                 append_line(f"Saved NCC draft to database (id {draft_id}).")
 
             default_path = _default_config_path()
-            config = _load_config_db(default_path)
+            config = DraftStore(default_path).load_config()
             config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
             steps = [
                 {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
@@ -3023,7 +3178,7 @@ def _interactive_tui() -> None:
                     {"key": "version", "label": "Version (optional)", "default": config_tags.get("version"), "required": False},
                     {
                         "key": "supersedes",
-                        "label": "Supersedes (optional)",
+                        "label": "Supersedes (event id, optional)",
                         "default": config_tags.get("supersedes"),
                         "required": False,
                     },
@@ -3063,21 +3218,35 @@ def _interactive_tui() -> None:
                     license_id=_normalize_optional_str(answers.get("license")),
                     authors=authors,
                 )
-                conn = _db_connect(answers.get("config_path") or _default_config_path())
-                _db_update_draft(
-                    conn,
-                    draft_id=int(answers["draft_id"]),
-                    title=answers["title"],
-                    content=content,
-                    tags=tags,
-                )
-                conn.close()
+                store = DraftStore(answers.get("config_path") or _default_config_path())
+                draft = store.get_draft(int(answers["draft_id"]))
+                base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+                base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
+                if base_is_published and base_event_id:
+                    tags = _add_tag_value(tags, "supersedes", f"event:{base_event_id}")
+                if base_is_published:
+                    new_id = store.insert_draft(
+                        kind=30050,
+                        d=answers["d"],
+                        title=answers["title"],
+                        content=content,
+                        tags=tags,
+                    )
+                    append_line(f"Created new NCC draft (id {new_id}) superseding event {base_event_id}.")
+                else:
+                    store.update_draft(
+                        draft_id=int(answers["draft_id"]),
+                        title=answers["title"],
+                        content=content,
+                        tags=tags,
+                    )
                 export_path = _normalize_optional_str(answers.get("out_path"))
                 if export_path:
                     payload = _payload_from_draft(30050, answers["d"], answers["title"], content, tags, _now())
                     _write_json(export_path, payload)
                     append_line(f"Wrote NCC draft JSON to {export_path}")
-                append_line("Updated NCC draft in database.")
+                if not base_is_published:
+                    append_line("Updated NCC draft in database.")
             steps = [
                 {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
             ]
@@ -3099,21 +3268,35 @@ def _interactive_tui() -> None:
                     reason=_normalize_optional_str(answers.get("reason")),
                     effective_at=_normalize_optional_str(answers.get("effective_at")),
                 )
-                conn = _db_connect(answers.get("config_path") or _default_config_path())
-                _db_update_draft(
-                    conn,
-                    draft_id=int(answers["draft_id"]),
-                    title=None,
-                    content=content,
-                    tags=tags,
-                )
-                conn.close()
+                store = DraftStore(answers.get("config_path") or _default_config_path())
+                draft = store.get_draft(int(answers["draft_id"]))
+                base_event_id = draft["event_id"] if draft and draft["event_id"] else None
+                base_is_published = bool(draft and (draft["status"] == "published" or base_event_id))
+                if base_is_published and base_event_id:
+                    tags = _add_or_replace_tag(tags, "previous", f"event:{base_event_id}")
+                if base_is_published:
+                    new_id = store.insert_draft(
+                        kind=30051,
+                        d=answers["d"],
+                        title=None,
+                        content=content,
+                        tags=tags,
+                    )
+                    append_line(f"Created new NSR draft (id {new_id}) superseding event {base_event_id}.")
+                else:
+                    store.update_draft(
+                        draft_id=int(answers["draft_id"]),
+                        title=None,
+                        content=content,
+                        tags=tags,
+                    )
                 export_path = _normalize_optional_str(answers.get("out_path"))
                 if export_path:
                     payload = _payload_from_draft(30051, answers["d"], None, content, tags, _now())
                     _write_json(export_path, payload)
                     append_line(f"Wrote succession record JSON to {export_path}")
-                append_line("Updated succession record in database.")
+                if not base_is_published:
+                    append_line("Updated succession record in database.")
             steps = [
                 {"key": "d", "label": "NCC number (e.g. 01)", "default": None, "required": True},
             ]
@@ -3124,7 +3307,8 @@ def _interactive_tui() -> None:
         if command == "/create-nsr":
             def _complete_create_nsr(answers: dict) -> None:
                 config_path = _default_config_path()
-                config = _load_config_db(config_path)
+                store = DraftStore(config_path)
+                config = store.load_config()
                 config_tags = config.get("tags", {}) if isinstance(config, dict) else {}
                 content = answers.get("content") or "Steward acknowledges updated NCC document."
                 tags = _nsr_tags_from_inputs(
@@ -3134,16 +3318,13 @@ def _interactive_tui() -> None:
                     reason=_normalize_optional_str(config_tags.get("reason")),
                     effective_at=_normalize_optional_str(config_tags.get("effective_at")),
                 )
-                conn = _db_connect(config_path)
-                draft_id = _db_insert_draft(
-                    conn,
+                draft_id = store.insert_draft(
                     kind=30051,
                     d=answers["d"],
                     title=None,
                     content=content,
                     tags=tags,
                 )
-                conn.close()
                 export_path = _normalize_optional_str(answers.get("out_path"))
                 if export_path:
                     payload = _payload_from_draft(30051, answers["d"], None, content, tags, _now())
@@ -3170,17 +3351,16 @@ def _interactive_tui() -> None:
             kind = 30050 if command == "/list-ncc" else 30051
             config_path = _default_config_path()
             def _render_list() -> None:
-                conn = _db_connect(config_path)
-                rows = _db_list_drafts(conn, kind)
+                store = DraftStore(config_path)
+                rows = store.list_drafts(kind)
                 label = "NCC drafts" if kind == 30050 else "NSR drafts"
                 append_line(f"{label}:")
                 if not rows:
-                    conn.close()
                     append_line("  (none)")
                     return
                 pubkey_hex = None
                 if kind == 30050:
-                    config = _load_config_db(config_path)
+                    config = store.load_config()
                     privkey = config.get("privkey") if isinstance(config, dict) else None
                     if privkey:
                         try:
@@ -3195,7 +3375,7 @@ def _interactive_tui() -> None:
                     published_at = _format_ts(row["published_at"])
                     event_id = row["event_id"] or "-"
                     if kind == 30050:
-                        tags = _db_get_tags(conn, row["id"])
+                        tags = store.get_tags(row["id"])
                         labels = _classify_ncc_row(
                             row,
                             tags,
@@ -3211,7 +3391,6 @@ def _interactive_tui() -> None:
                         append_line(
                             f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
                         )
-                conn.close()
 
             if kind == 30050:
                 def _complete_fetch(answers: dict) -> None:
@@ -3241,7 +3420,9 @@ def _interactive_tui() -> None:
         if command in ("/publish-ncc", "/publish-nsr"):
             def _complete_publish_latest(answers: dict) -> None:
                 config_path = _default_config_path()
-                config = _load_config_db(config_path)
+                store = DraftStore(config_path)
+                service = PublishService(config_path)
+                config = store.load_config()
                 relays = _parse_list_value(answers["relays"])
                 if not relays and isinstance(config, dict):
                     relays = config.get("relays", []) or []
@@ -3255,9 +3436,7 @@ def _interactive_tui() -> None:
                 draft_id = answers.get("draft_id")
                 if draft_id:
                     if kind == 30051:
-                        conn = _db_connect(config_path)
-                        tags = _db_get_tags(conn, int(draft_id))
-                        conn.close()
+                        tags = store.get_tags(int(draft_id))
                         authoritative, previous, steward = _extract_succession_fields_from_tags(tags)
                         try:
                             succession_info = _validate_succession_fields(authoritative, previous, steward)
@@ -3270,9 +3449,9 @@ def _interactive_tui() -> None:
                     append_line("Publishing event...")
                     try:
                         with _PUBLISH_LOCK:
-                            event_id = _attempt_publish_draft(config_path, int(draft_id), relays=relays, keys=keys)
+                            event_id = service.publish_draft(int(draft_id), relays=relays, keys=keys)
                     except Exception as exc:
-                        _enqueue_publish_task(
+                        service.enqueue_task(
                             {
                                 "type": "draft",
                                 "config_path": config_path,
@@ -3309,9 +3488,9 @@ def _interactive_tui() -> None:
                 append_line("Publishing event...")
                 try:
                     with _PUBLISH_LOCK:
-                        event_id = _attempt_publish_json(json_path, relays=relays, keys=keys)
+                        event_id = service.publish_json(json_path, relays=relays, keys=keys)
                 except Exception as exc:
-                    _enqueue_publish_task(
+                    service.enqueue_task(
                         {
                             "type": "json",
                             "config_path": config_path,
@@ -3332,9 +3511,8 @@ def _interactive_tui() -> None:
                     )
 
             kind = 30050 if command == "/publish-ncc" else 30051
-            conn = _db_connect(_default_config_path())
-            unpublished = _db_list_unpublished_drafts(conn, kind)
-            conn.close()
+            store = DraftStore(_default_config_path())
+            unpublished = store.list_unpublished_drafts(kind)
             label = "Unpublished NCC drafts" if kind == 30050 else "Unpublished NSR drafts"
             append_line(f"{label}:")
             if not unpublished:
@@ -3365,10 +3543,9 @@ def _interactive_tui() -> None:
         if command in ("/verify-ncc", "/verify-nsr"):
             kind = 30050 if command == "/verify-ncc" else 30051
             config_path = _default_config_path()
-            config = _load_config_db(config_path)
-            conn = _db_connect(config_path)
-            published = _db_list_published_drafts(conn, kind)
-            conn.close()
+            store = DraftStore(config_path)
+            config = store.load_config()
+            published = store.list_published_drafts(kind)
             label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
             append_line(f"{label}:")
             if not published:
@@ -3390,20 +3567,17 @@ def _interactive_tui() -> None:
 
             def _complete_verify(answers: dict) -> None:
                 selection = answers.get("selection") or ""
+                store = DraftStore(config_path)
+                service = PublishService(config_path)
                 draft = None
                 if selection.isdigit():
-                    conn = _db_connect(config_path)
-                    draft = conn.execute(
-                        "select * from drafts where id = ? and kind = ?",
-                        (int(selection), kind),
-                    ).fetchone()
-                    conn.close()
+                    draft = store.get_draft(int(selection))
+                    if draft and draft["kind"] != kind:
+                        draft = None
                 else:
                     identifier = _format_ncc_identifier(selection)
                     if identifier:
-                        conn = _db_connect(config_path)
-                        draft = _db_get_latest_draft(conn, kind, identifier)
-                        conn.close()
+                        draft = store.get_latest_draft(kind, identifier)
                 if not draft:
                     append_line("Error: draft not found.")
                     return
@@ -3419,7 +3593,7 @@ def _interactive_tui() -> None:
                     return
                 append_line("Checking event on relays...")
                 try:
-                    found = _verify_event_on_relays(event_id, relays)
+                    found = service.verify_event(event_id, relays)
                 except Exception as exc:
                     append_line(f"Verification failed: {exc}")
                     return
@@ -3428,7 +3602,7 @@ def _interactive_tui() -> None:
                 else:
                     append_line(f"Event not found on relays: {event_id}")
 
-            config_defaults = _load_config_db(config_path)
+            config_defaults = DraftStore(config_path).load_config()
             flow["mode"] = "verify-ncc" if command == "/verify-ncc" else "verify-nsr"
             start_flow(
                 [
@@ -3446,7 +3620,7 @@ def _interactive_tui() -> None:
 
         if command == "/add-relay":
             config_path = _default_config_path()
-            config = _load_config_db(config_path) or _default_config()
+            config = _load_config_or_default(config_path, _default_config())
             relays = config.get("relays") if isinstance(config, dict) else []
             relays = list(relays or [])
 
@@ -3476,7 +3650,7 @@ def _interactive_tui() -> None:
 
         if command == "/remove-relay":
             config_path = _default_config_path()
-            config = _load_config_db(config_path) or _default_config()
+            config = _load_config_or_default(config_path, _default_config())
             relays = config.get("relays") if isinstance(config, dict) else []
             relays = list(relays or [])
             append_line("Configured relays:")
@@ -3650,18 +3824,6 @@ def _interactive() -> None:
     _interactive_tui()
 
 
-def _add_tag(tags: List[Tag], key: str, value: Optional[str]) -> None:
-    if value:
-        tags.append(Tag.parse([key, value]))
-
-
-def _add_tag_many(tags: List[Tag], key: str, values: Optional[List[str]]) -> None:
-    if not values:
-        return
-    for value in values:
-        tags.append(Tag.parse([key, value]))
-
-
 def _set_builder_created_at(builder: EventBuilder, created_at: Optional[int]) -> EventBuilder:
     if created_at is None:
         return builder
@@ -3679,18 +3841,6 @@ def _merge_optional_list(value: Optional[List[str]], fallback: Optional[List[str
     if value is not None and len(value) > 0:
         return value
     return fallback
-
-
-def _add_json_tag(tags: List[List[str]], key: str, value: Optional[str]) -> None:
-    if value:
-        tags.append([key, value])
-
-
-def _add_json_tag_many(tags: List[List[str]], key: str, values: Optional[List[str]]) -> None:
-    if not values:
-        return
-    for value in values:
-        tags.append([key, value])
 
 
 def _ncc_template_content() -> str:
@@ -3741,22 +3891,21 @@ def build_document_json(
     license_id: Optional[str],
     authors: Optional[List[str]],
 ) -> dict:
-    tags: List[List[str]] = []
-    tags.append(["d", d])
-    tags.append(["title", title])
-    tags.append(["published_at", str(published_at)])
-    _add_json_tag(tags, "summary", summary)
-    _add_json_tag_many(tags, "t", topics)
-    _add_json_tag(tags, "lang", lang)
-    _add_json_tag(tags, "version", version)
-    _add_json_tag_many(tags, "supersedes", supersedes)
-    _add_json_tag(tags, "license", license_id)
-    _add_json_tag_many(tags, "authors", authors)
+    tags = _ncc_tags_from_inputs(
+        summary=summary,
+        topics=topics or [],
+        lang=lang,
+        version=version,
+        supersedes=supersedes or [],
+        license_id=license_id,
+        authors=authors or [],
+        published_at=published_at,
+    )
 
     return {
         "kind": 30050,
         "created_at": published_at,
-        "tags": tags,
+        "tags": _json_tags_from_tuples(30050, d, title, tags),
         "content": content,
     }
 
@@ -3772,18 +3921,18 @@ def build_succession_json(
     reason: Optional[str],
     effective_at: Optional[int],
 ) -> dict:
-    tags: List[List[str]] = []
-    tags.append(["d", d])
-    tags.append(["authoritative", f"event:{authoritative_event}"])
-    _add_json_tag(tags, "steward", steward)
-    _add_json_tag(tags, "previous", f"event:{previous}" if previous else None)
-    _add_json_tag(tags, "reason", reason)
-    _add_json_tag(tags, "effective_at", str(effective_at) if effective_at else None)
+    tags = _nsr_tags_from_inputs(
+        authoritative_event=authoritative_event,
+        steward=steward,
+        previous=previous,
+        reason=reason,
+        effective_at=str(effective_at) if effective_at else None,
+    )
 
     return {
         "kind": 30051,
         "created_at": created_at,
-        "tags": tags,
+        "tags": _json_tags_from_tuples(30051, d, None, tags),
         "content": content,
     }
 
@@ -3802,19 +3951,18 @@ def build_document_event(
     license_id: Optional[str],
     authors: Optional[List[str]],
 ) -> EventBuilder:
-    tags: List[Tag] = []
-    tags.append(Tag.parse(["d", d]))
-    tags.append(Tag.parse(["title", title]))
-    tags.append(Tag.parse(["published_at", str(published_at)]))
-    _add_tag(tags, "summary", summary)
-    _add_tag_many(tags, "t", topics)
-    _add_tag(tags, "lang", lang)
-    _add_tag(tags, "version", version)
-    _add_tag_many(tags, "supersedes", supersedes)
-    _add_tag(tags, "license", license_id)
-    _add_tag_many(tags, "authors", authors)
+    tags = _ncc_tags_from_inputs(
+        summary=summary,
+        topics=topics or [],
+        lang=lang,
+        version=version,
+        supersedes=supersedes or [],
+        license_id=license_id,
+        authors=authors or [],
+        published_at=published_at,
+    )
 
-    builder = EventBuilder(Kind(30050), content).tags(tags)
+    builder = EventBuilder(Kind(30050), content).tags(_event_tags_from_tuples(30050, d, title, tags))
     return _set_builder_created_at(builder, published_at)
 
 
@@ -3829,15 +3977,15 @@ def build_succession_event(
     reason: Optional[str],
     effective_at: Optional[int],
 ) -> EventBuilder:
-    tags: List[Tag] = []
-    tags.append(Tag.parse(["d", d]))
-    tags.append(Tag.parse(["authoritative", f"event:{authoritative_event}"]))
-    _add_tag(tags, "steward", steward)
-    _add_tag(tags, "previous", f"event:{previous}" if previous else None)
-    _add_tag(tags, "reason", reason)
-    _add_tag(tags, "effective_at", str(effective_at) if effective_at else None)
+    tags = _nsr_tags_from_inputs(
+        authoritative_event=authoritative_event,
+        steward=steward,
+        previous=previous,
+        reason=reason,
+        effective_at=str(effective_at) if effective_at else None,
+    )
 
-    builder = EventBuilder(Kind(30051), content).tags(tags)
+    builder = EventBuilder(Kind(30051), content).tags(_event_tags_from_tuples(30051, d, None, tags))
     return _set_builder_created_at(builder, created_at)
 
 
@@ -3955,7 +4103,7 @@ def main() -> None:
     if args.command == "edit-config":
         if not _load_config_db(args.config):
             _write_config_db(args.config, _default_config())
-        config = _load_config_db(args.config) or _default_config()
+            config = _load_config_or_default(args.config, _default_config())
         relays = _prompt_list("Relays", config.get("relays") if isinstance(config, dict) else None)
         privkey = _prompt_value(
             "Privkey (nsec or hex, used for signing)",
@@ -3976,7 +4124,7 @@ def main() -> None:
         )
         lang = _prompt_value("Lang (optional)", tags.get("lang"), required=False)
         version = _prompt_value("Version (optional)", tags.get("version"), required=False)
-        supersedes = _prompt_value("Supersedes (optional)", tags.get("supersedes"), required=False)
+        supersedes = _prompt_value("Supersedes (event id, optional)", tags.get("supersedes"), required=False)
         license_id = _prompt_value("License (optional)", tags.get("license"), required=False)
         authors = _prompt_value(
             "Authors (npub or hex pubkey; comma-separated, optional)",
@@ -4021,6 +4169,9 @@ def main() -> None:
         d_value = _format_ncc_identifier(d_value)
         if not d_value:
             raise SystemExit("NCC identifier is required")
+        collision = _find_ncc_collision(args.config, d_value)
+        if collision:
+            raise SystemExit(f"NCC {d_value} already exists (draft #{collision['id']}).")
         title_value = input("Title: ").strip()
         if not title_value:
             raise SystemExit("Title is required")
@@ -4037,7 +4188,7 @@ def main() -> None:
         topics = input(f"Topics (comma-separated, optional) [{topics_default}]: ").strip()
         lang = input(f"Lang (optional) [{config_tags.get('lang') or ''}]: ").strip()
         version = input(f"Version (optional) [{config_tags.get('version') or ''}]: ").strip()
-        supersedes = input(f"Supersedes (optional) [{config_tags.get('supersedes') or ''}]: ").strip()
+        supersedes = input(f"Supersedes (event id, optional) [{config_tags.get('supersedes') or ''}]: ").strip()
         license_id = input(f"License (optional) [{config_tags.get('license') or ''}]: ").strip()
         authors_default = _format_list_default(config_tags.get("authors")) or ""
         authors = input(f"Authors (npub or hex pubkey; comma-separated, optional) [{authors_default}]: ").strip()
@@ -4056,16 +4207,14 @@ def main() -> None:
             license_id=_normalize_optional_str(license_id) or config_tags.get("license"),
             authors=authors_list,
         )
-        conn = _db_connect(args.config)
-        draft_id = _db_insert_draft(
-            conn,
+        store = DraftStore(args.config)
+        draft_id = store.insert_draft(
             kind=30050,
             d=d_value,
             title=title_value,
             content=content,
             tags=tags,
         )
-        conn.close()
         export_path = args.out or input("Export JSON path (optional): ").strip() or None
         if export_path:
             payload = _payload_from_draft(30050, d_value, title_value, content, tags, _now())
@@ -4081,6 +4230,9 @@ def main() -> None:
         d_value = _format_ncc_identifier(d_value)
         if not d_value:
             raise SystemExit("NCC identifier is required")
+        collision = _find_ncc_collision(args.config, d_value)
+        if collision:
+            print(f"Note: NCC {d_value} already exists (draft #{collision['id']}).")
         authoritative_event = input("Authoritative event id: ").strip()
         if not authoritative_event:
             raise SystemExit("Authoritative event id is required")
@@ -4094,16 +4246,14 @@ def main() -> None:
             reason=_normalize_optional_str(config_tags.get("reason")),
             effective_at=_normalize_optional_str(config_tags.get("effective_at")),
         )
-        conn = _db_connect(args.config)
-        draft_id = _db_insert_draft(
-            conn,
+        store = DraftStore(args.config)
+        draft_id = store.insert_draft(
             kind=30051,
             d=d_value,
             title=None,
             content=content_value,
             tags=tags,
         )
-        conn.close()
         export_path = args.out or input("Export JSON path (optional): ").strip() or None
         if export_path:
             payload = _payload_from_draft(30051, d_value, None, content_value, tags, _now())
@@ -4159,11 +4309,12 @@ def main() -> None:
         if not _check_succession_not_self(args.config, authoritative, keys):
             raise SystemExit("Succession should not acknowledge your own NCC.")
 
+    service = PublishService(args.config)
     try:
         with _PUBLISH_LOCK:
-            event_id = _attempt_publish_payload(payload, relays=relays, keys=keys)
+            event_id = service.publish_payload(payload, relays=relays, keys=keys)
     except Exception as exc:
-        _enqueue_publish_task(
+        service.enqueue_task(
             {
                 "type": "payload",
                 "config_path": args.config,
