@@ -13,7 +13,24 @@
           <h1>NCC Viewer</h1>
           <p>Live index of Nostr Community Conventions, steward hints, and endorsements.</p>
         </div>
-        <div class="badge" id="relay-count">Relays: --</div>
+        <div class="header-actions">
+          <div class="relay-wrap">
+            <button class="badge" id="relay-toggle" type="button">Relays: --</button>
+            <div class="relay-panel panel" id="relay-panel" hidden>
+              <div class="relay-header">
+                <strong>Extra relays</strong>
+                <button class="link-button" id="relay-close" type="button">Close</button>
+              </div>
+              <div class="relay-input">
+                <input id="relay-input" type="text" placeholder="wss://relay.example" />
+                <button class="badge" id="relay-add" type="button">Add</button>
+              </div>
+              <ul class="relay-list" id="relay-list"></ul>
+              <button class="link-button" id="relay-clear" type="button">Clear extras</button>
+              <p class="muted small">Stored in this browser.</p>
+            </div>
+          </div>
+        </div>
       </header>
 
       <section class="panel">

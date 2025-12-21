@@ -13,7 +13,25 @@
           <h1 id="endorsement-title">Endorsements</h1>
           <p class="muted" id="endorsement-subtitle"></p>
         </div>
-        <a class="badge" href="/">Back to list</a>
+        <div class="header-actions">
+          <div class="relay-wrap">
+            <button class="badge" id="relay-toggle" type="button">Relays: --</button>
+            <div class="relay-panel panel" id="relay-panel" hidden>
+              <div class="relay-header">
+                <strong>Extra relays</strong>
+                <button class="link-button" id="relay-close" type="button">Close</button>
+              </div>
+              <div class="relay-input">
+                <input id="relay-input" type="text" placeholder="wss://relay.example" />
+                <button class="badge" id="relay-add" type="button">Add</button>
+              </div>
+              <ul class="relay-list" id="relay-list"></ul>
+              <button class="link-button" id="relay-clear" type="button">Clear extras</button>
+              <p class="muted small">Stored in this browser.</p>
+            </div>
+          </div>
+          <a class="badge" href="/">Back to list</a>
+        </div>
       </header>
 
       <section class="panel">
