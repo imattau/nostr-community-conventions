@@ -96,7 +96,7 @@ Any author MAY publish an NCC that declares it supersedes an existing NCC.
 - It does not transfer authority by itself
 - Superseding NCCs compete through adoption
 
-Supersession is expressed using a `supersedes` tag.
+Supersession is expressed using a `supersedes` tag that references the superseded event id.
 
 ---
 
@@ -201,7 +201,7 @@ These kinds are reserved by convention for NCC use and may be reassigned if conf
 - `["t","<topic>"]` (repeatable)
 - `["lang","<bcp47>"]`
 - `["version","<string>"]`
-- `["supersedes","ncc-YY"]` (repeatable)
+- `["supersedes","event:<event_id>"]` (repeatable)
 - `["license","<id-or-url>"]`
 - `["authors","<npub-or-pubkey>"]` (editorial credit only)
 
