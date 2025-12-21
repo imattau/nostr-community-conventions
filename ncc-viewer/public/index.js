@@ -3,7 +3,7 @@ import { shorten, formatTimestamp } from "./app.js";
 const listEl = document.getElementById("ncc-list");
 const relayCount = document.getElementById("relay-count");
 const CACHE_KEY = "ncc-viewer-cache";
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 600_000;
 
 function renderEmpty(message) {
   listEl.innerHTML = `<div class="empty">${message}</div>`;

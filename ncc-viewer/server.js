@@ -17,7 +17,7 @@ const RELAYS = (process.env.NCC_RELAYS ||
   .filter(Boolean);
 
 const PORT = Number(process.env.PORT || 4321);
-const CACHE_TTL_MS = Number(process.env.NCC_CACHE_TTL_MS || 60_000);
+const CACHE_TTL_MS = Number(process.env.NCC_CACHE_TTL_MS || 600_000);
 const SINCE_SECONDS = Number(process.env.NCC_SINCE_SECONDS || 0);
 
 let cacheState = {
