@@ -2028,8 +2028,8 @@ def _interactive_cli() -> None:
                         "relays": relays,
                     }
                 )
-                    print(f"Publish failed: {exc}. Queued for retry.")
-                    continue
+                print(f"Publish failed: {exc}. Queued for retry.")
+                continue
             if kind == 30051 and succession_info:
                 authoritative, previous, steward = succession_info
                 _apply_succession_updates(
