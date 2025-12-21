@@ -157,7 +157,7 @@ header p {
 }
 
 .markdown {
-  white-space: pre-wrap;
+  white-space: normal;
   line-height: 1.6;
   font-size: 0.98rem;
 }
