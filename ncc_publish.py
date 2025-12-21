@@ -22,9 +22,10 @@ import threading
 import uuid
 import tempfile
 import queue as queue_module
+from datetime import timedelta
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
 
-from nostr_sdk import Client, EventBuilder, Keys, Kind, NostrSigner, PublicKey, RelayUrl, Tag, Timestamp
+from nostr_sdk import Client, EventBuilder, EventId, Filter, Keys, Kind, NostrSigner, PublicKey, RelayUrl, Tag, Timestamp
 
 
 def _now() -> int:
@@ -305,6 +306,27 @@ def _run_async(coro: "asyncio.Future") -> str:
     if isinstance(result, Exception):
         raise result
     return result
+
+
+async def _verify_event_on_relays_async(event_id: str, relays: List[str]) -> bool:
+    if not relays:
+        raise SystemExit("At least one relay is required to verify.")
+    client = Client()
+    for relay in relays:
+        await client.add_relay(RelayUrl.parse(relay))
+    await client.connect()
+    try:
+        events = await client.fetch_events(
+            Filter().ids([EventId.parse(event_id)]),
+            timedelta(seconds=5),
+        )
+        return events.len() > 0
+    finally:
+        await client.disconnect()
+
+
+def _verify_event_on_relays(event_id: str, relays: List[str]) -> bool:
+    return _run_async(_verify_event_on_relays_async(event_id, relays))
 
 
 def _attempt_publish_payload(payload: dict, *, relays: List[str], keys: Keys) -> str:
@@ -637,10 +659,23 @@ def _format_unpublished_drafts(rows: List[sqlite3.Row]) -> List[str]:
     return lines
 
 
+def _format_published_drafts(rows: List[sqlite3.Row]) -> List[str]:
+    lines = []
+    for row in rows:
+        title = row["title"] or "-"
+        updated_at = _format_ts(row["updated_at"])
+        published_at = _format_ts(row["published_at"])
+        event_id = row["event_id"] or "-"
+        lines.append(
+            f"  #{row['id']} {row['d']} {title} | published {published_at} | updated {updated_at} | event {event_id}"
+        )
+    return lines
+
+
 def _db_list_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlite3.Row]:
     cur = conn.execute(
         """
-        select id, d, title, status, updated_at, published_at
+        select id, d, title, status, updated_at, published_at, event_id
         from drafts
         where kind = ?
         order by updated_at desc
@@ -656,6 +691,19 @@ def _db_list_unpublished_drafts(conn: sqlite3.Connection, kind: int) -> List[sql
         select id, d, title, status, updated_at, published_at
         from drafts
         where kind = ? and (status is null or status != 'published')
+        order by updated_at desc
+        """,
+        (kind,),
+    )
+    return cur.fetchall()
+
+
+def _db_list_published_drafts(conn: sqlite3.Connection, kind: int) -> List[sqlite3.Row]:
+    cur = conn.execute(
+        """
+        select id, d, title, status, updated_at, published_at, event_id
+        from drafts
+        where kind = ? and event_id is not null and event_id != ''
         order by updated_at desc
         """,
         (kind,),
@@ -1004,6 +1052,8 @@ def _interactive_cli() -> None:
         "/list-nsr": "List succession record drafts in the database.",
         "/publish-ncc": "Publish the latest NCC draft JSON file.",
         "/publish-nsr": "Publish the latest succession record JSON file.",
+        "/verify-ncc": "Verify published NCC event id on relays.",
+        "/verify-nsr": "Verify published NSR event id on relays.",
         "/help": "Show available commands.",
         "/quit": "Exit interactive mode.",
     }
@@ -1037,6 +1087,8 @@ def _interactive_cli() -> None:
             print("  /list-nsr")
             print("  /publish-ncc")
             print("  /publish-nsr")
+            print("  /verify-ncc")
+            print("  /verify-nsr")
             print("  /quit")
             print("")
             print("Details:")
@@ -1050,6 +1102,8 @@ def _interactive_cli() -> None:
             print("  /list-nsr     List succession record drafts in the database.")
             print("  /publish-ncc  Publish the latest NCC draft JSON file.")
             print("  /publish-nsr  Publish the latest succession record JSON file.")
+            print("  /verify-ncc   Verify published NCC event id on relays.")
+            print("  /verify-nsr   Verify published NSR event id on relays.")
             print("  /quit         Exit interactive mode.")
             print("")
             print("Getting started:")
@@ -1425,7 +1479,10 @@ def _interactive_cli() -> None:
                 updated_at = _format_ts(row["updated_at"])
                 status = row["status"] or "draft"
                 published_at = _format_ts(row["published_at"])
-                print(f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at}")
+                event_id = row["event_id"] or "-"
+                print(
+                    f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                )
             continue
 
         if command in ("/publish-ncc", "/publish-nsr"):
@@ -1531,6 +1588,63 @@ def _interactive_cli() -> None:
             conn.close()
             continue
 
+        if command in ("/verify-ncc", "/verify-nsr"):
+            kind = 30050 if command == "/verify-ncc" else 30051
+            config_path = _default_config_path()
+            config = _load_config_db(config_path)
+            conn = _db_connect(config_path)
+            published = _db_list_published_drafts(conn, kind)
+            conn.close()
+            label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
+            print(f"{label}:")
+            if not published:
+                print("  (none)")
+                continue
+            for line in _format_published_drafts(published):
+                print(line)
+            selection = _prompt_value("Draft id or NCC number (e.g. 01)", required=True)
+            draft = None
+            if selection.isdigit():
+                conn = _db_connect(config_path)
+                draft = conn.execute(
+                    "select * from drafts where id = ? and kind = ?",
+                    (int(selection), kind),
+                ).fetchone()
+                conn.close()
+            else:
+                identifier = _format_ncc_identifier(selection)
+                if not identifier:
+                    print("Cancelled.")
+                    continue
+                conn = _db_connect(config_path)
+                draft = _db_get_latest_draft(conn, kind, identifier)
+                conn.close()
+            if not draft:
+                print("Draft not found.")
+                continue
+            event_id = draft["event_id"]
+            if not event_id:
+                print("No event id recorded for this draft.")
+                continue
+            relays = _prompt_list(
+                "Relays",
+                config.get("relays") if isinstance(config, dict) else None,
+            )
+            if not relays:
+                print("At least one relay is required to verify.")
+                continue
+            print("Checking event on relays...")
+            try:
+                found = _verify_event_on_relays(event_id, relays)
+            except Exception as exc:
+                print(f"Verification failed: {exc}")
+                continue
+            if found:
+                print(f"Event found on relays: {event_id}")
+            else:
+                print(f"Event not found on relays: {event_id}")
+            continue
+
         print("Error: unknown command. Type /help for options.")
 
 
@@ -1566,6 +1680,8 @@ def _interactive_tui() -> None:
         "/list-nsr": "List succession record drafts in the database.",
         "/publish-ncc": "Publish the latest NCC draft JSON file.",
         "/publish-nsr": "Publish the latest succession record JSON file.",
+        "/verify-ncc": "Verify published NCC event id on relays.",
+        "/verify-nsr": "Verify published NSR event id on relays.",
         "/help": "Show available commands.",
         "/quit": "Exit interactive mode.",
     }
@@ -2083,6 +2199,8 @@ def _interactive_tui() -> None:
                 if flow_step.get("key") == "privkey":
                     flow_step["default"] = privkey_default
         flow["answers"][step["key"]] = value
+        if flow.get("mode") in ("verify-ncc", "verify-nsr") and step.get("key") == "selection":
+            set_custom_completer(None)
         flow["index"] += 1
         if flow["index"] >= len(flow["steps"]):
             on_complete = flow["on_complete"]
@@ -2134,6 +2252,8 @@ def _interactive_tui() -> None:
             append_line("  /list-nsr")
             append_line("  /publish-ncc")
             append_line("  /publish-nsr")
+            append_line("  /verify-ncc")
+            append_line("  /verify-nsr")
             append_line("  /quit")
             append_line("")
             append_line("Details:")
@@ -2147,6 +2267,8 @@ def _interactive_tui() -> None:
             append_line("  /list-nsr     List succession record drafts in the database.")
             append_line("  /publish-ncc  Publish the latest NCC draft JSON file.")
             append_line("  /publish-nsr  Publish the latest succession record JSON file.")
+            append_line("  /verify-ncc   Verify published NCC event id on relays.")
+            append_line("  /verify-nsr   Verify published NSR event id on relays.")
             append_line("  /quit         Exit interactive mode.")
             append_line("")
             append_line("Getting started:")
@@ -2535,7 +2657,10 @@ def _interactive_tui() -> None:
                 updated_at = _format_ts(row["updated_at"])
                 status = row["status"] or "draft"
                 published_at = _format_ts(row["published_at"])
-                append_line(f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at}")
+                event_id = row["event_id"] or "-"
+                append_line(
+                    f"  #{row['id']} {row['d']} {title} | {status} | updated {updated_at} | published {published_at} | event {event_id}"
+                )
             return
 
         if command in ("/publish-ncc", "/publish-nsr"):
@@ -2614,6 +2739,88 @@ def _interactive_tui() -> None:
                     {"key": "d", "label": "Draft id or NCC number (e.g. 01)", "default": None, "required": True},
                 ],
                 _complete_publish_latest,
+            )
+            return
+
+        if command in ("/verify-ncc", "/verify-nsr"):
+            kind = 30050 if command == "/verify-ncc" else 30051
+            config_path = _default_config_path()
+            config = _load_config_db(config_path)
+            conn = _db_connect(config_path)
+            published = _db_list_published_drafts(conn, kind)
+            conn.close()
+            label = "Published NCC drafts" if kind == 30050 else "Published NSR drafts"
+            append_line(f"{label}:")
+            if not published:
+                append_line("  (none)")
+                return
+            for line in _format_published_drafts(published):
+                append_line(line)
+            verify_options: List[str] = []
+            verify_meta: Dict[str, str] = {}
+            for row in published:
+                draft_id = str(row["id"])
+                d_value = row["d"]
+                title = row["title"] or "-"
+                verify_options.extend([draft_id, d_value])
+                verify_meta[draft_id] = f"{d_value} {title}"
+                verify_meta[d_value] = f"#{draft_id} {title}"
+            if verify_options:
+                set_custom_completer(_CommandCompleter(verify_options, meta=verify_meta))
+
+            def _complete_verify(answers: dict) -> None:
+                selection = answers.get("selection") or ""
+                draft = None
+                if selection.isdigit():
+                    conn = _db_connect(config_path)
+                    draft = conn.execute(
+                        "select * from drafts where id = ? and kind = ?",
+                        (int(selection), kind),
+                    ).fetchone()
+                    conn.close()
+                else:
+                    identifier = _format_ncc_identifier(selection)
+                    if identifier:
+                        conn = _db_connect(config_path)
+                        draft = _db_get_latest_draft(conn, kind, identifier)
+                        conn.close()
+                if not draft:
+                    append_line("Error: draft not found.")
+                    return
+                event_id = draft["event_id"]
+                if not event_id:
+                    append_line("No event id recorded for this draft.")
+                    return
+                relays = _parse_list_value(answers.get("relays") or "")
+                if not relays and isinstance(config, dict):
+                    relays = config.get("relays", []) or []
+                if not relays:
+                    append_line("Error: at least one relay is required to verify.")
+                    return
+                append_line("Checking event on relays...")
+                try:
+                    found = _verify_event_on_relays(event_id, relays)
+                except Exception as exc:
+                    append_line(f"Verification failed: {exc}")
+                    return
+                if found:
+                    append_line(f"Event found on relays: {event_id}")
+                else:
+                    append_line(f"Event not found on relays: {event_id}")
+
+            config_defaults = _load_config_db(config_path)
+            flow["mode"] = "verify-ncc" if command == "/verify-ncc" else "verify-nsr"
+            start_flow(
+                [
+                    {"key": "selection", "label": "Draft id or NCC number (e.g. 01)", "default": None, "required": True},
+                    {
+                        "key": "relays",
+                        "label": "Relays (comma-separated)",
+                        "default": _format_list_default(config_defaults.get("relays")),
+                        "required": False,
+                    },
+                ],
+                _complete_verify,
             )
             return
 
@@ -2948,9 +3155,20 @@ async def publish_event(builder: EventBuilder, *, relays: List[str], keys: Keys)
 
     event = await client.sign_event_builder(builder)
     await client.send_event(event)
-    await client.disconnect()
 
     event_id = event.id().to_hex()
+    try:
+        events = await client.fetch_events(
+            Filter().ids([EventId.parse(event_id)]),
+            timedelta(seconds=5),
+        )
+        if events.len() > 0:
+            print(f"Verified event on relay(s): {event_id}")
+        else:
+            print(f"Warning: event not found on relays yet: {event_id}")
+    except Exception as exc:
+        print(f"Warning: could not verify event on relays: {exc}")
+    await client.disconnect()
     print(f"Published event kind={event.kind()} id={event_id}")
     return event_id
 
