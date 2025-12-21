@@ -21,6 +21,7 @@ import random
 import threading
 import uuid
 import tempfile
+import queue as queue_module
 from typing import AsyncIterable, Callable, Dict, Iterable, List, Optional
 
 from nostr_sdk import Client, EventBuilder, Keys, Kind, PublicKey, Tag, Timestamp
@@ -283,10 +284,33 @@ def _load_privkey_from_config(config_path: Optional[str]) -> Optional[str]:
     return None
 
 
+def _run_async(coro: "asyncio.Future") -> str:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    result_queue: queue_module.Queue = queue_module.Queue()
+
+    def _runner() -> None:
+        try:
+            result = asyncio.run(coro)
+        except Exception as exc:
+            result_queue.put(exc)
+        else:
+            result_queue.put(result)
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    result = result_queue.get()
+    if isinstance(result, Exception):
+        raise result
+    return result
+
+
 def _attempt_publish_payload(payload: dict, *, relays: List[str], keys: Keys) -> str:
     _prepare_payload_for_publish(payload)
     builder = build_event_from_json(payload)
-    return asyncio.run(publish_event(builder, relays=relays, keys=keys))
+    return _run_async(publish_event(builder, relays=relays, keys=keys))
 
 
 def _attempt_publish_json(json_path: str, *, relays: List[str], keys: Keys) -> str:
