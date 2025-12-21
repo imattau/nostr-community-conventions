@@ -286,6 +286,7 @@ header p {
   gap: 12px;
   font-size: 0.9rem;
   color: var(--muted);
+  word-break: break-all;
 }
 
 .link-button {

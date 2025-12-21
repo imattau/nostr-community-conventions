@@ -1,4 +1,11 @@
-import { shorten, formatTimestamp, buildApiUrl, getRelayCacheKey, initRelayControls, setRelayCount } from "./app.js";
+import {
+  shorten,
+  formatTimestamp,
+  buildApiUrl,
+  getRelayCacheKey,
+  initRelayControls,
+  setRelayCount
+} from "./app.js";
 
 const listEl = document.getElementById("ncc-list");
 const CACHE_KEY = "ncc-viewer-cache";
@@ -38,6 +45,8 @@ function renderList(items) {
     .join("");
 }
 
+let defaultRelays = [];
+
 async function load() {
   const cacheKey = getRelayCacheKey(CACHE_KEY);
   const cachedRaw = window.localStorage.getItem(cacheKey);
@@ -46,6 +55,7 @@ async function load() {
       const cached = JSON.parse(cachedRaw);
       if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
         setRelayCount(cached.relays?.length || 0);
+        defaultRelays = cached.default_relays || defaultRelays;
         renderList(cached.items || []);
         return;
       }
@@ -59,15 +69,21 @@ async function load() {
     if (!response.ok) throw new Error("Failed to load");
     const data = await response.json();
     setRelayCount(data.relays.length);
+    defaultRelays = data.default_relays || defaultRelays;
     renderList(data.items || []);
     window.localStorage.setItem(
       cacheKey,
-      JSON.stringify({ at: Date.now(), relays: data.relays, items: data.items })
+      JSON.stringify({
+        at: Date.now(),
+        relays: data.relays,
+        default_relays: data.default_relays,
+        items: data.items
+      })
     );
   } catch (error) {
     renderEmpty("Unable to fetch NCC data right now.");
   }
 }
 
-initRelayControls(() => load());
+initRelayControls(() => defaultRelays, () => load());
 load();

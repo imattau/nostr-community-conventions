@@ -401,7 +401,7 @@ app.get("/api/nccs", async (req, res) => {
   try {
     const relays = getRelaysFromRequest(req);
     const data = await getData(relays);
-    res.json({ relays, items: data.list });
+    res.json({ relays, default_relays: RELAYS, items: data.list });
   } catch (error) {
     res.status(500).json({ error: "Failed to load NCCs", detail: error.message });
   }
@@ -415,7 +415,7 @@ app.get("/api/nccs/:d", async (req, res) => {
     const eventId = normalizeId(req.query.event_id || "");
     const details = buildDetails(dTag, data.index, eventId);
     if (!details) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays, details });
+    res.json({ relays, default_relays: RELAYS, details });
   } catch (error) {
     res.status(500).json({ error: "Failed to load NCC", detail: error.message });
   }
@@ -428,7 +428,7 @@ app.get("/api/nccs/:d/endorsements", async (req, res) => {
     const dTag = normalizeId(req.params.d);
     const endorsements = buildEndorsements(dTag, data.index);
     if (!endorsements) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays, endorsements });
+    res.json({ relays, default_relays: RELAYS, endorsements });
   } catch (error) {
     res.status(500).json({ error: "Failed to load endorsements", detail: error.message });
   }
@@ -441,7 +441,7 @@ app.get("/api/nccs/:d/proposals", async (req, res) => {
     const dTag = normalizeId(req.params.d);
     const proposals = buildProposals(dTag, data.index);
     if (!proposals) return res.status(404).json({ error: "NCC not found" });
-    res.json({ relays, proposals });
+    res.json({ relays, default_relays: RELAYS, proposals });
   } catch (error) {
     res.status(500).json({ error: "Failed to load proposals", detail: error.message });
   }
