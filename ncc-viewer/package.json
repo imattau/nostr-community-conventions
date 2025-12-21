@@ -1,0 +1,15 @@
+{
+  "name": "ncc-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lightweight NCC viewer for Nostr community conventions.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nostr-tools": "^2.7.1"
+  }
+}
