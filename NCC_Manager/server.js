@@ -105,13 +105,43 @@ function normalizeEventId(value) {
   return value.replace(/^event:/i, "").trim().toLowerCase();
 }
 
+function extractTagEntries(value) {
+  if (!value || typeof value !== "object") return [];
+  const tags = [];
+  const push = (key, entry) => {
+    if (!entry) return;
+    tags.push([key, String(entry)]);
+  };
+  Object.entries(value).forEach(([key, entry]) => {
+    if (Array.isArray(entry)) {
+      entry.forEach((item) => push(key, item));
+    } else {
+      push(key, entry);
+    }
+  });
+  return tags;
+}
+
+function storedTagsForDraft(draft) {
+  if (Array.isArray(draft.raw_tags) && draft.raw_tags.length) {
+    return draft.raw_tags;
+  }
+  if (Array.isArray(draft.tags) && draft.tags.length) {
+    return draft.tags;
+  }
+  return extractTagEntries(draft.tags);
+}
+
 app.get("/api/endorsements/counts", async (req, res) => {
   if (!SERVER_STORAGE) return res.json({ counts: {} });
   try {
     const rows = await listDraftData(KINDS.endorsement);
     const counts = {};
     for (const draft of rows || []) {
-      const tags = draft.tags || [];
+      if (!draft) continue;
+      const status = String(draft.status || "").toLowerCase();
+      if (status !== "published") continue;
+      const tags = storedTagsForDraft(draft);
       const targets = new Set();
       const endorses = tags.find((tag) => tag[0] === "endorses")?.[1];
       if (endorses) targets.add(normalizeEventId(endorses));

@@ -152,6 +152,9 @@ export function payloadToDraft(payload) {
     };
   }
 
+  draft.raw_event = payload;
+  draft.raw_tags = tags;
+
   return draft;
 }
 

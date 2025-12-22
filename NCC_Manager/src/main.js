@@ -4,12 +4,10 @@ import sanitizeHtml from "sanitize-html";
 import {
   saveDraft,
   listDrafts,
-  listRecentDrafts,
   deleteDraft,
   getDraft,
   setConfig,
-  getConfig,
-  fetchEndorsementCounts
+  getConfig
 } from "./store.js";
 import {
   createEventTemplate,
@@ -1231,6 +1229,80 @@ function buildEndorsementSummary(event) {
   };
 }
 
+function buildDraftTagList(draft) {
+  if (!draft) return [];
+  if (Array.isArray(draft.raw_tags) && draft.raw_tags.length) return draft.raw_tags;
+  if (Array.isArray(draft.raw_event?.tags) && draft.raw_event.tags.length) {
+    return draft.raw_event.tags;
+  }
+  const tags = [];
+  const push = (key, value) => {
+    if (!value) return;
+    tags.push([key, value]);
+  };
+  if (draft.tags) {
+    push("endorses", draft.tags.endorses);
+    (draft.tags.roles || []).forEach((role) => push("role", role));
+    (draft.tags.topics || []).forEach((topic) => push("t", topic));
+    push("implementation", draft.tags.implementation);
+    push("note", draft.tags.note);
+  }
+  return tags;
+}
+
+function buildEventFromDraft(draft) {
+  const createdAt =
+    draft.published_at ||
+    Math.floor(((draft.updated_at || Date.now()) / 1000)) ||
+    nowSeconds();
+  return {
+    id: draft.event_id || draft.id,
+    tags: buildDraftTagList(draft),
+    pubkey: draft.author_pubkey || draft.raw_event?.pubkey || "",
+    author: draft.author_pubkey || draft.raw_event?.pubkey || "",
+    created_at: createdAt,
+    content: draft.content || "",
+    status: draft.status || ""
+  };
+}
+
+async function refreshStoredEndorsementMetadata() {
+  try {
+    const drafts = await listDrafts(KINDS.endorsement);
+    const counts = new Map();
+    const details = new Map();
+    const seen = new Set();
+
+    for (const draft of drafts) {
+      if (!draft) continue;
+      const status = String(draft.status || "").toLowerCase();
+      if (status !== "published") continue;
+      const eventId = normalizeHexId(draft.event_id || draft.id);
+      if (!eventId || seen.has(eventId)) continue;
+      seen.add(eventId);
+      const event = buildEventFromDraft(draft);
+      const targets = getEndorsementTargets(event);
+      if (!targets.size) continue;
+      const summary = buildEndorsementSummary(event);
+      for (const target of targets) {
+        counts.set(target, (counts.get(target) || 0) + 1);
+        const bucket = details.get(target) || [];
+        bucket.push(summary);
+        details.set(target, bucket);
+      }
+    }
+
+    details.forEach((list) =>
+      list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+    );
+
+    state.endorsementCounts = counts;
+    state.endorsementDetails = details;
+  } catch (error) {
+    console.error("NCC Manager: failed to refresh endorsement metadata", error);
+  }
+}
+
 async function persistRelayEvents(events) {
   if (!events?.length) return;
   const tasks = [];
@@ -1247,6 +1319,8 @@ async function persistRelayEvents(events) {
     draft.created_at = timestamp * 1000;
     draft.published_at = timestamp;
     draft.id = event.id;
+    draft.raw_tags = event.tags || [];
+    draft.raw_event = event;
     tasks.push(saveDraft(draft));
   }
   if (!tasks.length) return;
@@ -1263,25 +1337,6 @@ function getEndorsementTargets(event) {
     .filter((tag) => tag[0] === "e")
     .forEach((tag) => targets.add(normalizeEventId(tag[1])));
   return targets;
-}
-
-function recordPublishedEndorsement(event) {
-  if ((event?.kind || 0) !== KINDS.endorsement) return;
-  const targets = getEndorsementTargets(event);
-  if (!targets.size) return;
-  const counts = new Map(state.endorsementCounts || []);
-  const details = new Map(state.endorsementDetails || []);
-  const summary = buildEndorsementSummary(event);
-  for (const targetId of targets) {
-    if (!targetId) continue;
-    counts.set(targetId, (counts.get(targetId) || 0) + 1);
-    const existing = details.get(targetId) || [];
-    const next = [summary, ...existing];
-    next.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    details.set(targetId, next);
-  }
-  state.endorsementCounts = counts;
-  state.endorsementDetails = details;
 }
 
 function isOnline() {
@@ -1332,39 +1387,15 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     const filtered = events.filter((event) => isNccDocument(event));
     await persistRelayEvents(filtered);
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
-    let detailBuffer = new Map();
     if (eventIds.length && isOnline()) {
-      const detailMap = new Map();
       try {
         const endorsementEvents = await fetchEndorsements(relays, eventIds);
         await persistRelayEvents(endorsementEvents);
-        for (const endorsement of endorsementEvents || []) {
-          const targets = getEndorsementTargets(endorsement);
-          const summary = buildEndorsementSummary(endorsement);
-          for (const targetId of targets) {
-            if (!targetId) continue;
-            const existing = detailMap.get(targetId) || [];
-            existing.push(summary);
-            detailMap.set(targetId, existing);
-          }
-        }
-        detailMap.forEach((list) => {
-          list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-        });
-        detailBuffer = detailMap;
       } catch (error) {
         console.warn("NCC Manager: failed to fetch endorsement counts", error);
       }
     }
-    const persistedCounts = await fetchEndorsementCounts();
-    const countsMap = new Map();
-    Object.entries(persistedCounts || {}).forEach(([target, value]) => {
-      const normalized = normalizeEventId(target);
-      if (!normalized) return;
-      countsMap.set(normalized, Number(value) || 0);
-    });
-    state.endorsementCounts = countsMap;
-    state.endorsementDetails = detailBuffer;
+    await refreshStoredEndorsementMetadata();
     state.nccOptions = buildNccOptions(filtered);
     state.nccDocs = filtered;
     state.relayStatus = {
@@ -1689,13 +1720,15 @@ async function publishDraft(draft, kind) {
       status: "published",
       event_id: event.id,
       author_pubkey: signer.pubkey,
-      published_at: draft.published_at || nowSeconds()
+      published_at: draft.published_at || nowSeconds(),
+      raw_event: event,
+      raw_tags: event.tags || []
     };
     await saveDraft(updated);
     state.currentDraft[kind] = updated;
     renderForm(kind, updated);
     if (kind === "endorsement") {
-      recordPublishedEndorsement(event);
+      await refreshStoredEndorsementMetadata();
     }
     renderDrafts(kind);
     renderDashboard();
