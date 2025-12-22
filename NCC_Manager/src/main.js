@@ -17,6 +17,7 @@ import {
   publishEvent,
   verifyEvent,
   fetchNccDocuments,
+  fetchEndorsements,
   fetchProfile
 } from "./nostr.js";
 
@@ -41,6 +42,7 @@ const state = {
   nccOptions: [],
   nccDocs: [],
   relayStatus: null,
+  endorsementCounts: new Map(),
   signerPubkey: null,
   signerProfile: null,
   selectedNcc: null,
@@ -97,6 +99,12 @@ function formatCacheAge(timestamp) {
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
   return `${Math.floor(delta / 86_400_000)}d ago`;
+}
+
+function shortenKey(value, head = 6, tail = 4) {
+  if (!value) return "";
+  if (value.length <= head + tail + 1) return value;
+  return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
 function esc(value) {
@@ -410,7 +418,8 @@ async function renderDashboard() {
       source: "local",
       content: draft.content || "",
       tags: draft.tags || {},
-      updated_at: draft.updated_at || 0
+      updated_at: draft.updated_at || 0,
+      author: draft.author_pubkey || state.signerPubkey || ""
     });
   }
 
@@ -428,7 +437,8 @@ async function renderDashboard() {
       source: "relay",
       content: event.content || "",
       tags: event.tags || [],
-      updated_at: (event.created_at || 0) * 1000
+      updated_at: (event.created_at || 0) * 1000,
+      author: event.pubkey
     });
   }
 
@@ -443,6 +453,7 @@ async function renderDashboard() {
   }
 
   const canPublish = Boolean(state.signerPubkey);
+  const endorsementCounts = state.endorsementCounts || new Map();
   listEl.innerHTML = sorted
     .map(
       (item) => `
@@ -450,8 +461,12 @@ async function renderDashboard() {
           <strong>${esc(item.d)} · ${esc(item.title)}</strong>
           <div class="meta">
             <span>Status: ${esc(item.status)}</span>
-            <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
-            <span>Event: ${item.event_id ? item.event_id.slice(0, 10) + "…" : "-"}</span>
+            <span>Published: ${
+              item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"
+            }</span>
+            <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
+            <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
+            <span>Endorsements: ${item.event_id ? endorsementCounts.get(item.event_id) || 0 : 0}</span>
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
@@ -860,6 +875,11 @@ function eventTagValue(tags, name) {
   return found ? found[1] : "";
 }
 
+function normalizeEventId(value) {
+  if (!value) return "";
+  return value.replace(/^event:/i, "").trim();
+}
+
 function isNccDocument(event) {
   const dValue = eventTagValue(event.tags, "d");
   return dValue && dValue.toLowerCase().startsWith("ncc-");
@@ -1047,6 +1067,23 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     }
 
     const filtered = events.filter((event) => isNccDocument(event));
+    const eventIds = filtered.map((event) => event.id).filter(Boolean);
+    let endorsementCounts = state.endorsementCounts || new Map();
+    if (eventIds.length && isOnline()) {
+      const updatedCounts = new Map();
+      try {
+        const endorsementEvents = await fetchEndorsements(relays, eventIds);
+        for (const endorsement of endorsementEvents || []) {
+          const targetId = normalizeEventId(eventTagValue(endorsement.tags, "endorses"));
+          if (!targetId) continue;
+          updatedCounts.set(targetId, (updatedCounts.get(targetId) || 0) + 1);
+        }
+        endorsementCounts = updatedCounts;
+      } catch (error) {
+        console.warn("NCC Manager: failed to fetch endorsement counts", error);
+      }
+    }
+    state.endorsementCounts = endorsementCounts;
     state.nccOptions = buildNccOptions(filtered);
     state.nccDocs = filtered;
     state.relayStatus = {
