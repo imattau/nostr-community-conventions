@@ -1,11 +1,14 @@
 import sqlite3 from "sqlite3";
+import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import envPaths from "env-paths";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const paths = envPaths("ncc-manager");
+const defaultDbDir = paths.data;
+const defaultDbPath = path.join(defaultDbDir, "ncc_manager.sqlite");
+const DB_PATH = process.env.NCC_MANAGER_DB || defaultDbPath;
 
-const DB_PATH = process.env.NCC_MANAGER_DB || path.join(__dirname, "ncc_manager.sqlite");
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new sqlite3.Database(DB_PATH);
 
