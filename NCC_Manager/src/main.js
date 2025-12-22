@@ -442,6 +442,7 @@ async function renderDashboard() {
     return;
   }
 
+  const canPublish = Boolean(state.signerPubkey);
   listEl.innerHTML = sorted
     .map(
       (item) => `
@@ -455,7 +456,7 @@ async function renderDashboard() {
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
             ${
-              item.source === "local" && item.status !== "published"
+              canPublish && item.source === "local" && item.status !== "published"
                 ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
                 : ""
             }
