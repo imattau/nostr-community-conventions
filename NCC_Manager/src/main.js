@@ -556,6 +556,7 @@ function renderForm(kind, draft) {
   }
 
   if (kind === "nsr") {
+    const effectiveAtValue = draft?.tags?.effective_at || nowSeconds();
     form.innerHTML = `
       <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" value="${esc(stripNccNumber(draft?.d))}" /></label>
       <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
@@ -563,7 +564,7 @@ function renderForm(kind, draft) {
       <label class="field"><span>Steward pubkey/npub</span><input name="steward" value="${esc(draft?.tags?.steward)}" /></label>
       <label class="field"><span>Previous event id</span><input name="previous" value="${esc(draft?.tags?.previous)}" /></label>
       <label class="field"><span>Reason</span><input name="reason" value="${esc(draft?.tags?.reason)}" /></label>
-      <label class="field"><span>Effective at (unix seconds)</span><input name="effective_at" value="${esc(draft?.tags?.effective_at)}" /></label>
+      <label class="field"><span>Effective at (unix seconds)</span><input name="effective_at" value="${esc(effectiveAtValue)}" /></label>
       <label class="field"><span>Content</span><textarea name="content">${esc(draft?.content)}</textarea></label>
       <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
     `;
