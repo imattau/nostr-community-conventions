@@ -257,11 +257,15 @@ export async function fetchEndorsements(relays, eventIds) {
   if (!relays.length || !eventIds.length) return [];
   const uniqueIds = Array.from(new Set(eventIds.filter(Boolean)));
   if (!uniqueIds.length) return [];
+  const normalized = uniqueIds
+    .map((id) => id.replace(/^event:/i, "").trim())
+    .filter(Boolean)
+    .map((id) => `event:${id}`);
   return pool.querySync(
     relays,
     {
       kinds: [30052],
-      "#e": uniqueIds,
+      "#e": normalized,
       limit: 1000
     },
     { maxWait: 4000 }
