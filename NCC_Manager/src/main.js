@@ -145,8 +145,9 @@ async function refreshSignerProfile() {
   }
   try {
     const relays = await getRelays();
-    if (!relays.length) return;
-    state.signerProfile = await fetchProfile(state.signerPubkey, relays);
+    const targets = relays.length ? relays : FALLBACK_RELAYS;
+    if (!targets.length) return;
+    state.signerProfile = await fetchProfile(state.signerPubkey, targets);
   } catch (error) {
     console.error("NCC Manager: signer profile fetch failed", error);
     state.signerProfile = null;
@@ -305,26 +306,30 @@ async function getRelays() {
 }
 
 async function updateSignerStatus() {
-  const statusEl = document.getElementById("signer-status");
   const helpEl = document.getElementById("signer-help");
   const mode = state.signerMode;
   const nsec = sessionStorage.getItem("ncc-manager-nsec");
   try {
     const signer = await getSigner(mode, nsec);
     state.signerPubkey = signer.pubkey;
-    statusEl.textContent = `Signer: ${signer.type} · ${signer.pubkey.slice(0, 12)}…`;
-    helpEl.textContent =
-    mode === "nip07"
-        ? "Using your browser signer. Keys stay in your extension."
-        : "Using a session-only nsec. It is never saved to disk.";
+    if (helpEl) {
+      helpEl.textContent =
+        mode === "nip07"
+          ? "Using your browser signer. Keys stay in your extension."
+          : "Using a session-only nsec. It is never saved to disk.";
+    }
+    await refreshSignerProfile();
   } catch (error) {
     state.signerPubkey = null;
-    statusEl.textContent = `Signer: ${mode} not ready`;
-    helpEl.textContent =
-      mode === "nip07"
-        ? "Install a NIP-07 signer (e.g. Alby) to sign events."
-      : "Enter a valid nsec to enable local signing.";
+    state.signerProfile = null;
+    if (helpEl) {
+      helpEl.textContent =
+        mode === "nip07"
+          ? "Install a NIP-07 signer (e.g. Alby) to sign events."
+          : "Enter a valid nsec to enable local signing.";
+    }
   }
+  renderSignerStatus();
   renderNsrHelpers();
 }
 
@@ -1332,6 +1337,7 @@ async function init() {
   initNav();
   initNewButtons();
   initSettings();
+  setupSignerMenu();
   await loadConfig();
   await fetchDefaults();
   await renderRelays();

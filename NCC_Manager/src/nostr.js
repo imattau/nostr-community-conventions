@@ -152,6 +152,30 @@ export async function getSigner(mode, nsec) {
   };
 }
 
+export async function fetchProfile(pubkey, relays = []) {
+  if (!pubkey || !relays.length) return null;
+  const events = await pool.querySync(
+    relays,
+    {
+      kinds: [0],
+      authors: [pubkey],
+      limit: 5
+    },
+    { maxWait: 4000 }
+  );
+  if (!events.length) return null;
+  const latest = events.reduce((best, current) => {
+    if (!best) return current;
+    return (current.created_at || 0) > (best.created_at || 0) ? current : best;
+  }, events[0]);
+  if (!latest?.content) return null;
+  try {
+    return JSON.parse(latest.content);
+  } catch (error) {
+    return null;
+  }
+}
+
 export async function publishEvent(relays, event) {
   const results = await Promise.allSettled(pool.publish(relays, event));
   const accepted = results.filter((result) => result.status === "fulfilled");
