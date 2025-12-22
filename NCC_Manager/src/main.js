@@ -1216,6 +1216,37 @@ function buildEndorsementSummary(event) {
   };
 }
 
+function getEndorsementTargets(event) {
+  const targets = new Set();
+  const leads = eventTagValue(event.tags, "endorses");
+  if (leads) {
+    targets.add(normalizeEventId(leads));
+  }
+  (event.tags || [])
+    .filter((tag) => tag[0] === "e")
+    .forEach((tag) => targets.add(normalizeEventId(tag[1])));
+  return targets;
+}
+
+function recordPublishedEndorsement(event) {
+  if ((event?.kind || 0) !== KINDS.endorsement) return;
+  const targets = getEndorsementTargets(event);
+  if (!targets.size) return;
+  const counts = new Map(state.endorsementCounts || []);
+  const details = new Map(state.endorsementDetails || []);
+  const summary = buildEndorsementSummary(event);
+  for (const targetId of targets) {
+    if (!targetId) continue;
+    counts.set(targetId, (counts.get(targetId) || 0) + 1);
+    const existing = details.get(targetId) || [];
+    const next = [summary, ...existing];
+    next.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    details.set(targetId, next);
+  }
+  state.endorsementCounts = counts;
+  state.endorsementDetails = details;
+}
+
 function isOnline() {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;
@@ -1623,6 +1654,9 @@ async function publishDraft(draft, kind) {
     await saveDraft(updated);
     state.currentDraft[kind] = updated;
     renderForm(kind, updated);
+    if (kind === "endorsement") {
+      recordPublishedEndorsement(event);
+    }
     renderDrafts(kind);
     renderDashboard();
     showToast(
