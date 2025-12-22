@@ -18,6 +18,7 @@ import {
   verifyEvent,
   fetchNccDocuments,
   fetchEndorsements,
+  fetchAuthorEndorsements,
   fetchProfile
 } from "./nostr.js";
 
@@ -1233,35 +1234,80 @@ async function renderDrafts(kind) {
   const listEl = document.getElementById(`${kind}-list`);
   if (!listEl) return;
   const drafts = await listDrafts(KINDS[kind]);
+  let combined = drafts.map((draft) => ({
+    id: draft.id,
+    d: draft.d,
+    status: draft.status,
+    updated_at: draft.updated_at,
+    event_id: draft.event_id,
+    source: "local"
+  }));
 
-  if (!drafts.length) {
+  if (kind === "endorsement" && state.signerPubkey) {
+    const relays = await getRelays();
+    if (relays.length) {
+      try {
+        const events = await fetchAuthorEndorsements(relays, state.signerPubkey);
+        if (events.length) {
+          combined = combined.concat(
+            events.map((event) => ({
+              id: event.id,
+              d: eventTagValue(event.tags, "d") || "",
+              status: "published",
+              updated_at: (event.created_at || 0) * 1000,
+              event_id: event.id,
+              source: "relay",
+              tags: event.tags || [],
+              published_at: event.created_at,
+              content: event.content || "",
+              author: event.pubkey
+            }))
+          );
+        }
+      } catch (error) {
+        console.warn("NCC Manager: failed to load published endorsements", error);
+      }
+    }
+  }
+
+  if (!combined.length) {
     listEl.innerHTML = `<div class="card">No drafts yet.</div>`;
     return;
   }
 
-  listEl.innerHTML = drafts
+  const renderActions = (item) => {
+    if (item.source !== "local") {
+      return `<span class="muted">Published on relays</span>`;
+    }
+    return `
+      <button class="ghost" data-action="edit" data-id="${item.id}">Edit</button>
+      <button class="ghost" data-action="duplicate" data-id="${item.id}">Duplicate</button>
+      <button class="ghost" data-action="export" data-id="${item.id}">Export JSON</button>
+      <button class="primary" data-action="publish" data-id="${item.id}">Publish</button>
+      <button class="ghost" data-action="verify" data-id="${item.id}">Verify</button>
+      <button class="danger" data-action="delete" data-id="${item.id}">Delete</button>
+    `;
+  };
+
+  listEl.innerHTML = combined
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
     .map(
       (draft) => `
         <div class="card">
           <strong>${esc(draft.d || "(no identifier)")}</strong>
           <div class="meta">
-            <span>Status: ${draft.status}</span>
-            <span>Updated: ${new Date(draft.updated_at).toLocaleString()}</span>
+            <span>Status: ${esc(draft.status)}</span>
+            <span>Updated: ${new Date(draft.updated_at || 0).toLocaleString()}</span>
             <span>Event: ${draft.event_id ? draft.event_id.slice(0, 10) + "…" : "-"}</span>
           </div>
           <div class="actions">
-            <button class="ghost" data-action="edit" data-id="${draft.id}">Edit</button>
-            <button class="ghost" data-action="duplicate" data-id="${draft.id}">Duplicate</button>
-            <button class="ghost" data-action="export" data-id="${draft.id}">Export JSON</button>
-            <button class="primary" data-action="publish" data-id="${draft.id}">Publish</button>
-            <button class="ghost" data-action="verify" data-id="${draft.id}">Verify</button>
-            <button class="danger" data-action="delete" data-id="${draft.id}">Delete</button>
+            ${renderActions(draft)}
           </div>
         </div>
       `
     )
     .join("");
-}
+} 
 
 async function handleListAction(kind, event) {
   const target = event.target;

@@ -267,3 +267,16 @@ export async function fetchEndorsements(relays, eventIds) {
     { maxWait: 4000 }
   );
 }
+
+export async function fetchAuthorEndorsements(relays, pubkey) {
+  if (!relays.length || !pubkey) return [];
+  return pool.querySync(
+    relays,
+    {
+      kinds: [30052],
+      authors: [pubkey],
+      limit: 200
+    },
+    { maxWait: 4000 }
+  );
+}
