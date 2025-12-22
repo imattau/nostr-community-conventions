@@ -1247,6 +1247,8 @@ async function renderDrafts(kind) {
   const listEl = document.getElementById(`${kind}-list`);
   if (!listEl) return;
   const drafts = await listDrafts(KINDS[kind]);
+  const signerKey = state.signerPubkey?.toLowerCase() || "";
+  const normalizeKey = (value) => (value || "").toLowerCase();
   let combined = drafts.map((draft) => ({
     id: draft.id,
     d: draft.d,
@@ -1254,6 +1256,8 @@ async function renderDrafts(kind) {
     updated_at: draft.updated_at,
     event_id: draft.event_id,
     source: "local"
+    ,
+    owner: signerKey && normalizeKey(draft.author_pubkey) === signerKey
   }));
 
   if (kind === "endorsement" && state.signerPubkey) {
@@ -1281,7 +1285,8 @@ async function renderDrafts(kind) {
                 tags: event.tags || [],
                 published_at: event.created_at,
                 content: event.content || "",
-                author: event.pubkey
+                author: event.pubkey,
+                owner: signerKey && normalizeKey(event.pubkey) === signerKey
               }))
           );
         }
@@ -1311,24 +1316,25 @@ async function renderDrafts(kind) {
   combined.forEach(addEntry);
   const finalList = Array.from(aggregateByEvent.values());
   const renderActions = (item) => {
-    if (item.source !== "local") {
+    const ownerReady = signerReady && Boolean(item.owner);
+    if (item.source !== "local" && !ownerReady) {
       return `<span class="muted">Published on relays</span>`;
     }
     const showPublish = item.status !== "published";
-    const disabledAttr = signerReady ? "" : "disabled";
-    const lockedHint = signerReady ? "" : 'title="Sign in to manage drafts"';
-    const disableAttrs = `${disabledAttr} ${lockedHint}`;
+    const disabledAttr = ownerReady ? "" : "disabled";
+    const lockedHint = ownerReady ? "" : 'title="Sign in with your signer to manage this endorsement"';
+    const attrString = `${disabledAttr} ${lockedHint}`;
     return `
-      <button class="ghost" data-action="edit" data-id="${item.id}" ${disableAttrs}>Edit</button>
-      <button class="ghost" data-action="duplicate" data-id="${item.id}" ${disableAttrs}>Duplicate</button>
-      <button class="ghost" data-action="export" data-id="${item.id}" ${disableAttrs}>Export JSON</button>
+      <button class="ghost" data-action="edit" data-id="${item.id}" ${attrString}>Edit</button>
+      <button class="ghost" data-action="duplicate" data-id="${item.id}" ${attrString}>Duplicate</button>
+      <button class="ghost" data-action="export" data-id="${item.id}" ${attrString}>Export JSON</button>
       ${
         showPublish
-          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${disableAttrs}>Publish</button>`
+          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${attrString}>Publish</button>`
           : ""
       }
-      <button class="ghost" data-action="verify" data-id="${item.id}" ${disableAttrs}>Verify</button>
-      <button class="danger" data-action="delete" data-id="${item.id}" ${disableAttrs}>Delete</button>
+      <button class="ghost" data-action="verify" data-id="${item.id}" ${attrString}>Verify</button>
+      <button class="danger" data-action="delete" data-id="${item.id}" ${attrString}>Delete</button>
     `;
   };
 
