@@ -45,6 +45,12 @@ Use `npm run dev:all` for the Vite dev server + Express API combo during active 
 - `NCC_SERVER_STORE`: set to `0` to turn off server-side storage.
 - `NCC_MANAGER_DB`: full path to the SQLite file if you need to place it somewhere else (default is per-user storage).
 
+## Caching & offline mode
+
+- NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
+- The UI listens for `online`/`offline` events and informs you via toasts; drafts are always saved locally (IndexedDB + the server’s SQLite store) even when no network is available.
+- Publishing while offline will still attempt to connect to relays, but you can keep editing drafts locally and publish once connectivity returns.
+
 ### Database location
 
 By default the server stores drafts at the OS-specific data path provided by [`env-paths`](https://www.npmjs.com/package/env-paths); for example:
