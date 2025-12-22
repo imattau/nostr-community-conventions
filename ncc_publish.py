@@ -3189,7 +3189,7 @@ def _interactive_tui() -> None:
             tags = store.get_tags(draft["id"])
             tag_map = _tags_to_map(tags)
             supersedes_default = list(tag_map.get("supersedes", []))
-            if draft.get("event_id"):
+            if draft["event_id"]:
                 supersedes_default.append(f"event:{draft['event_id']}")
             if kind == 30050:
                 steps = [

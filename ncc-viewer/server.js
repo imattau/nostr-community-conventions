@@ -19,6 +19,7 @@ const RELAYS = (process.env.NCC_RELAYS ||
 const PORT = Number(process.env.PORT || 4321);
 const CACHE_TTL_MS = Number(process.env.NCC_CACHE_TTL_MS || 600_000);
 const SINCE_SECONDS = Number(process.env.NCC_SINCE_SECONDS || 0);
+const LOG_LEVEL = (process.env.NCC_LOG_LEVEL || "info").toLowerCase();
 
 const cacheState = new Map();
 
@@ -151,7 +152,15 @@ async function fetchEvents(relays) {
   if (SINCE_SECONDS > 0) filter.since = SINCE_SECONDS;
 
   try {
+    const startedAt = Date.now();
+    if (LOG_LEVEL !== "silent") {
+      console.log(`Fetching NCC events from ${relays.length} relays...`);
+    }
     const events = await pool.querySync(relays, filter, { maxWait: 4000 });
+    if (LOG_LEVEL !== "silent") {
+      const durationMs = Date.now() - startedAt;
+      console.log(`Fetched ${events.length} events in ${durationMs}ms.`);
+    }
     return dedupe(events);
   } catch (error) {
     console.error("Failed to fetch NCC events from relays:", error);

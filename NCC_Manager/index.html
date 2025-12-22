@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCC Manager</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <div>
+            <h1>NCC Manager</h1>
+            <p>Draft, publish, and verify NCC, NSR, and endorsement events.</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="pill" id="signer-status">Signer: Not connected</div>
+          <button class="ghost" id="refresh-defaults" type="button">Refresh defaults</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="sidebar">
+          <button class="nav-item active" data-view="dashboard">Overview</button>
+          <button class="nav-item" data-view="ncc">NCC Drafts</button>
+          <button class="nav-item" data-view="nsr">NSR Drafts</button>
+          <button class="nav-item" data-view="endorsement">Endorsements</button>
+          <button class="nav-item" data-view="settings">Settings</button>
+        </aside>
+
+        <main class="content">
+          <section class="view active" data-view="dashboard">
+            <div class="grid two">
+              <div class="panel">
+                <h2>Quick actions</h2>
+                <div class="actions" id="quick-actions"></div>
+              </div>
+              <div class="panel">
+                <h2>Status</h2>
+                <div class="stats" id="status-stats"></div>
+              </div>
+            </div>
+            <div class="panel">
+              <h2>Recent drafts</h2>
+              <div class="list" id="recent-drafts"></div>
+            </div>
+            <div class="panel">
+              <h2>Recently published</h2>
+              <div class="list" id="recent-published"></div>
+            </div>
+          </section>
+
+          <section class="view" data-view="ncc">
+            <div class="grid two">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2>NCC drafts</h2>
+                  <button class="primary" id="new-ncc" type="button">New NCC</button>
+                </div>
+                <div class="list" id="ncc-list"></div>
+              </div>
+              <div class="panel">
+                <h2 id="ncc-form-title">Create NCC</h2>
+                <form id="ncc-form" class="form"></form>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" data-view="nsr">
+            <div class="grid two">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2>Succession records</h2>
+                  <button class="primary" id="new-nsr" type="button">New NSR</button>
+                </div>
+                <div class="list" id="nsr-list"></div>
+              </div>
+              <div class="panel">
+                <h2 id="nsr-form-title">Create NSR</h2>
+                <form id="nsr-form" class="form"></form>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" data-view="endorsement">
+            <div class="grid two">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2>Endorsements</h2>
+                  <button class="primary" id="new-endorsement" type="button">New Endorsement</button>
+                </div>
+                <div class="list" id="endorsement-list"></div>
+              </div>
+              <div class="panel">
+                <div class="panel-header">
+                  <h2 id="endorsement-form-title">Create Endorsement</h2>
+                  <button class="ghost" id="refresh-endorsement-data" type="button">Refresh from relays</button>
+                </div>
+                <div class="form helper">
+                  <label class="field">
+                    <span>Pick NCC to endorse</span>
+                    <select id="endorse-ncc-select"></select>
+                  </label>
+                  <label class="field">
+                    <span>Pick NCC event</span>
+                    <select id="endorse-event-select"></select>
+                  </label>
+                  <p class="muted small" id="endorse-helper-text"></p>
+                </div>
+                <form id="endorsement-form" class="form"></form>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" data-view="settings">
+            <div class="grid two">
+              <div class="panel">
+                <h2>Relays</h2>
+                <div class="relay-section">
+                  <div>
+                    <p class="muted">Default relays</p>
+                    <ul class="relay-list" id="default-relays"></ul>
+                  </div>
+                  <div>
+                    <p class="muted">Your relays</p>
+                    <ul class="relay-list" id="user-relays"></ul>
+                    <div class="inline">
+                      <input id="relay-input" type="text" placeholder="wss://relay.example" />
+                      <button class="primary" id="add-relay" type="button">Add</button>
+                    </div>
+                    <button class="ghost" id="clear-relays" type="button">Clear custom relays</button>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <h2>Signer</h2>
+                <div class="form">
+                  <label class="field">
+                    <span>Signing mode</span>
+                    <select id="signer-mode">
+                      <option value="nip07">NIP-07 browser signer</option>
+                      <option value="nsec">Local nsec (session only)</option>
+                    </select>
+                  </label>
+                  <label class="field" id="nsec-field">
+                    <span>nsec (stored in session only)</span>
+                    <input id="nsec-input" type="password" placeholder="nsec1..." />
+                  </label>
+                  <div class="inline">
+                    <button class="primary" id="save-signer" type="button">Save signer</button>
+                    <button class="ghost" id="clear-signer" type="button">Clear</button>
+                  </div>
+                  <p class="muted" id="signer-help"></p>
+                </div>
+              </div>
+            </div>
+            <div class="panel">
+              <h2>Import / Export</h2>
+              <div class="import-export">
+                <div>
+                  <p class="muted">Import draft JSON</p>
+                  <input id="import-file" type="file" accept="application/json" />
+                  <button class="ghost" id="import-button" type="button">Import</button>
+                </div>
+                <div>
+                  <p class="muted">Export all drafts</p>
+                  <button class="ghost" id="export-all" type="button">Download JSON</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
