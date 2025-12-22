@@ -24,6 +24,7 @@ export const state = {
   signerMode: "nip07",
   nccOptions: [],
   nccDocs: [],
+  remoteBackups: [],
   relayStatus: null,
   endorsementCounts: new Map(),
   signerPubkey: null,

@@ -149,7 +149,13 @@ export function renderForm(kind, draft, state, KINDS) {
       <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(
         publishedValue
       )}" /></label>
-      <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+      <div class="form-actions">
+        <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+        ${isEdit
+          ? `<button class="ghost" type="button" data-action="backup" data-kind="ncc">Backup to Relays</button>`
+          : ""
+        }
+      </div>
     `;
   }
 
@@ -171,7 +177,13 @@ export function renderForm(kind, draft, state, KINDS) {
       <label class="field"><span>Content</span><textarea name="content">${esc(
         draft?.content || ""
       )}</textarea></label>
-      <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+      <div class="form-actions">
+        <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+        ${isEdit
+          ? `<button class="ghost" type="button" data-action="backup" data-kind="nsr">Backup to Relays</button>`
+          : ""
+        }
+      </div>
     `;
   }
 
@@ -195,7 +207,13 @@ export function renderForm(kind, draft, state, KINDS) {
       <label class="field"><span>Content</span><textarea name="content">${esc(
         draft?.content || ""
       )}</textarea></label>
-      <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+      <div class="form-actions">
+        <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+        ${isEdit
+          ? `<button class="ghost" type="button" data-action="backup" data-kind="endorsement">Backup to Relays</button>`
+          : ""
+        }
+      </div>
     `;
   }
 
@@ -221,17 +239,11 @@ export function renderForm(kind, draft, state, KINDS) {
             <select name="type">
               <option value="">Select a type</option>
               <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
-              <option value="implementation"${
-                draft?.tags?.type === "implementation" ? " selected" : ""
-              }>Implementation</option>
+              <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
               <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
-              <option value="migration"${
-                draft?.tags?.type === "migration" ? " selected" : ""
-              }>Migration</option>
+              <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
               <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
-              <option value="rationale"${
-                draft?.tags?.type === "rationale" ? " selected" : ""
-              }>Rationale</option>
+              <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
             </select>
           </label>
           <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(
@@ -256,7 +268,13 @@ export function renderForm(kind, draft, state, KINDS) {
           )}</textarea></label>
         </div>
       </div>
-      <button class="primary" type="submit" hidden>${isEdit ? "Save" : "Create"}</button>
+      <div class="form-actions">
+        <button class="primary" type="submit" hidden>${isEdit ? "Save" : "Create"}</button>
+        ${isEdit
+          ? `<button class="ghost" type="button" data-action="backup" data-kind="supporting" hidden>Backup to Relays</button>`
+          : ""
+        }
+      </div>
     `;
   }
 }
@@ -272,6 +290,7 @@ export function renderDashboard(
   const listEl = document.getElementById("recent-nccs");
   const localDrafts = state.nccLocalDrafts || [];
   const relayDocs = state.nccDocs || [];
+  const remoteBackups = state.remoteBackups || [];
 
   const localMap = new Map(
     localDrafts
@@ -317,6 +336,34 @@ export function renderDashboard(
     });
   }
 
+  // Remote Backups
+  // Filter for backups that are NOT locally present (or present a way to import)
+  const backups = remoteBackups.map((event) => {
+    const d = eventTagValue(event.tags, "d").replace(/^draft:/, "");
+    const title = eventTagValue(event.tags, "title") || "Untitled Draft";
+    return {
+      id: event.id,
+      d,
+      title,
+      status: "remote-backup",
+      published_at: null,
+      event_id: event.id,
+      source: "relay-backup",
+      content: event.content || "",
+      tags: event.tags || [],
+      updated_at: (event.created_at || 0) * 1000,
+      author: event.pubkey,
+      isBackup: true
+    };
+  });
+
+  // We should render backups separately or merged?
+  // Let's create a separate section or list for "Remote Drafts" if they exist.
+  // For now, I'll append them to the combined list but clearly marked.
+  // Actually, keeping them separate is better UI.
+  // But `renderDashboard` writes to `listEl` which is "recent-nccs".
+  // I will inject a "Remote Drafts" header if we have backups.
+
   const grouped = new Map();
   for (const item of combined) {
     if (!item.d) continue;
@@ -330,14 +377,10 @@ export function renderDashboard(
     .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
     .slice(0, 12);
 
-  if (!sorted.length) {
-    listEl.innerHTML = `<div class="card">No NCCs available yet.</div>`;
-    return;
-  }
-
   const canPublish = Boolean(state.signerPubkey);
   const endorsementCounts = state.endorsementCounts || new Map();
-  listEl.innerHTML = sorted
+
+  let html = sorted
     .map((item) => {
       const normalizedEventId = normalizeHexId(item.event_id);
       const endorsementCount =
@@ -354,25 +397,47 @@ export function renderDashboard(
           <strong>${esc(item.d)} · ${esc(item.title)}</strong>
           <div class="meta">
             <span>Status: ${esc(item.status)}</span>
-            <span>Published: ${
-              item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"
-            }</span>
+            <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
             <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
             <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
             ${endorsementMeta}
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
-            ${
-              canPublish && item.source === "local" && item.status !== "published"
-                ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
-                : ""
+            ${canPublish && item.source === "local" && item.status !== "published"
+              ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
+              : ""
             }
           </div>
         </div>
       `;
     })
     .join("");
+
+  if (backups.length > 0) {
+    html += `<div class="divider"></div><h3>Remote Draft Backups (from Relays)</h3>`;
+    html += backups.map(item => `
+        <div class="card" style="border-color: var(--accent);">
+          <strong>${esc(item.d)} · ${esc(item.title)}</strong>
+          <div class="meta">
+            <span>Source: Remote Backup</span>
+            <span>Saved: ${new Date(item.updated_at).toLocaleString()}</span>
+            <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
+          </div>
+          <div class="actions">
+            <button class="ghost" data-action="import-backup" data-id="${item.id}">Import as Local Draft</button>
+          </div>
+        </div>
+    `).join("");
+  }
+
+  if (!sorted.length && !backups.length) {
+    listEl.innerHTML = `<div class="card">No NCCs available yet.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = html;
+
   setupEndorsementCounterButtons();
   renderEndorsementDetailsPanel(state);
 
@@ -682,9 +747,7 @@ export function renderDrafts(
       }
       const publishButton =
         item.status !== "published"
-          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${
-              ownerKey ? "" : 'disabled title="Sign in to publish"'
-            }>Publish</button>`
+          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${ownerKey ? "" : 'disabled title="Sign in to publish"'}>Publish</button>`
           : "";
       const actions = [];
       if (isLocal) {
