@@ -6,8 +6,10 @@ Web app for drafting, publishing, and verifying NCC, NSR, and endorsement events
 
 ```bash
 npm install
-npm run dev
+npm run dev:all
 ```
+
+Vite runs on `http://localhost:5173` and the API server runs on `http://localhost:5179`.
 
 ## Build + run (production)
 

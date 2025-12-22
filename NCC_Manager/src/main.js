@@ -23,10 +23,23 @@ const KINDS = {
   endorsement: 30052
 };
 
+const FALLBACK_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.nostr.band",
+  "wss://nostr.wine",
+  "wss://relay.primal.net",
+  "wss://nostr-01.yakihonne.com"
+];
+
 const state = {
   defaults: [],
   signerMode: "nip07",
   nccOptions: [],
+  nccDocs: [],
+  relayStatus: null,
+  signerPubkey: null,
+  selectedNcc: null,
   currentDraft: {
     ncc: null,
     nsr: null,
@@ -77,7 +90,10 @@ async function fetchDefaults() {
     await setConfig("default_relays", state.defaults);
     renderRelays();
   } catch (error) {
-    showToast("Failed to load default relays.", "error");
+    state.defaults = FALLBACK_RELAYS;
+    await setConfig("default_relays", state.defaults);
+    renderRelays();
+    showToast("Using fallback default relays (server unavailable).", "error");
   }
 }
 
@@ -101,12 +117,14 @@ async function updateSignerStatus() {
   const nsec = sessionStorage.getItem("ncc-manager-nsec");
   try {
     const signer = await getSigner(mode, nsec);
+    state.signerPubkey = signer.pubkey;
     statusEl.textContent = `Signer: ${signer.type} · ${signer.pubkey.slice(0, 12)}…`;
     helpEl.textContent =
       mode === "nip07"
         ? "Using your browser signer. Keys stay in your extension."
         : "Using a session-only nsec. It is never saved to disk.";
   } catch (error) {
+    state.signerPubkey = null;
     statusEl.textContent = `Signer: ${mode} not ready`;
     helpEl.textContent =
       mode === "nip07"
@@ -122,87 +140,85 @@ function switchView(view) {
   document.querySelectorAll(".nav-item").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
+  if (view === "dashboard") {
+    renderDashboard();
+  }
 }
 
 async function renderDashboard() {
-  const drafts = await listDrafts();
-  const statsEl = document.getElementById("status-stats");
-  const recentEl = document.getElementById("recent-drafts");
-  const recentPublishedEl = document.getElementById("recent-published");
+  const listEl = document.getElementById("recent-nccs");
+  const localDrafts = await listDrafts(KINDS.ncc);
+  const relayDocs = state.nccDocs || [];
 
-  const counts = drafts.reduce(
-    (acc, draft) => {
-      acc.total += 1;
-      if (draft.kind === KINDS.ncc) acc.ncc += 1;
-      if (draft.kind === KINDS.nsr) acc.nsr += 1;
-      if (draft.kind === KINDS.endorsement) acc.endorsement += 1;
-      if (draft.status === "published") acc.published += 1;
-      return acc;
-    },
-    { total: 0, ncc: 0, nsr: 0, endorsement: 0, published: 0 }
-  );
+  const localMap = new Map(localDrafts.map((draft) => [draft.event_id || draft.id, draft]));
+  const combined = [];
 
-  statsEl.innerHTML = [
-    `<div class="stat"><span>Total drafts</span><strong>${counts.total}</strong></div>`,
-    `<div class="stat"><span>NCC drafts</span><strong>${counts.ncc}</strong></div>`,
-    `<div class="stat"><span>NSR drafts</span><strong>${counts.nsr}</strong></div>`,
-    `<div class="stat"><span>Endorsements</span><strong>${counts.endorsement}</strong></div>`,
-    `<div class="stat"><span>Published</span><strong>${counts.published}</strong></div>`
-  ].join("");
+  for (const draft of localDrafts) {
+    combined.push({
+      id: draft.id,
+      d: draft.d,
+      title: draft.title || "Untitled",
+      status: draft.status || "draft",
+      published_at: draft.status === "published" ? draft.published_at : null,
+      event_id: draft.event_id || "",
+      source: "local",
+      content: draft.content || "",
+      tags: draft.tags || {},
+      updated_at: draft.updated_at || 0
+    });
+  }
 
-  const recent = await listRecentDrafts(6);
-  if (!recent.length) {
-    recentEl.innerHTML = `<div class="card">No drafts yet.</div>`;
-  } else {
-    recentEl.innerHTML = recent
-      .map(
-        (draft) => `
+  for (const event of relayDocs) {
+    if (localMap.has(event.id)) continue;
+    const publishedAtRaw = eventTagValue(event.tags, "published_at");
+    const publishedAt = publishedAtRaw && String(publishedAtRaw).match(/^\d+$/) ? Number(publishedAtRaw) : null;
+    combined.push({
+      id: event.id,
+      d: eventTagValue(event.tags, "d"),
+      title: eventTagValue(event.tags, "title") || "Untitled",
+      status: publishedAt ? "published" : "proposal",
+      published_at: publishedAt,
+      event_id: event.id,
+      source: "relay",
+      content: event.content || "",
+      tags: event.tags || [],
+      updated_at: (event.created_at || 0) * 1000
+    });
+  }
+
+  const sorted = combined
+    .filter((item) => item.d)
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+    .slice(0, 12);
+
+  if (!sorted.length) {
+    listEl.innerHTML = `<div class="card">No NCCs available yet.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = sorted
+    .map(
+      (item) => `
         <div class="card">
-          <strong>${draft.d || "(no identifier)"}</strong>
+          <strong>${esc(item.d)} · ${esc(item.title)}</strong>
           <div class="meta">
-            <span>Kind: ${draft.kind}</span>
-            <span>Status: ${draft.status}</span>
-            <span>Updated: ${new Date(draft.updated_at).toLocaleString()}</span>
+            <span>Status: ${esc(item.status)}</span>
+            <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
+            <span>Event: ${item.event_id ? item.event_id.slice(0, 10) + "…" : "-"}</span>
+          </div>
+          <div class="actions">
+            <button class="ghost" data-action="view" data-id="${item.id}">View</button>
           </div>
         </div>
       `
-      )
-      .join("");
-  }
+    )
+    .join("");
 
-  const published = drafts.filter((draft) => draft.status === "published");
-  if (!published.length) {
-    recentPublishedEl.innerHTML = `<div class="card">No published drafts yet.</div>`;
-  } else {
-    recentPublishedEl.innerHTML = published
-      .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
-      .slice(0, 6)
-      .map(
-        (draft) => `
-        <div class="card">
-          <strong>${draft.d || "(no identifier)"}</strong>
-          <div class="meta">
-            <span>Kind: ${draft.kind}</span>
-            <span>Event: ${draft.event_id ? draft.event_id.slice(0, 10) + "…" : "-"}</span>
-            <span>Published: ${new Date(draft.updated_at).toLocaleString()}</span>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-  }
-}
-
-function renderQuickActions() {
-  const actionsEl = document.getElementById("quick-actions");
-  actionsEl.innerHTML = [
-    `<button class="ghost" data-view="ncc">Create NCC</button>`,
-    `<button class="ghost" data-view="nsr">Create NSR</button>`,
-    `<button class="ghost" data-view="endorsement">Create endorsement</button>`
-  ].join("");
-  actionsEl.querySelectorAll("button").forEach((button) => {
+  listEl.querySelectorAll("button[data-action=\"view\"]").forEach((button) => {
     button.addEventListener("click", () => {
-      switchView(button.dataset.view);
+      const target = sorted.find((item) => item.id === button.dataset.id);
+      if (!target) return;
+      openNccView(target, localDrafts);
     });
   });
 }
@@ -259,6 +275,7 @@ function renderForm(kind, draft) {
   titleEl.textContent = isEdit ? `Edit ${kind.toUpperCase()} draft` : `Create ${kind.toUpperCase()}`;
 
   if (kind === "ncc") {
+    const publishedValue = draft?.published_at ? draft.published_at : nowSeconds();
     form.innerHTML = `
       <label class="field"><span>Identifier (d tag)</span><input name="d" required value="${esc(draft?.d)}" /></label>
       <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.title)}" /></label>
@@ -270,7 +287,7 @@ function renderForm(kind, draft) {
       <label class="field"><span>Supersedes (comma)</span><input name="supersedes" value="${esc((draft?.tags?.supersedes || []).join(", "))}" /></label>
       <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
       <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
-      <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(draft?.published_at)}" /></label>
+      <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
       <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
     `;
   }
@@ -302,17 +319,113 @@ function renderForm(kind, draft) {
   }
 }
 
+function buildTagsMapFromEvent(tags) {
+  const map = {};
+  (tags || []).forEach((tag) => {
+    const key = tag[0];
+    if (!key) return;
+    map[key] = map[key] || [];
+    map[key].push(tag[1]);
+  });
+  return map;
+}
+
+function toDraftFromRelay(item) {
+  const tagMap = buildTagsMapFromEvent(item.tags || []);
+  return {
+    id: crypto.randomUUID(),
+    kind: KINDS.ncc,
+    status: "draft",
+    d: item.d,
+    title: item.title,
+    content: item.content || "",
+    published_at: null,
+    tags: {
+      summary: tagMap.summary?.[0] || "",
+      topics: tagMap.t || [],
+      lang: tagMap.lang?.[0] || "",
+      version: tagMap.version?.[0] || "",
+      supersedes: item.event_id ? [`event:${item.event_id}`] : [],
+      license: tagMap.license?.[0] || "",
+      authors: tagMap.authors || []
+    }
+  };
+}
+
+function openNccView(item, localDrafts) {
+  state.selectedNcc = item;
+  const titleEl = document.getElementById("ncc-view-title");
+  const metaEl = document.getElementById("ncc-view-meta");
+  const statsEl = document.getElementById("ncc-view-stats");
+  const contentEl = document.getElementById("ncc-view-content");
+  const editButton = document.getElementById("ncc-view-edit");
+  const reviseButton = document.getElementById("ncc-view-revise");
+
+  titleEl.textContent = `${item.d.toUpperCase()} · ${item.title}`;
+  metaEl.textContent = item.event_id ? `Event ${item.event_id}` : "Draft (not published)";
+  statsEl.innerHTML = `
+    <span>Status: ${esc(item.status)}</span>
+    <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
+    <span>Source: ${item.source}</span>
+  `;
+  contentEl.textContent = item.content || "No content available.";
+
+  const localDraft = localDrafts.find((draft) => draft.id === item.id);
+  editButton.disabled = !localDraft || localDraft.status === "published";
+  editButton.onclick = async () => {
+    if (!localDraft || localDraft.status === "published") return;
+    state.currentDraft.ncc = localDraft;
+    renderForm("ncc", localDraft);
+    switchView("ncc");
+  };
+
+  reviseButton.disabled = item.status !== "published";
+  reviseButton.onclick = async () => {
+    if (item.status !== "published") return;
+    let draft;
+    if (item.source === "relay") {
+      draft = toDraftFromRelay(item);
+    } else {
+      const base = localDrafts.find((d) => d.id === item.id);
+      if (!base) return;
+      draft = {
+        ...base,
+        id: crypto.randomUUID(),
+        status: "draft",
+        event_id: "",
+        published_at: null,
+        tags: {
+          ...base.tags,
+          supersedes: Array.from(new Set([...(base.tags?.supersedes || []), `event:${item.event_id}`]))
+        }
+      };
+    }
+    if (!draft) return;
+    await saveDraft(draft);
+    state.currentDraft.ncc = draft;
+    renderForm("ncc", draft);
+    switchView("ncc");
+  };
+
+  switchView("ncc-view");
+}
+
 function eventTagValue(tags, name) {
   if (!Array.isArray(tags)) return "";
   const found = tags.find((tag) => tag[0] === name);
   return found ? found[1] : "";
 }
 
+function isNccDocument(event) {
+  const dValue = eventTagValue(event.tags, "d");
+  return dValue && dValue.toLowerCase().startsWith("ncc-");
+}
+
 function buildNccOptions(events) {
   const grouped = {};
   for (const event of events) {
     const dValue = eventTagValue(event.tags, "d");
-    if (!dValue) continue;
+    if (!dValue || !dValue.toLowerCase().startsWith("ncc-")) continue;
     if (!grouped[dValue]) grouped[dValue] = [];
     grouped[dValue].push(event);
   }
@@ -379,11 +492,30 @@ async function refreshEndorsementHelpers() {
   if (helper) helper.textContent = "Loading NCC documents from relays...";
   try {
     const relays = await getRelays();
+    if (!relays.length) {
+      if (helper) helper.textContent = "No relays configured. Add relays in Settings.";
+      return;
+    }
     const events = await fetchNccDocuments(relays);
-    state.nccOptions = buildNccOptions(events);
+    const filtered = events.filter((event) => isNccDocument(event));
+    state.nccOptions = buildNccOptions(filtered);
+    state.nccDocs = filtered;
+    state.relayStatus = {
+      relays: relays.length,
+      events: filtered.length,
+      at: Date.now()
+    };
     renderEndorsementHelpers();
+    renderDashboard();
+    if (helper) {
+      helper.textContent = `Loaded ${filtered.length} NCC documents from ${relays.length} relays.`;
+    }
+    console.info(
+      `NCC Manager: fetched ${filtered.length}/${events.length} NCC documents from ${relays.length} relays.`
+    );
   } catch (error) {
     if (helper) helper.textContent = "Failed to load NCC documents from relays.";
+    console.error("NCC Manager: relay fetch failed", error);
   }
 }
 
@@ -752,7 +884,6 @@ async function init() {
   initNav();
   initNewButtons();
   initSettings();
-  renderQuickActions();
   await loadConfig();
   await fetchDefaults();
   await renderRelays();
@@ -760,6 +891,8 @@ async function init() {
   await initLists();
   await renderDashboard();
   await refreshEndorsementHelpers();
+
+  document.getElementById("ncc-view-back").addEventListener("click", () => switchView("dashboard"));
 }
 
 init();

@@ -192,6 +192,11 @@ select {
   font-size: 0.95rem;
 }
 
+select option {
+  background: var(--panel-solid);
+  color: var(--text);
+}
+
 textarea {
   min-height: 160px;
   font-family: "IBM Plex Mono", monospace;
@@ -284,6 +289,18 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--stroke);
+  margin: 16px 0;
+}
+
+.read-only {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 0.98rem;
 }
 
 .import-export {
