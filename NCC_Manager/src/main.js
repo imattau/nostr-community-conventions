@@ -425,7 +425,11 @@ async function renderDashboard() {
   const localDrafts = await listDrafts(KINDS.ncc);
   const relayDocs = state.nccDocs || [];
 
-  const localMap = new Map(localDrafts.map((draft) => [draft.event_id || draft.id, draft]));
+  const localMap = new Map(
+    localDrafts
+      .filter((draft) => draft.status !== "relay")
+      .map((draft) => [draft.event_id || draft.id, draft])
+  );
   const combined = [];
 
   for (const draft of localDrafts) {
