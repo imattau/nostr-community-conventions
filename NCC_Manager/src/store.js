@@ -124,3 +124,13 @@ export async function getAllConfig() {
   }
   return entries;
 }
+
+export async function fetchEndorsementCounts() {
+  try {
+    if (!(await checkServerStorage())) return {};
+    const data = await serverRequest("/api/endorsements/counts");
+    return data.counts || {};
+  } catch (error) {
+    return {};
+  }
+}

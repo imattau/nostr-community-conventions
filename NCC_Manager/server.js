@@ -1,7 +1,14 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import { deleteDraft, getDbPath, getDraft, listDrafts, upsertDraft } from "./src/server_store.js";
+import {
+  deleteDraft,
+  getDbPath,
+  getDraft,
+  listDraftData,
+  listDrafts,
+  upsertDraft
+} from "./src/server_store.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +24,9 @@ const DEFAULT_RELAYS = (process.env.NCC_RELAYS ||
   .filter(Boolean);
 
 const SERVER_STORAGE = process.env.NCC_SERVER_STORE !== "0";
+const KINDS = {
+  endorsement: 30052
+};
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -89,6 +99,37 @@ app.delete("/api/drafts/:id", async (req, res) => {
 
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
+
+function normalizeEventId(value) {
+  if (!value) return "";
+  return value.replace(/^event:/i, "").trim().toLowerCase();
+}
+
+app.get("/api/endorsements/counts", async (req, res) => {
+  if (!SERVER_STORAGE) return res.json({ counts: {} });
+  try {
+    const rows = await listDraftData(KINDS.endorsement);
+    const counts = {};
+    for (const draft of rows || []) {
+      const tags = draft.tags || [];
+      const targets = new Set();
+      const endorses = tags.find((tag) => tag[0] === "endorses")?.[1];
+      if (endorses) targets.add(normalizeEventId(endorses));
+      for (const tag of tags) {
+        if (tag[0] === "e" && tag[1]) {
+          targets.add(normalizeEventId(tag[1]));
+        }
+      }
+      for (const target of targets) {
+        if (!target) continue;
+        counts[target] = (counts[target] || 0) + 1;
+      }
+    }
+    res.json({ counts });
+  } catch (error) {
+    res.status(500).json({ counts: {}, error: "Failed to aggregate endorsement counts" });
+  }
+});
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
