@@ -75,13 +75,7 @@ export async function upsertDraft(draft) {
       updated_at = excluded.updated_at,
       data = excluded.data
     `,
-    [
-      normalized.id,
-      normalized.kind,
-      normalized.status || "draft",
-      normalized.updated_at,
-      payload
-    ]
+    [normalized.id, normalized.kind, normalized.status || "draft", normalized.updated_at, payload]
   );
   return normalized;
 }

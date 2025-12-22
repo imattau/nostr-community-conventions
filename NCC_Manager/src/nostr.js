@@ -260,9 +260,7 @@ export async function fetchEndorsements(relays, eventIds) {
   if (!relays.length || !eventIds.length) return [];
   const uniqueIds = Array.from(new Set(eventIds.filter(Boolean)));
   if (!uniqueIds.length) return [];
-  const normalized = uniqueIds
-    .map((id) => id.replace(/^event:/i, "").trim())
-    .filter(Boolean);
+  const normalized = uniqueIds.map((id) => id.replace(/^event:/i, "").trim()).filter(Boolean);
   const filters = [
     {
       kinds: [30052],

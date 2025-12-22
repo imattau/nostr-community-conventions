@@ -12,8 +12,24 @@ const options = {
 };
 const extras = [];
 
+const helpMessage = `
+Usage: ncc-manager [options]
+
+Web app for managing Nostr Community Convention (NCC) drafts, publishing, and verification.
+
+Options:
+  --port <port>  Port to bind the server to (default: 5179)
+  --host <host>  Host to bind the server to (default: 127.0.0.1)
+  --no-open      Do not open the browser automatically
+  --help         Display this help message
+`;
+
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
+  if (arg === "--help") {
+    console.log(helpMessage);
+    process.exit(0);
+  }
   if (arg === "--port" && args[i + 1]) {
     options.port = Number(args[++i]);
     continue;

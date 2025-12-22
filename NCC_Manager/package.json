@@ -12,13 +12,21 @@
   "bin": {
     "ncc-manager": "./bin/ncc-manager.js"
   },
-  "files": ["dist", "server.js", "src", "bin", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "server.js",
+    "src",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "vite",
     "dev:api": "node server.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
     "build": "vite build",
     "start": "NODE_ENV=production node server.js",
+    "format": "prettier --write .",
     "pack:test": "npm run build && sh -c 'set -e; TARBALL=$(npm pack --silent); echo \"Installing $TARBALL globally\"; npm install -g \"$TARBALL\"; ncc-manager --no-open'"
   },
   "prepublishOnly": "npm run build",
@@ -33,7 +41,10 @@
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
+    "@eslint/compat": "^2.0.0",
+    "@eslint/eslintrc": "^3.3.3",
     "concurrently": "^9.0.1",
+    "eslint": "^9.8.0",
     "vite": "^5.4.21"
   }
 }

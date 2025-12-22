@@ -47,7 +47,7 @@ Use `npm run dev:all` for the Vite dev server + Express API combo during active 
 
 ## Supporting documents
 
-You can publish supporting document events (kind: 30053) via the *Supporting Docs* view in the sidebar. At minimum you must supply:
+You can publish supporting document events (kind: 30053) via the _Supporting Docs_ view in the sidebar. At minimum you must supply:
 
 - **Document ID (`d`)**: unique per author (no enforced prefix).
 - **For NCC (`for`)**: which NCC this document supports; it must start with `ncc-`.
