@@ -1,24 +1,6 @@
-import { openDB } from "idb";
-
-const DB_NAME = "ncc-manager";
-const DB_VERSION = 1;
 let serverStatus = null;
-
-async function getDb() {
-  return openDB(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains("drafts")) {
-        const store = db.createObjectStore("drafts", { keyPath: "id" });
-        store.createIndex("kind", "kind", { unique: false });
-        store.createIndex("status", "status", { unique: false });
-        store.createIndex("updated_at", "updated_at", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("config")) {
-        db.createObjectStore("config", { keyPath: "key" });
-      }
-    }
-  });
-}
+const fallbackDrafts = new Map();
+const fallbackConfig = new Map();
 
 async function checkServerStorage() {
   if (serverStatus !== null) return serverStatus;
@@ -59,12 +41,13 @@ export async function saveDraft(draft) {
         method: "POST",
         body: JSON.stringify(data)
       });
+      fallbackDrafts.set(data.id, data);
+      return data;
     }
   } catch (error) {
-    // Fall back to local storage when server fails.
+    // ignore
   }
-  const db = await getDb();
-  await db.put("drafts", data);
+  fallbackDrafts.set(data.id, data);
   return data;
 }
 
@@ -72,25 +55,28 @@ export async function getDraft(id) {
   try {
     if (await checkServerStorage()) {
       const data = await serverRequest(`/api/drafts/${id}`);
-      if (data?.draft) return data.draft;
+      if (data?.draft) {
+        fallbackDrafts.set(id, data.draft);
+        return data.draft;
+      }
     }
   } catch (error) {
-    // ignore, fall back to local
+    // ignore
   }
-  const db = await getDb();
-  return db.get("drafts", id);
+  return fallbackDrafts.get(id) || null;
 }
 
 export async function deleteDraft(id) {
   try {
     if (await checkServerStorage()) {
       await serverRequest(`/api/drafts/${id}`, { method: "DELETE" });
+      fallbackDrafts.delete(id);
+      return;
     }
   } catch (error) {
-    // ignore, fall back to local
+    // ignore
   }
-  const db = await getDb();
-  return db.delete("drafts", id);
+  fallbackDrafts.delete(id);
 }
 
 export async function listDrafts(kind) {
@@ -98,19 +84,21 @@ export async function listDrafts(kind) {
     if (await checkServerStorage()) {
       const url = kind ? `/api/drafts?kind=${kind}` : "/api/drafts";
       const data = await serverRequest(url);
-      if (Array.isArray(data?.drafts)) return data.drafts;
+      if (Array.isArray(data?.drafts)) {
+        for (const draft of data.drafts || []) {
+          if (draft?.id) {
+            fallbackDrafts.set(draft.id, draft);
+          }
+        }
+        return data.drafts;
+      }
     }
   } catch (error) {
-    // ignore, fall back to local
+    // ignore
   }
-  const db = await getDb();
-  let drafts = [];
-  if (kind) {
-    drafts = await db.getAllFromIndex("drafts", "kind", kind);
-  } else {
-    drafts = await db.getAll("drafts");
-  }
-  return drafts.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  const drafts = Array.from(fallbackDrafts.values());
+  const filtered = kind ? drafts.filter((draft) => draft.kind === kind) : drafts;
+  return filtered.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
 }
 
 export async function listRecentDrafts(limit = 5) {
@@ -119,17 +107,20 @@ export async function listRecentDrafts(limit = 5) {
 }
 
 export async function setConfig(key, value) {
-  const db = await getDb();
-  return db.put("config", { key, value });
+  fallbackConfig.set(key, value);
 }
 
 export async function getConfig(key, fallback = null) {
-  const db = await getDb();
-  const result = await db.get("config", key);
-  return result ? result.value : fallback;
+  if (fallbackConfig.has(key)) {
+    return fallbackConfig.get(key);
+  }
+  return fallback;
 }
 
 export async function getAllConfig() {
-  const db = await getDb();
-  return db.getAll("config");
+  const entries = [];
+  for (const [key, value] of fallbackConfig) {
+    entries.push({ key, value });
+  }
+  return entries;
 }
