@@ -271,6 +271,19 @@ p {
   gap: 8px;
 }
 
+#supporting-panel .supporting-fields {
+  display: grid;
+  gap: 12px;
+}
+
+#supporting-panel.collapsed .supporting-fields {
+  display: none;
+}
+
+#supporting-panel .supporting-content textarea {
+  min-height: 320px;
+}
+
 .list {
   display: grid;
   gap: 12px;
