@@ -584,13 +584,16 @@ function renderForm(kind, draft) {
   if (kind === "nsr") {
     const effectiveAtValue = draft?.tags?.effective_at || nowSeconds();
     form.innerHTML = `
-      <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" value="${esc(stripNccNumber(draft?.d))}" /></label>
-      <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
-      <label class="field"><span>Authoritative event id</span><input name="authoritative" required value="${esc(draft?.tags?.authoritative)}" /></label>
-      <label class="field"><span>Steward pubkey/npub</span><input name="steward" value="${esc(draft?.tags?.steward)}" /></label>
-      <label class="field"><span>Previous event id</span><input name="previous" value="${esc(draft?.tags?.previous)}" /></label>
+      <input type="hidden" name="d" value="${esc(draft?.d)}" />
+      <input type="hidden" name="authoritative" value="${esc(draft?.tags?.authoritative)}" />
+      <input type="hidden" name="steward" value="${esc(draft?.tags?.steward)}" />
+      <input type="hidden" name="previous" value="${esc(draft?.tags?.previous)}" />
+      <div class="muted small">Select an NCC + event above to populate the hidden NCC number &amp; event id.</div>
       <label class="field"><span>Reason</span><input name="reason" value="${esc(draft?.tags?.reason)}" /></label>
-      <label class="field"><span>Effective at (unix seconds)</span><input name="effective_at" value="${esc(effectiveAtValue)}" /></label>
+      <label class="field">
+        <span>Effective at (unix seconds)</span>
+        <input name="effective_at" value="${esc(effectiveAtValue)}" />
+      </label>
       <label class="field"><span>Content</span><textarea name="content">${esc(draft?.content)}</textarea></label>
       <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
     `;
@@ -598,9 +601,9 @@ function renderForm(kind, draft) {
 
   if (kind === "endorsement") {
     form.innerHTML = `
-      <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" value="${esc(stripNccNumber(draft?.d))}" /></label>
-      <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
-      <label class="field"><span>Endorses event id</span><input name="endorses" required value="${esc(draft?.tags?.endorses)}" /></label>
+      <input type="hidden" name="d" value="${esc(draft?.d)}" />
+      <input type="hidden" name="endorses" value="${esc(draft?.tags?.endorses)}" />
+      <div class="muted small">Pick an NCC and event from the helper above; those values are stored in the hidden inputs.</div>
       <label class="field"><span>Roles (comma)</span><input name="roles" value="${esc((draft?.tags?.roles || []).join(", "))}" /></label>
       <label class="field"><span>Implementation</span><input name="implementation" value="${esc(draft?.tags?.implementation)}" /></label>
       <label class="field"><span>Note</span><input name="note" value="${esc(draft?.tags?.note)}" /></label>
