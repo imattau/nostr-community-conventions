@@ -259,8 +259,7 @@ export async function fetchEndorsements(relays, eventIds) {
   if (!uniqueIds.length) return [];
   const normalized = uniqueIds
     .map((id) => id.replace(/^event:/i, "").trim())
-    .filter(Boolean)
-    .map((id) => `event:${id}`);
+    .filter(Boolean);
   return pool.querySync(
     relays,
     {
