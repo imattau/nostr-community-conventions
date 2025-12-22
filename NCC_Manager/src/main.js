@@ -259,7 +259,7 @@ function openNccView(item, localDrafts) {
   titleEl.textContent = `${item.d.toUpperCase()} · ${item.title}`;
   metaEl.textContent = item.event_id ? `Event ${item.event_id}` : "Draft (not published)";
   statsEl.innerHTML = `
-    <span>Status: ${esc(item.status)}</span>
+    <span class="badge status-${esc(item.status).toLowerCase()}">${esc(item.status.toUpperCase())}</span>
     <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
     <span>Source: ${item.source}</span>
   `;
@@ -976,16 +976,18 @@ async function publishDraft(draft, kind) {
     const nsec = sessionStorage.getItem("ncc-manager-nsec");
     const signer = await getSigner(signerMode, nsec);
 
-    const template = createEventTemplate(draft);
+    // Ensure we publish with the correct status tag
+    const publishableDraft = { ...draft, status: "published" };
+    const template = createEventTemplate(publishableDraft);
+    
     const event = await signer.signEvent(template);
     const result = await publishEvent(relays, event);
 
     const updated = {
-      ...draft,
-      status: "published",
+      ...publishableDraft,
       event_id: event.id,
       author_pubkey: signer.pubkey,
-      published_at: draft.published_at || nowSeconds(),
+      published_at: publishableDraft.published_at || nowSeconds(),
       raw_event: event,
       raw_tags: event.tags || []
     };
@@ -1041,7 +1043,7 @@ async function backupDraft(draft, kind) {
 
     // Create a backup clone
     const backupD = buildDraftIdentifier(draft.d);
-    const backupDraftPayload = { ...draft, d: backupD };
+    const backupDraftPayload = { ...draft, d: backupD, status: "draft" };
     
     // Ensure status tag is present
     if (!backupDraftPayload.tags) backupDraftPayload.tags = {};
@@ -1050,8 +1052,6 @@ async function backupDraft(draft, kind) {
     // Manually constructing the template to ensure we don't mess up the original draft object
     const template = createEventTemplate(backupDraftPayload);
     
-    // Explicitly inject the 'status' tag for clarity
-    template.tags.push(["status", "draft"]);
     // And a reference to the original d tag for easier recovery logic if needed
     template.tags.push(["original_d", draft.d]);
 

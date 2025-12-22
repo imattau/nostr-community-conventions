@@ -27,6 +27,9 @@ export function buildTagsForDraft(draft) {
   const tags = [];
   const dValue = (draft.d || "").trim();
   if (dValue) pushTag(tags, "d", dValue);
+  
+  // Ensure status is always present, defaulting to draft
+  pushTag(tags, "status", draft.status || "draft");
 
   if (draft.kind === 30050) {
     pushTag(tags, "title", draft.title || "Untitled");
@@ -99,7 +102,7 @@ export function payloadToDraft(payload) {
     d: tagMap.d?.[0] || "",
     title: tagMap.title?.[0] || "",
     content: payload.content || "",
-    status: payload.event_id ? "published" : "draft",
+    status: tagMap.status?.[0] || (payload.event_id ? "published" : "draft"),
     event_id: payload.event_id || "",
     author_pubkey: payload.author_pubkey || "",
     published_at: tagMap.published_at ? Number(tagMap.published_at[0]) : null,
