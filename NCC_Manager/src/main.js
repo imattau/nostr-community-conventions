@@ -393,6 +393,7 @@ async function updateSignerStatus() {
   }
   renderSignerStatus();
   renderNsrHelpers();
+  await renderDrafts("endorsement");
 }
 
 function switchView(view) {
