@@ -7,7 +7,7 @@ Web app for drafting, publishing, and verifying NCC, NSR, and endorsement events
 ### Run without installing globally
 
 ```bash
-npx ncc-manager
+npx @0xx0lostcause0xx0/ncc-manager
 ```
 
 This builds the UI (if needed), serves `dist/` via Express, and opens your browser automatically. Use `--no-open` to skip the browser launch, e.g., `npx ncc-manager --no-open`.
@@ -15,7 +15,7 @@ This builds the UI (if needed), serves `dist/` via Express, and opens your brows
 ### Global install
 
 ```bash
-npm install -g ncc-manager
+npm install -g @0xx0lostcause0xx0/ncc-manager
 ncc-manager
 ```
 
