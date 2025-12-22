@@ -91,6 +91,21 @@ export function buildNccIdentifier(numberValue) {
   return `ncc-${digits}`;
 }
 
+export function buildDraftIdentifier(dValue) {
+  if (!dValue) return "";
+  return `draft:${dValue}`;
+}
+
+export function isDraftIdentifier(value) {
+  if (!value) return false;
+  return value.toString().trim().toLowerCase().startsWith("draft:");
+}
+
+export function stripDraftPrefix(value) {
+  if (!value) return "";
+  return value.toString().trim().replace(/^draft:/, "");
+}
+
 export function isNccIdentifier(value) {
   if (!value) return false;
   return value.toString().trim().toLowerCase().startsWith("ncc-");

@@ -374,6 +374,12 @@ p {
   gap: 14px;
 }
 
+.form-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .form.helper {
   margin-bottom: 16px;
   padding-bottom: 12px;

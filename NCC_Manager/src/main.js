@@ -36,6 +36,9 @@ import {
   stripNccNumber,
   buildNccIdentifier,
   isNccIdentifier,
+  buildDraftIdentifier,
+  isDraftIdentifier,
+  stripDraftPrefix,
   eventTagValue,
   normalizeEventId,
   normalizeHexId,
@@ -697,6 +700,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     }
 
     const filtered = events.filter((event) => isNccDocument(event));
+    const backups = events.filter((event) => isDraftIdentifier(eventTagValue(event.tags, "d")));
     await persistRelayEvents(filtered);
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
     if (eventIds.length && isOnline()) {
@@ -711,6 +715,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     updateState({
       nccOptions: buildNccOptions(filtered),
       nccDocs: filtered,
+      remoteBackups: backups,
       relayStatus: {
         relays: relays.length,
         events: filtered.length,
@@ -1019,6 +1024,45 @@ async function publishDraft(draft, kind) {
     );
   } catch (error) {
     showToast(`Publish failed: ${error.message}`, "error");
+  }
+}
+
+async function backupDraft(draft, kind) {
+  try {
+    if (!draft.d) throw new Error("Draft must have an identifier (d tag) before backing up.");
+    
+    // We don't run full validation because drafts can be incomplete.
+    
+    const relays = await getRelays(getConfig);
+    if (!relays.length) throw new Error("No relays configured");
+    const signerMode = state.signerMode;
+    const nsec = sessionStorage.getItem("ncc-manager-nsec");
+    const signer = await getSigner(signerMode, nsec);
+
+    // Create a backup clone
+    const backupD = buildDraftIdentifier(draft.d);
+    const backupDraftPayload = { ...draft, d: backupD };
+    
+    // Ensure status tag is present
+    if (!backupDraftPayload.tags) backupDraftPayload.tags = {};
+    // We treat this as a standard event template creation but with overridden tags in the builder
+    
+    // Manually constructing the template to ensure we don't mess up the original draft object
+    const template = createEventTemplate(backupDraftPayload);
+    
+    // Explicitly inject the 'status' tag for clarity
+    template.tags.push(["status", "draft"]);
+    // And a reference to the original d tag for easier recovery logic if needed
+    template.tags.push(["original_d", draft.d]);
+
+    const event = await signer.signEvent(template);
+    const result = await publishEvent(relays, event);
+
+    showToast(
+      `Backup saved to ${result.accepted}/${result.total} relays.`
+    );
+  } catch (error) {
+    showToast(`Backup failed: ${error.message}`, "error");
   }
 }
 
@@ -1420,6 +1464,78 @@ async function init() {
   document.getElementById("ncc-edit-cancel").addEventListener("click", hideEditMode);
   document.getElementById("ncc-edit-save").addEventListener("click", saveEditDraft);
   document.getElementById("ncc-edit-toggle").addEventListener("click", toggleEditPanel);
+
+  document.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.dataset.action;
+
+    if (action === "backup") {
+      const kind = target.dataset.kind;
+      if (!kind) return;
+      // Get the current form data to ensure we backup what's on screen, not just what's in state
+      // Actually, handleFormSubmit saves to state. But backup button isn't a submit.
+      // We should probably save the draft first? Or just grab form data?
+      // Simpler: The user should save (to local) then backup.
+      // But we can just grab state.currentDraft[kind] which is updated on edits? 
+      // No, state.currentDraft is updated on SAVE.
+      // If user types and hits backup, they might backup stale data.
+      // FORCE SAVE first? Or warn?
+      // Let's assume user has saved or we risk complex form parsing logic duplication.
+      // We'll warn if no draft exists.
+      
+      const draft = state.currentDraft[kind];
+      if (!draft) {
+        showToast("Please save the draft locally first.", "error");
+        return;
+      }
+      target.disabled = true;
+      await backupDraft(draft, kind);
+      target.disabled = false;
+    }
+
+    if (action === "import-backup") {
+      const id = target.dataset.id;
+      const backup = state.remoteBackups.find((b) => b.id === id);
+      if (backup) {
+        const draft = payloadToDraft(backup);
+        draft.d = stripDraftPrefix(draft.d);
+        draft.source = "local";
+        draft.status = "draft";
+        draft.id = crypto.randomUUID();
+        draft.event_id = "";
+        
+        await saveDraft(draft);
+        showToast("Backup imported as local draft.");
+        
+        const kindKey = Object.keys(KINDS).find((k) => KINDS[k] === draft.kind);
+        if (kindKey) {
+          await renderDrafts(
+            kindKey,
+            state,
+            listDrafts,
+            KINDS,
+            fetchAuthorEndorsements,
+            persistRelayEvents,
+            payloadToDraft,
+            createEventTemplate,
+            downloadJson,
+            publishDraft,
+            verifyDraft,
+            showToast
+          );
+        }
+        renderDashboard(
+          state,
+          listDrafts,
+          openNccView,
+          publishDraft,
+          setupEndorsementCounterButtons,
+          renderEndorsementDetailsPanel
+        );
+      }
+    }
+  });
 }
 
 init();
