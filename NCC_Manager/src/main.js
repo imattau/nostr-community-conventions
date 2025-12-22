@@ -466,8 +466,16 @@ async function renderDashboard() {
     });
   }
 
-  const sorted = combined
-    .filter((item) => item.d)
+  const grouped = new Map();
+  for (const item of combined) {
+    if (!item.d) continue;
+    const key = item.event_id || item.id;
+    const existing = grouped.get(key);
+    if (!existing || (item.updated_at || 0) > (existing.updated_at || 0)) {
+      grouped.set(key, item);
+    }
+  }
+  const sorted = Array.from(grouped.values())
     .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
     .slice(0, 12);
 
