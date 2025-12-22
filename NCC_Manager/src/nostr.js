@@ -176,13 +176,38 @@ export async function fetchProfile(pubkey, relays = []) {
   }
 }
 
-export async function publishEvent(relays, event) {
-  const results = await Promise.allSettled(pool.publish(relays, event));
-  const accepted = results.filter((result) => result.status === "fulfilled");
-  return {
-    accepted: accepted.length,
-    total: results.length
-  };
+const DEFAULT_PUBLISH_ATTEMPTS = 3;
+const DEFAULT_BACKOFF_MS = 500;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function publishEvent(relays, event, options = {}) {
+  const maxAttempts = Math.max(1, options.attempts || DEFAULT_PUBLISH_ATTEMPTS);
+  const backoffBase = options.backoffBaseMs ?? DEFAULT_BACKOFF_MS;
+  let lastOutcome = { accepted: 0, total: relays.length };
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const results = await Promise.allSettled(pool.publish(relays, event));
+    const accepted = results.filter((result) => result.status === "fulfilled");
+    lastOutcome = {
+      accepted: accepted.length,
+      total: results.length
+    };
+
+    if (accepted.length > 0) {
+      return { ...lastOutcome, attempts: attempt };
+    }
+
+    if (attempt < maxAttempts) {
+      await delay(backoffBase * attempt);
+    }
+  }
+
+  throw new Error(
+    `Publish failed on ${relays.length} relays after ${maxAttempts} attempts (${lastOutcome.accepted} accepted)`
+  );
 }
 
 export async function verifyEvent(relays, eventId) {

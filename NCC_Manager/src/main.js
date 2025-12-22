@@ -1166,7 +1166,11 @@ async function publishDraft(draft, kind) {
     renderForm(kind, updated);
     renderDrafts(kind);
     renderDashboard();
-    showToast(`Published to ${result.accepted}/${result.total} relays.`);
+    showToast(
+      `Published to ${result.accepted}/${result.total} relays (took ${result.attempts} attempt${
+        result.attempts === 1 ? "" : "s"
+      }).`
+    );
   } catch (error) {
     showToast(`Publish failed: ${error.message}`, "error");
   }
