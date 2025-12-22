@@ -834,14 +834,25 @@ function openNccView(item, localDrafts) {
   switchView("ncc-view");
 }
 
+function buildRevisionSupersedes(tags, eventId) {
+  const list = tags?.supersedes ? [...tags.supersedes] : [];
+  if (eventId) {
+    const normalized = normalizeEventId(eventId);
+    if (normalized) {
+      const target = `event:${normalized}`;
+      if (!list.includes(target)) list.push(target);
+    }
+  }
+  return list;
+}
+
 function createRevisionDraft(item, localDrafts) {
-  let draft;
-  if (item.source === "relay") {
-    draft = toDraftFromRelay(item);
-  } else {
-    const base = localDrafts.find((d) => d.id === item.id);
-    if (!base) return null;
-    draft = {
+  const eventId = item.event_id || item.id;
+  const relaySource =
+    item.raw_event || state.nccDocs?.find((doc) => normalizeHexId(doc.id) === normalizeHexId(eventId));
+  if (relaySource) {
+    const base = toDraftFromRelay(relaySource);
+    return {
       ...base,
       id: crypto.randomUUID(),
       status: "draft",
@@ -849,11 +860,25 @@ function createRevisionDraft(item, localDrafts) {
       published_at: null,
       tags: {
         ...base.tags,
-        supersedes: Array.from(new Set([...(base.tags?.supersedes || []), `event:${item.event_id}`]))
-      }
+        supersedes: buildRevisionSupersedes(base.tags, eventId)
+      },
+      source: "local"
     };
   }
-  return draft;
+
+  const baseDraft = (localDrafts || []).find((d) => d.id === item.id);
+  if (!baseDraft) return null;
+  return {
+    ...baseDraft,
+    id: crypto.randomUUID(),
+    status: "draft",
+    event_id: "",
+    published_at: null,
+    tags: {
+      ...baseDraft.tags,
+      supersedes: buildRevisionSupersedes(baseDraft.tags, eventId)
+    }
+  };
 }
 
 function setNccViewActions(item, localDrafts) {
