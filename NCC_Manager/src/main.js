@@ -408,6 +408,11 @@ async function renderDashboard() {
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
+            ${
+              item.source === "local" && item.status !== "published"
+                ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
+                : ""
+            }
           </div>
         </div>
       `
@@ -419,6 +424,17 @@ async function renderDashboard() {
       const target = sorted.find((item) => item.id === button.dataset.id);
       if (!target) return;
       openNccView(target, localDrafts);
+    });
+  });
+
+  listEl.querySelectorAll("button[data-action=\"publish\"]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const targetId = button.dataset.id;
+      const kind = button.dataset.kind || "ncc";
+      const targetDraft = localDrafts.find((draft) => draft.id === targetId);
+      if (!targetDraft) return;
+      button.disabled = true;
+      await publishDraft(targetDraft, kind);
     });
   });
 }
