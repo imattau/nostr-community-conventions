@@ -173,7 +173,7 @@ export async function fetchNccDocuments(relays) {
       kinds: [30050],
       limit: 500
     },
-    { maxWait: 3500 }
+    { maxWait: 8000 }
   );
   return events;
 }

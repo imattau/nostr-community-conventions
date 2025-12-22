@@ -32,23 +32,9 @@
 
         <main class="content">
           <section class="view active" data-view="dashboard">
-            <div class="grid two">
-              <div class="panel">
-                <h2>Quick actions</h2>
-                <div class="actions" id="quick-actions"></div>
-              </div>
-              <div class="panel">
-                <h2>Status</h2>
-                <div class="stats" id="status-stats"></div>
-              </div>
-            </div>
             <div class="panel">
-              <h2>Recent drafts</h2>
-              <div class="list" id="recent-drafts"></div>
-            </div>
-            <div class="panel">
-              <h2>Recently published</h2>
-              <div class="list" id="recent-published"></div>
+              <h2>Recent NCCs</h2>
+              <div class="list" id="recent-nccs"></div>
             </div>
           </section>
 
@@ -169,6 +155,25 @@
                   <button class="ghost" id="export-all" type="button">Download JSON</button>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section class="view" data-view="ncc-view">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h2 id="ncc-view-title">NCC</h2>
+                  <p class="muted" id="ncc-view-meta"></p>
+                </div>
+                <div class="actions">
+                  <button class="ghost" id="ncc-view-back" type="button">Back</button>
+                  <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
+                  <button class="ghost" id="ncc-view-revise" type="button">Create revision</button>
+                </div>
+              </div>
+              <div class="meta" id="ncc-view-stats"></div>
+              <div class="divider"></div>
+              <article class="read-only" id="ncc-view-content"></article>
             </div>
           </section>
         </main>
