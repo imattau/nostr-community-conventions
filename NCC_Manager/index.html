@@ -16,7 +16,21 @@
           </div>
         </div>
         <div class="top-actions">
-          <div class="pill" id="signer-status">Signer: Not connected</div>
+          <div class="signer-wrapper">
+            <button class="pill signer-button" id="signer-status" type="button" aria-haspopup="true" aria-expanded="false">
+              Signer: Not connected
+            </button>
+            <div class="signer-menu" id="signer-menu">
+              <div class="menu-profile">
+                <div class="menu-avatar" id="signer-menu-avatar"></div>
+                <div>
+                  <strong id="signer-menu-name">Not connected</strong>
+                  <p id="signer-menu-pubkey"></p>
+                </div>
+              </div>
+              <button class="ghost" id="signer-menu-signout" type="button" disabled>Sign out</button>
+            </div>
+          </div>
           <button class="ghost" id="refresh-defaults" type="button">Refresh defaults</button>
         </div>
       </header>
@@ -24,7 +38,7 @@
       <div class="layout">
         <aside class="sidebar">
           <button class="nav-item active" data-view="dashboard">Overview</button>
-          <button class="nav-item" data-view="ncc">NCC Drafts</button>
+          <button class="nav-item" id="nav-new-ncc" type="button">New NCC</button>
           <button class="nav-item" data-view="nsr">NSR Drafts</button>
           <button class="nav-item" data-view="endorsement">Endorsements</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -39,18 +53,9 @@
           </section>
 
           <section class="view" data-view="ncc">
-            <div class="grid two">
-              <div class="panel">
-                <div class="panel-header">
-                  <h2>NCC drafts</h2>
-                  <button class="primary" id="new-ncc" type="button">New NCC</button>
-                </div>
-                <div class="list" id="ncc-list"></div>
-              </div>
-              <div class="panel">
-                <h2 id="ncc-form-title">Create NCC</h2>
-                <form id="ncc-form" class="form"></form>
-              </div>
+            <div class="panel">
+              <h2 id="ncc-form-title">Create NCC</h2>
+              <form id="ncc-form" class="form"></form>
             </div>
           </section>
 
@@ -65,6 +70,17 @@
               </div>
               <div class="panel">
                 <h2 id="nsr-form-title">Create NSR</h2>
+                <div class="form helper">
+                  <label class="field">
+                    <span>Your NCC</span>
+                    <select id="nsr-ncc-select"></select>
+                  </label>
+                  <label class="field">
+                    <span>Select NCC event</span>
+                    <select id="nsr-event-select"></select>
+                  </label>
+                  <p class="muted small" id="nsr-helper-text"></p>
+                </div>
                 <form id="nsr-form" class="form"></form>
               </div>
             </div>
@@ -159,21 +175,51 @@
           </section>
 
           <section class="view" data-view="ncc-view">
-            <div class="panel">
-              <div class="panel-header">
-                <div>
-                  <h2 id="ncc-view-title">NCC</h2>
-                  <p class="muted" id="ncc-view-meta"></p>
+            <div class="grid two" id="ncc-view-grid">
+              <div class="panel" id="ncc-edit-panel" hidden>
+                <div class="panel-header">
+                  <h2>Edit fields</h2>
+                  <div class="header-actions">
+                    <button class="primary" id="ncc-edit-save" type="button">Save draft</button>
+                    <button class="ghost" id="ncc-edit-cancel" type="button">Cancel</button>
+                    <button class="ghost" id="ncc-edit-toggle" type="button" aria-label="Collapse edit fields">▴</button>
+                  </div>
                 </div>
-                <div class="actions">
-                  <button class="ghost" id="ncc-view-back" type="button">Back</button>
-                  <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
-                  <button class="ghost" id="ncc-view-revise" type="button">Create revision</button>
+                <form class="form" id="ncc-edit-form">
+                  <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" /></label>
+                  <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
+                  <label class="field"><span>Summary</span><input name="summary" /></label>
+                  <label class="field"><span>Topics (comma)</span><input name="topics" /></label>
+                  <label class="field"><span>Language (BCP-47)</span><input name="lang" /></label>
+                  <label class="field"><span>Version</span><input name="version" /></label>
+                  <label class="field"><span>Supersedes (comma)</span><input name="supersedes" /></label>
+                  <label class="field"><span>License</span><input name="license" /></label>
+                  <label class="field"><span>Authors (comma)</span><input name="authors" /></label>
+                  <label class="field"><span>Published at (unix seconds)</span><input name="published_at" /></label>
+                </form>
+              </div>
+              <div class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 id="ncc-view-title">NCC</h2>
+                    <p class="muted" id="ncc-view-meta"></p>
+                  </div>
+                  <div class="actions">
+                    <button class="ghost" id="ncc-view-back" type="button">Back</button>
+                    <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
+                    <button class="ghost" id="ncc-view-revise" type="button">Create revision</button>
+                  </div>
+                </div>
+                <div class="meta" id="ncc-view-stats"></div>
+                <div class="divider"></div>
+                <div id="ncc-view-title-edit" hidden>
+                  <label class="field"><span>Title</span><input id="ncc-title-input" /></label>
+                </div>
+                <article class="read-only" id="ncc-view-content"></article>
+                <div id="ncc-view-content-edit" hidden>
+                  <label class="field"><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea></label>
                 </div>
               </div>
-              <div class="meta" id="ncc-view-stats"></div>
-              <div class="divider"></div>
-              <article class="read-only" id="ncc-view-content"></article>
             </div>
           </section>
         </main>
