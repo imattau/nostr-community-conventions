@@ -29,6 +29,7 @@ body {
     var(--bg);
   color: var(--text);
   min-height: 100vh;
+  line-height: 1.35;
 }
 
 h1,
@@ -274,10 +275,25 @@ p {
 #supporting-panel .supporting-fields {
   display: grid;
   gap: 12px;
+  transition: opacity 0.2s ease, max-height 0.2s ease, margin 0.2s ease;
+  overflow: hidden;
+  max-height: 1200px;
+}
+
+#supporting-panel .supporting-grid {
+  display: grid;
+  gap: 16px;
 }
 
 #supporting-panel.collapsed .supporting-fields {
-  display: none;
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+#supporting-panel .supporting-content {
+  transition: margin-top 0.2s ease;
 }
 
 #supporting-panel .supporting-content textarea {
@@ -450,7 +466,7 @@ button {
 
 .read-only {
   white-space: pre-wrap;
-  line-height: 1.4;
+  line-height: 1.35;
   font-size: 0.98rem;
 }
 
