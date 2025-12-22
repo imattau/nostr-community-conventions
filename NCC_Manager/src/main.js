@@ -610,29 +610,33 @@ function renderForm(kind, draft) {
   if (kind === "supporting") {
     const publishedValue = draft?.tags?.published_at || nowSeconds();
     form.innerHTML = `
-      <label class="field"><span>Document ID</span><input name="d" required pattern="\\S+" placeholder="guides-usage" value="${esc(draft?.d)}" /></label>
-      <p class="muted small">Supporting document IDs must be unique per author.</p>
-      <label class="field"><span>For NCC</span><input name="for" required value="${esc(draft?.tags?.for)}" /></label>
-      <label class="field"><span>For event (optional)</span><input name="for_event" value="${esc(draft?.tags?.for_event)}" /></label>
-      <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.tags?.title)}" /></label>
-      <label class="field"><span>Type</span>
-        <select name="type">
-          <option value="">Select a type</option>
-          <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
-          <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
-          <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
-          <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
-          <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
-          <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
-        </select>
-      </label>
-      <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
-      <label class="field"><span>Language (BCP-47)</span><input name="lang" value="${esc(draft?.tags?.lang)}" /></label>
-      <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
-      <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
-      <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
-      <label class="field"><span>Content (Markdown)</span><textarea name="content">${esc(draft?.content)}</textarea></label>
-      <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+      <div class="supporting-fields">
+        <label class="field"><span>Document ID</span><input name="d" required pattern="\\S+" placeholder="guides-usage" value="${esc(draft?.d)}" /></label>
+        <p class="muted small">Supporting document IDs must be unique per author.</p>
+        <label class="field"><span>For NCC</span><input name="for" required value="${esc(draft?.tags?.for)}" /></label>
+        <label class="field"><span>For event (optional)</span><input name="for_event" value="${esc(draft?.tags?.for_event)}" /></label>
+        <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.tags?.title)}" /></label>
+        <label class="field"><span>Type</span>
+          <select name="type">
+            <option value="">Select a type</option>
+            <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
+            <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
+            <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
+            <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
+            <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
+            <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
+          </select>
+        </label>
+        <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
+        <label class="field"><span>Language (BCP-47)</span><input name="lang" value="${esc(draft?.tags?.lang)}" /></label>
+        <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
+        <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
+        <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
+      </div>
+      <div class="supporting-content">
+        <label class="field"><span>Content (Markdown)</span><textarea name="content">${esc(draft?.content)}</textarea></label>
+      </div>
+      <button class="primary" type="submit" hidden>${isEdit ? "Save" : "Create"}</button>
     `;
   }
 }
