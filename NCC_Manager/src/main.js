@@ -426,20 +426,21 @@ async function renderDashboard() {
 
   const localMap = new Map(
     localDrafts
-      .filter((draft) => draft.status !== "relay")
+      .filter((draft) => draft.source !== "relay")
       .map((draft) => [draft.event_id || draft.id, draft])
   );
   const combined = [];
 
   for (const draft of localDrafts) {
+    const isRelay = draft.source === "relay";
     combined.push({
       id: draft.id,
       d: draft.d,
       title: draft.title || "Untitled",
-      status: draft.status || "draft",
-      published_at: draft.status === "published" ? draft.published_at : null,
+      status: isRelay ? "published" : draft.status || "draft",
+      published_at: draft.published_at || (isRelay ? draft.created_at : null),
       event_id: draft.event_id || "",
-      source: "local",
+      source: isRelay ? "relay" : "local",
       content: draft.content || "",
       tags: draft.tags || {},
       updated_at: draft.updated_at || 0,
@@ -1237,11 +1238,13 @@ async function persistRelayEvents(events) {
     if (state.persistedRelayEvents.has(event.id)) continue;
     state.persistedRelayEvents.add(event.id);
     const draft = payloadToDraft(event);
-    draft.status = "relay";
+    draft.status = "published";
+    draft.source = "relay";
     draft.event_id = event.id;
     const timestamp = event.created_at || nowSeconds();
     draft.updated_at = timestamp * 1000;
     draft.created_at = timestamp * 1000;
+    draft.published_at = timestamp;
     tasks.push(saveDraft(draft));
   }
   if (!tasks.length) return;
