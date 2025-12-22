@@ -55,6 +55,12 @@ const state = {
     nsr: null,
     endorsement: null,
     supporting: null
+  },
+  renderedDrafts: {
+    ncc: [],
+    nsr: [],
+    endorsement: [],
+    supporting: []
   }
 };
 
@@ -618,31 +624,33 @@ function renderForm(kind, draft) {
   if (kind === "supporting") {
     const publishedValue = draft?.tags?.published_at || nowSeconds();
     form.innerHTML = `
-      <div class="supporting-fields">
-        <label class="field"><span>Document ID</span><input name="d" required pattern="\\S+" placeholder="guides-usage" value="${esc(draft?.d)}" /></label>
-        <p class="muted small">Supporting document IDs must be unique per author.</p>
-        <label class="field"><span>For NCC</span><input name="for" required value="${esc(draft?.tags?.for)}" /></label>
-        <label class="field"><span>For event (optional)</span><input name="for_event" value="${esc(draft?.tags?.for_event)}" /></label>
-        <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.tags?.title)}" /></label>
-        <label class="field"><span>Type</span>
-          <select name="type">
-            <option value="">Select a type</option>
-            <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
-            <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
-            <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
-            <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
-            <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
-            <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
-          </select>
-        </label>
-        <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
-        <label class="field"><span>Language (BCP-47)</span><input name="lang" value="${esc(draft?.tags?.lang)}" /></label>
-        <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
-        <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
-        <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
-      </div>
-      <div class="supporting-content">
-        <label class="field"><span>Content (Markdown)</span><textarea name="content">${esc(draft?.content)}</textarea></label>
+      <div class="supporting-grid">
+        <div class="supporting-fields">
+          <label class="field"><span>Document ID</span><input name="d" required pattern="\\S+" placeholder="guides-usage" value="${esc(draft?.d)}" /></label>
+          <p class="muted small">Supporting document IDs must be unique per author.</p>
+          <label class="field"><span>For NCC</span><input name="for" required value="${esc(draft?.tags?.for)}" /></label>
+          <label class="field"><span>For event (optional)</span><input name="for_event" value="${esc(draft?.tags?.for_event)}" /></label>
+          <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.tags?.title)}" /></label>
+          <label class="field"><span>Type</span>
+            <select name="type">
+              <option value="">Select a type</option>
+              <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
+              <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
+              <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
+              <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
+              <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
+              <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
+            </select>
+          </label>
+          <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
+          <label class="field"><span>Language (BCP-47)</span><input name="lang" value="${esc(draft?.tags?.lang)}" /></label>
+          <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
+          <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
+          <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
+        </div>
+        <div class="supporting-content">
+          <label class="field"><span>Content (Markdown)</span><textarea name="content">${esc(draft?.content)}</textarea></label>
+        </div>
       </div>
       <button class="primary" type="submit" hidden>${isEdit ? "Save" : "Create"}</button>
     `;
@@ -1135,9 +1143,16 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
       try {
         const endorsementEvents = await fetchEndorsements(relays, eventIds);
         for (const endorsement of endorsementEvents || []) {
-          const targetId = normalizeEventId(eventTagValue(endorsement.tags, "endorses"));
-          if (!targetId) continue;
-          updatedCounts.set(targetId, (updatedCounts.get(targetId) || 0) + 1);
+          const targets = new Set();
+          const leads = eventTagValue(endorsement.tags, "endorses");
+          if (leads) targets.add(normalizeEventId(leads));
+          (endorsement.tags || [])
+            .filter((tag) => tag[0] === "e")
+            .forEach((tag) => targets.add(normalizeEventId(tag[1])));
+          for (const targetId of targets) {
+            if (!targetId) continue;
+            updatedCounts.set(targetId, (updatedCounts.get(targetId) || 0) + 1);
+          }
         }
         endorsementCounts = updatedCounts;
       } catch (error) {
@@ -1247,8 +1262,6 @@ async function renderDrafts(kind) {
   const listEl = document.getElementById(`${kind}-list`);
   if (!listEl) return;
   const drafts = await listDrafts(KINDS[kind]);
-  const signerKey = state.signerPubkey?.toLowerCase() || "";
-  const normalizeKey = (value) => (value || "").toLowerCase();
   let combined = drafts.map((draft) => ({
     id: draft.id,
     d: draft.d,
@@ -1257,7 +1270,9 @@ async function renderDrafts(kind) {
     event_id: draft.event_id,
     source: "local"
     ,
-    owner: signerKey && normalizeKey(draft.author_pubkey) === signerKey
+    author: draft.author_pubkey || "",
+    content: draft.content || "",
+    tags: draft.tags || {}
   }));
 
   if (kind === "endorsement" && state.signerPubkey) {
@@ -1285,8 +1300,8 @@ async function renderDrafts(kind) {
                 tags: event.tags || [],
                 published_at: event.created_at,
                 content: event.content || "",
-                author: event.pubkey,
-                owner: signerKey && normalizeKey(event.pubkey) === signerKey
+                author: event.pubkey || "",
+                rawEvent: event
               }))
           );
         }
@@ -1297,11 +1312,11 @@ async function renderDrafts(kind) {
   }
 
   if (!combined.length) {
+    state.renderedDrafts = { ...state.renderedDrafts, [kind]: [] };
     listEl.innerHTML = `<div class="card">No drafts yet.</div>`;
     return;
   }
 
-  const signerReady = Boolean(state.signerPubkey);
   const aggregateByEvent = new Map();
   const addEntry = (entry) => {
     const key = normalizeHexId(entry.event_id) || entry.id;
@@ -1315,27 +1330,35 @@ async function renderDrafts(kind) {
   };
   combined.forEach(addEntry);
   const finalList = Array.from(aggregateByEvent.values());
+  state.renderedDrafts = { ...state.renderedDrafts, [kind]: finalList };
   const renderActions = (item) => {
-    const ownerReady = signerReady && Boolean(item.owner);
-    if (item.source !== "local" && !ownerReady) {
-      return `<span class="muted">Published on relays</span>`;
+    const isLocal = item.source === "local";
+    const isRelay = item.source === "relay";
+    const authorKey = (item.author || "").toLowerCase();
+    const ownerKey = state.signerPubkey?.toLowerCase() || "";
+    const ownsRelay = ownerKey && authorKey && ownerKey === authorKey;
+    if (isRelay && !ownsRelay) {
+      const hint = ownerKey ? "" : " — sign in to manage your endorsements";
+      return `<span class="muted">Published on relays${hint}</span>`;
     }
-    const showPublish = item.status !== "published";
-    const disabledAttr = ownerReady ? "" : "disabled";
-    const lockedHint = ownerReady ? "" : 'title="Sign in with your signer to manage this endorsement"';
-    const attrString = `${disabledAttr} ${lockedHint}`;
-    return `
-      <button class="ghost" data-action="edit" data-id="${item.id}" ${attrString}>Edit</button>
-      <button class="ghost" data-action="duplicate" data-id="${item.id}" ${attrString}>Duplicate</button>
-      <button class="ghost" data-action="export" data-id="${item.id}" ${attrString}>Export JSON</button>
-      ${
-        showPublish
-          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${attrString}>Publish</button>`
-          : ""
-      }
-      <button class="ghost" data-action="verify" data-id="${item.id}" ${attrString}>Verify</button>
-      <button class="danger" data-action="delete" data-id="${item.id}" ${attrString}>Delete</button>
-    `;
+    const publishButton =
+      item.status !== "published"
+        ? `<button class="primary" data-action="publish" data-id="${item.id}" ${
+            ownerKey ? "" : 'disabled title="Sign in to publish"'
+          }>Publish</button>`
+        : "";
+    const actions = [];
+    if (isLocal) {
+      actions.push(`<button class="ghost" data-action="edit" data-id="${item.id}">Edit</button>`);
+    }
+    actions.push(`<button class="ghost" data-action="duplicate" data-id="${item.id}">Duplicate</button>`);
+    actions.push(`<button class="ghost" data-action="export" data-id="${item.id}">Export JSON</button>`);
+    if (publishButton) actions.push(publishButton);
+    actions.push(`<button class="ghost" data-action="verify" data-id="${item.id}">Verify</button>`);
+    if (isLocal) {
+      actions.push(`<button class="danger" data-action="delete" data-id="${item.id}">Delete</button>`);
+    }
+    return actions.join("");
   };
 
   listEl.innerHTML = finalList
@@ -1365,7 +1388,14 @@ async function handleListAction(kind, event) {
   const id = target.dataset.id;
   if (!action || !id) return;
 
+  const renderedEntry = findRenderedDraft(kind, id);
+
   if (action === "delete") {
+    const storedDraft = await getDraft(id);
+    if (!storedDraft) {
+      showToast("Only local drafts can be deleted.", "error");
+      return;
+    }
     await deleteDraft(id);
     showToast("Draft deleted.");
     renderDrafts(kind);
@@ -1373,7 +1403,14 @@ async function handleListAction(kind, event) {
     return;
   }
 
-  const draft = await getDraft(id);
+  let draft = await getDraft(id);
+  if (!draft && renderedEntry?.rawEvent) {
+    draft = payloadToDraft(renderedEntry.rawEvent);
+    draft.event_id = renderedEntry.event_id || renderedEntry.rawEvent.event_id || renderedEntry.rawEvent.id;
+    draft.author_pubkey = renderedEntry.author || renderedEntry.rawEvent.pubkey || "";
+    draft.status = renderedEntry.status || "published";
+    draft.id = id;
+  }
   if (!draft) return;
 
   if (action === "edit") {
@@ -1406,9 +1443,12 @@ async function handleListAction(kind, event) {
   }
 
   if (action === "export") {
-    const payload = createEventTemplate(draft);
-    payload.event_id = draft.event_id || undefined;
-    payload.author_pubkey = draft.author_pubkey || undefined;
+    const payload = renderedEntry?.rawEvent
+      ? { ...renderedEntry.rawEvent }
+      : createEventTemplate(draft);
+    payload.event_id =
+      payload.event_id || draft.event_id || renderedEntry?.event_id || undefined;
+    payload.author_pubkey = payload.author_pubkey || draft.author_pubkey || renderedEntry?.author || undefined;
     downloadJson(`draft-${draft.d || draft.id}.json`, payload);
     return;
   }
@@ -1478,6 +1518,11 @@ function validateDraft(draft, kind) {
     if (!draft.tags?.published_at) return "Published at timestamp is required.";
   }
   return "";
+}
+
+function findRenderedDraft(kind, id) {
+  const list = state.renderedDrafts?.[kind] || [];
+  return list.find((entry) => entry.id === id);
 }
 
 async function verifyDraft(draft) {
