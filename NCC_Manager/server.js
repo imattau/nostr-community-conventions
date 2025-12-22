@@ -17,8 +17,10 @@ const app = express();
 const PORT = Number(process.env.PORT || 5179);
 const HOST = process.env.HOST || "127.0.0.1";
 
-const DEFAULT_RELAYS = (process.env.NCC_RELAYS ||
-  "wss://relay.damus.io,wss://nos.lol,wss://relay.nostr.band,wss://nostr.wine,wss://relay.primal.net,wss://nostr-01.yakihonne.com")
+const DEFAULT_RELAYS = (
+  process.env.NCC_RELAYS ||
+  "wss://relay.damus.io,wss://nos.lol,wss://relay.nostr.band,wss://nostr.wine,wss://relay.primal.net,wss://nostr-01.yakihonne.com"
+)
   .split(",")
   .map((relay) => relay.trim())
   .filter(Boolean);
@@ -96,13 +98,15 @@ app.delete("/api/drafts/:id", async (req, res) => {
   }
 });
 
-
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
 
 function normalizeEventId(value) {
   if (!value) return "";
-  return value.replace(/^event:/i, "").trim().toLowerCase();
+  return value
+    .replace(/^event:/i, "")
+    .trim()
+    .toLowerCase();
 }
 
 function extractTagEntries(value) {

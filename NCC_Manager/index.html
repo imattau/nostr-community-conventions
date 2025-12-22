@@ -17,7 +17,13 @@
         </div>
         <div class="top-actions">
           <div class="signer-wrapper">
-            <button class="pill signer-button" id="signer-status" type="button" aria-haspopup="true" aria-expanded="false">
+            <button
+              class="pill signer-button"
+              id="signer-status"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
               Signer: Not connected
             </button>
             <div class="signer-menu" id="signer-menu">
@@ -28,7 +34,9 @@
                   <p id="signer-menu-pubkey"></p>
                 </div>
               </div>
-              <button class="ghost" id="signer-menu-signout" type="button" disabled>Sign out</button>
+              <button class="ghost" id="signer-menu-signout" type="button" disabled>
+                Sign out
+              </button>
             </div>
           </div>
           <button class="ghost" id="refresh-defaults" type="button">Refresh defaults</button>
@@ -93,14 +101,18 @@
               <div class="panel">
                 <div class="panel-header">
                   <h2>Endorsements</h2>
-                  <button class="primary" id="new-endorsement" type="button">New Endorsement</button>
+                  <button class="primary" id="new-endorsement" type="button">
+                    New Endorsement
+                  </button>
                 </div>
                 <div class="list" id="endorsement-list"></div>
               </div>
               <div class="panel">
                 <div class="panel-header">
                   <h2 id="endorsement-form-title">Create Endorsement</h2>
-                  <button class="ghost" id="refresh-endorsement-data" type="button">Refresh from relays</button>
+                  <button class="ghost" id="refresh-endorsement-data" type="button">
+                    Refresh from relays
+                  </button>
                 </div>
                 <div class="form helper">
                   <label class="field">
@@ -134,7 +146,9 @@
                       <input id="relay-input" type="text" placeholder="wss://relay.example" />
                       <button class="primary" id="add-relay" type="button">Add</button>
                     </div>
-                    <button class="ghost" id="clear-relays" type="button">Clear custom relays</button>
+                    <button class="ghost" id="clear-relays" type="button">
+                      Clear custom relays
+                    </button>
                   </div>
                 </div>
               </div>
@@ -184,20 +198,34 @@
                   <div class="header-actions">
                     <button class="primary" id="ncc-edit-save" type="button">Save draft</button>
                     <button class="ghost" id="ncc-edit-cancel" type="button">Cancel</button>
-                    <button class="ghost" id="ncc-edit-toggle" type="button" aria-label="Collapse edit fields">▴</button>
+                    <button
+                      class="ghost"
+                      id="ncc-edit-toggle"
+                      type="button"
+                      aria-label="Collapse edit fields"
+                    >
+                      ▴
+                    </button>
                   </div>
                 </div>
                 <form class="form" id="ncc-edit-form">
-                  <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" /></label>
+                  <label class="field"
+                    ><span>NCC number</span
+                    ><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00"
+                  /></label>
                   <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
                   <label class="field"><span>Summary</span><input name="summary" /></label>
                   <label class="field"><span>Topics (comma)</span><input name="topics" /></label>
                   <label class="field"><span>Language (BCP-47)</span><input name="lang" /></label>
                   <label class="field"><span>Version</span><input name="version" /></label>
-                  <label class="field"><span>Supersedes (comma)</span><input name="supersedes" /></label>
+                  <label class="field"
+                    ><span>Supersedes (comma)</span><input name="supersedes"
+                  /></label>
                   <label class="field"><span>License</span><input name="license" /></label>
                   <label class="field"><span>Authors (comma)</span><input name="authors" /></label>
-                  <label class="field"><span>Published at (unix seconds)</span><input name="published_at" /></label>
+                  <label class="field"
+                    ><span>Published at (unix seconds)</span><input name="published_at"
+                  /></label>
                 </form>
               </div>
               <div class="panel">
@@ -209,7 +237,9 @@
                   <div class="actions">
                     <button class="ghost" id="ncc-view-back" type="button">Back</button>
                     <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
-                    <button class="ghost" id="ncc-view-revise" type="button">Create revision</button>
+                    <button class="ghost" id="ncc-view-revise" type="button">
+                      Create revision
+                    </button>
                   </div>
                 </div>
                 <div class="meta" id="ncc-view-stats"></div>
@@ -219,7 +249,9 @@
                 </div>
                 <article class="read-only" id="ncc-view-content"></article>
                 <div id="ncc-view-content-edit" hidden>
-                  <label class="field"><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea></label>
+                  <label class="field"
+                    ><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea>
+                  </label>
                 </div>
               </div>
             </div>
@@ -230,7 +262,9 @@
               <div class="panel">
                 <div class="panel-header">
                   <h2>Supporting documents</h2>
-                  <button class="primary" id="new-supporting" type="button">New Supporting Doc</button>
+                  <button class="primary" id="new-supporting" type="button">
+                    New Supporting Doc
+                  </button>
                 </div>
                 <div class="list" id="supporting-list"></div>
               </div>
@@ -239,7 +273,14 @@
                   <h2 id="supporting-form-title">Create Supporting Document</h2>
                   <div class="header-actions">
                     <button class="primary" id="supporting-save" type="button">Save draft</button>
-                    <button class="ghost" id="supporting-toggle" type="button" aria-label="Collapse supporting document fields">▴</button>
+                    <button
+                      class="ghost"
+                      id="supporting-toggle"
+                      type="button"
+                      aria-label="Collapse supporting document fields"
+                    >
+                      ▴
+                    </button>
                   </div>
                 </div>
                 <form id="supporting-form" class="form"></form>
