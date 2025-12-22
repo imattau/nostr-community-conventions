@@ -41,6 +41,7 @@
           <button class="nav-item" id="nav-new-ncc" type="button">New NCC</button>
           <button class="nav-item" data-view="nsr">NSR Drafts</button>
           <button class="nav-item" data-view="endorsement">Endorsements</button>
+          <button class="nav-item" data-view="supporting">Supporting Docs</button>
           <button class="nav-item" data-view="settings">Settings</button>
         </aside>
 
@@ -219,6 +220,24 @@
                 <div id="ncc-view-content-edit" hidden>
                   <label class="field"><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea></label>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" data-view="supporting">
+            <div class="grid two">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2>Supporting documents</h2>
+                  <button class="primary" id="new-supporting" type="button">New Supporting Doc</button>
+                </div>
+                <div class="list" id="supporting-list"></div>
+              </div>
+              <div class="panel">
+                <div class="panel-header">
+                  <h2 id="supporting-form-title">Create Supporting Document</h2>
+                </div>
+                <form id="supporting-form" class="form"></form>
               </div>
             </div>
           </section>
