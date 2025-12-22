@@ -339,6 +339,7 @@ Succession records are coordination signals, not enforcement mechanisms.
 
 - `["d","ncc-XX"]`
 - `["endorses","event:<event_id>"]`
+- `["status","<status>"]`
 
 Endorsements are adoption signals only and confer no authority.
 
@@ -460,7 +461,6 @@ This kind is reserved by convention for NCC endorsement signalling and may be re
   - The NCC identifier being endorsed.
 - `["endorses","event:<event_id>"]`
   - References the specific NCC document event (kind:30050) being endorsed.
-  - `["status","<status>"]`
 
 Endorsements SHOULD reference a concrete NCC document, not just an identifier.
 
@@ -593,9 +593,7 @@ This kind is reserved by convention for NCC-related supporting documentation and
 ## Required Tags
 
 - `["d","<doc-id>"]`
-  - Identifier for the supporting document, unique per author.
 - `["for","ncc-XX"]`
-  - Identifies the NCC this document supports.
 - `["title","<title>"]`
 - `["published_at","<unix-seconds>"]`
 - `["status","<status>"]`
