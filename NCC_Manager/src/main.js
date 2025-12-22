@@ -1246,6 +1246,7 @@ async function persistRelayEvents(events) {
     draft.updated_at = timestamp * 1000;
     draft.created_at = timestamp * 1000;
     draft.published_at = timestamp;
+    draft.id = event.id;
     tasks.push(saveDraft(draft));
   }
   if (!tasks.length) return;
