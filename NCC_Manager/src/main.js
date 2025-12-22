@@ -788,10 +788,10 @@ function toDraftFromRelay(item) {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
     status: "draft",
-    d: item.d,
-    title: item.title,
+    d: buildNccIdentifier(eventTagValue(item.tags || [], "d")) || item.d || "",
+    title: eventTagValue(item.tags || [], "title") || item.title || "",
     content: item.content || "",
-    published_at: null,
+    published_at: Number(eventTagValue(item.tags || [], "published_at")) || (item.created_at || nowSeconds()),
     tags: {
       summary: tagMap.summary?.[0] || "",
       topics: tagMap.t || [],
