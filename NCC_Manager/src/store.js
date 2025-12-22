@@ -124,3 +124,16 @@ export async function getAllConfig() {
   }
   return entries;
 }
+
+export async function persistRelayEvent(event) {
+  if (!event?.id) return;
+  try {
+    if (!(await checkServerStorage())) return;
+    await serverRequest("/api/relay-events", {
+      method: "POST",
+      body: JSON.stringify(event)
+    });
+  } catch (error) {
+    // ignore
+  }
+}
