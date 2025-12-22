@@ -21,6 +21,7 @@ import {
   fetchAuthorEndorsements,
   fetchProfile
 } from "./nostr.js";
+import { persistRelayEvent } from "./store.js";
 
 const KINDS = {
   ncc: 30050,
@@ -64,7 +65,8 @@ const state = {
   },
   endorsementDetails: new Map(),
   selectedEndorsementTarget: "",
-  selectedEndorsementLabel: ""
+  selectedEndorsementLabel: "",
+  persistedRelayEvents: new Set()
 };
 
 const NCC_CACHE_KEY_BASE = "ncc-manager-ncc-cache";
@@ -1216,6 +1218,19 @@ function buildEndorsementSummary(event) {
   };
 }
 
+async function persistRelayEvents(events) {
+  if (!events?.length) return;
+  const tasks = [];
+  for (const event of events) {
+    if (!event?.id) continue;
+    if (state.persistedRelayEvents.has(event.id)) continue;
+    state.persistedRelayEvents.add(event.id);
+    tasks.push(persistRelayEvent(event));
+  }
+  if (!tasks.length) return;
+  await Promise.allSettled(tasks);
+}
+
 function getEndorsementTargets(event) {
   const targets = new Set();
   const leads = eventTagValue(event.tags, "endorses");
@@ -1313,6 +1328,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     }
 
     const filtered = events.filter((event) => isNccDocument(event));
+    await persistRelayEvents(filtered);
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
     let remoteCounts = new Map();
     let remoteDetails = new Map();
@@ -1321,6 +1337,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
       const detailBuffer = new Map();
       try {
         const endorsementEvents = await fetchEndorsements(relays, eventIds);
+        await persistRelayEvents(endorsementEvents);
         for (const endorsement of endorsementEvents || []) {
           const targets = getEndorsementTargets(endorsement);
           const summary = buildEndorsementSummary(endorsement);
@@ -1473,6 +1490,7 @@ async function renderDrafts(kind) {
               .filter(Boolean)
               .map((id) => normalizeHexId(id))
           );
+          await persistRelayEvents(events);
           combined = combined.concat(
             events
               .filter((event) => !publishedLocalIds.has(normalizeHexId(event.id)))
