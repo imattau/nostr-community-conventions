@@ -277,7 +277,7 @@ export async function fetchAuthorEndorsements(relays, pubkey) {
     relays,
     {
       kinds: [30052],
-      authors: [pubkey],
+      authors: [pubkey.toLowerCase()],
       limit: 200
     },
     { maxWait: 4000 }
