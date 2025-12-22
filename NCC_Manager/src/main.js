@@ -1411,6 +1411,27 @@ async function importDraft(file) {
   }
 }
 
+function setupSupportingPanelControls() {
+  const panel = document.getElementById("supporting-panel");
+  const toggle = document.getElementById("supporting-toggle");
+  const saveButton = document.getElementById("supporting-save");
+  const form = document.getElementById("supporting-form");
+  if (!panel || !toggle || !saveButton || !form) return;
+
+  toggle.addEventListener("click", () => {
+    const isCollapsed = panel.classList.toggle("collapsed");
+    toggle.textContent = isCollapsed ? "▾" : "▴";
+    toggle.setAttribute(
+      "aria-label",
+      isCollapsed ? "Expand supporting document fields" : "Collapse supporting document fields"
+    );
+  });
+
+  saveButton.addEventListener("click", () => {
+    form.requestSubmit();
+  });
+}
+
 function kindFromValue(kind) {
   if (kind === KINDS.ncc) return "ncc";
   if (kind === KINDS.nsr) return "nsr";
@@ -1558,6 +1579,7 @@ async function init() {
   initNewButtons();
   initSettings();
   setupSignerMenu();
+  setupSupportingPanelControls();
   await loadConfig();
   await fetchDefaults();
   await renderRelays();

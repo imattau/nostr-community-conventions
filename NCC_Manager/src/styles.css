@@ -464,6 +464,10 @@ button {
   gap: 16px;
 }
 
+#supporting-form textarea {
+  min-height: 280px;
+}
+
 .toast {
   position: fixed;
   right: 24px;
