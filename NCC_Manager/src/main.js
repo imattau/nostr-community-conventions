@@ -1296,20 +1296,26 @@ async function renderDrafts(kind) {
     return;
   }
 
+  const signerReady = Boolean(state.signerPubkey);
   const renderActions = (item) => {
     if (item.source !== "local") {
       return `<span class="muted">Published on relays</span>`;
     }
     const showPublish = item.status !== "published";
+    const disabledAttr = signerReady ? "" : "disabled";
+    const lockedHint = signerReady ? "" : 'title="Sign in to manage drafts"';
+    const disableAttrs = `${disabledAttr} ${lockedHint}`;
     return `
-      <button class="ghost" data-action="edit" data-id="${item.id}">Edit</button>
-      <button class="ghost" data-action="duplicate" data-id="${item.id}">Duplicate</button>
-      <button class="ghost" data-action="export" data-id="${item.id}">Export JSON</button>
+      <button class="ghost" data-action="edit" data-id="${item.id}" ${disableAttrs}>Edit</button>
+      <button class="ghost" data-action="duplicate" data-id="${item.id}" ${disableAttrs}>Duplicate</button>
+      <button class="ghost" data-action="export" data-id="${item.id}" ${disableAttrs}>Export JSON</button>
       ${
-        showPublish ? `<button class="primary" data-action="publish" data-id="${item.id}">Publish</button>` : ""
+        showPublish
+          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${disableAttrs}>Publish</button>`
+          : ""
       }
-      <button class="ghost" data-action="verify" data-id="${item.id}">Verify</button>
-      <button class="danger" data-action="delete" data-id="${item.id}">Delete</button>
+      <button class="ghost" data-action="verify" data-id="${item.id}" ${disableAttrs}>Verify</button>
+      <button class="danger" data-action="delete" data-id="${item.id}" ${disableAttrs}>Delete</button>
     `;
   };
 
