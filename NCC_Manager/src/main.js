@@ -21,7 +21,6 @@ import {
   fetchAuthorEndorsements,
   fetchProfile
 } from "./nostr.js";
-import { persistRelayEvent } from "./store.js";
 
 const KINDS = {
   ncc: 30050,
@@ -1229,7 +1228,13 @@ async function persistRelayEvents(events) {
     if (!event?.id) continue;
     if (state.persistedRelayEvents.has(event.id)) continue;
     state.persistedRelayEvents.add(event.id);
-    tasks.push(persistRelayEvent(event));
+    const draft = payloadToDraft(event);
+    draft.status = "relay";
+    draft.event_id = event.id;
+    const timestamp = event.created_at || nowSeconds();
+    draft.updated_at = timestamp * 1000;
+    draft.created_at = timestamp * 1000;
+    tasks.push(saveDraft(draft));
   }
   if (!tasks.length) return;
   await Promise.allSettled(tasks);

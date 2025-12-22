@@ -86,30 +86,6 @@ app.delete("/api/drafts/:id", async (req, res) => {
   }
 });
 
-app.post("/api/relay-events", async (req, res) => {
-  if (!SERVER_STORAGE) return res.status(404).json({ error: "Server storage disabled" });
-  try {
-    const event = req.body;
-    if (!event?.id || !event?.kind) {
-      return res.status(400).json({ error: "Event must include id and kind" });
-    }
-    const timestamp = Number(event.created_at || event.createdAt || Date.now());
-    const draft = {
-      id: event.id,
-      kind: Number(event.kind),
-      status: "relay",
-      updated_at: timestamp * 1000,
-      data: event
-    };
-    await upsertDraft({
-      ...draft,
-      data: JSON.stringify(event)
-    });
-    res.json({ event: draft });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to store relay event", detail: error.message });
-  }
-});
 
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
