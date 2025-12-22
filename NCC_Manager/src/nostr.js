@@ -60,6 +60,18 @@ export function buildTagsForDraft(draft) {
     (draft.tags?.topics || []).forEach((topic) => pushTag(tags, "t", topic));
   }
 
+  if (draft.kind === 30053) {
+    pushTag(tags, "title", draft.tags?.title || "Untitled");
+    pushTag(tags, "for", draft.tags?.for || "");
+    pushTag(tags, "published_at", draft.tags?.published_at || Math.floor(Date.now() / 1000));
+    pushTag(tags, "for_event", normalizeEventReference(draft.tags?.for_event || ""));
+    pushTag(tags, "type", draft.tags?.type || "");
+    (draft.tags?.topics || []).forEach((topic) => pushTag(tags, "t", topic));
+    pushTag(tags, "lang", draft.tags?.lang || "");
+    pushTag(tags, "license", draft.tags?.license || "");
+    (draft.tags?.authors || []).forEach((author) => pushTag(tags, "authors", author));
+  }
+
   return tags.filter((tag) => tag[1] && tag[1] !== "event:");
 }
 
@@ -123,6 +135,20 @@ export function payloadToDraft(payload) {
       implementation: tagMap.implementation?.[0] || "",
       note: tagMap.note?.[0] || "",
       topics: tagMap.t || []
+    };
+  }
+
+  if (draft.kind === 30053) {
+    draft.tags = {
+      title: tagMap.title?.[0] || "",
+      for: tagMap.for?.[0] || "",
+      published_at: tagMap.published_at?.[0] || "",
+      for_event: tagMap.for_event?.[0] || "",
+      type: tagMap.type?.[0] || "",
+      topics: tagMap.t || [],
+      lang: tagMap.lang?.[0] || "",
+      license: tagMap.license?.[0] || "",
+      authors: tagMap.authors || []
     };
   }
 

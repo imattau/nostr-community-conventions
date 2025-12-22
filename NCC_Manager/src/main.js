@@ -24,7 +24,8 @@ import {
 const KINDS = {
   ncc: 30050,
   nsr: 30051,
-  endorsement: 30052
+  endorsement: 30052,
+  supporting: 30053
 };
 
 const FALLBACK_RELAYS = [
@@ -51,7 +52,8 @@ const state = {
   currentDraft: {
     ncc: null,
     nsr: null,
-    endorsement: null
+    endorsement: null,
+    supporting: null
   }
 };
 
@@ -178,6 +180,11 @@ function buildNccIdentifier(numberValue) {
   const digits = stripNccNumber(numberValue);
   if (!digits) return "";
   return `ncc-${digits}`;
+}
+
+function isNccIdentifier(value) {
+  if (!value) return false;
+  return value.toString().trim().toLowerCase().startsWith("ncc-");
 }
 
 function showToast(message, type = "info") {
@@ -596,6 +603,35 @@ function renderForm(kind, draft) {
       <label class="field"><span>Note</span><input name="note" value="${esc(draft?.tags?.note)}" /></label>
       <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
       <label class="field"><span>Content</span><textarea name="content">${esc(draft?.content)}</textarea></label>
+      <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
+    `;
+  }
+
+  if (kind === "supporting") {
+    const publishedValue = draft?.tags?.published_at || nowSeconds();
+    form.innerHTML = `
+      <label class="field"><span>Document ID</span><input name="d" required pattern="\\S+" placeholder="guides-usage" value="${esc(draft?.d)}" /></label>
+      <p class="muted small">Supporting document IDs must be unique per author.</p>
+      <label class="field"><span>For NCC</span><input name="for" required value="${esc(draft?.tags?.for)}" /></label>
+      <label class="field"><span>For event (optional)</span><input name="for_event" value="${esc(draft?.tags?.for_event)}" /></label>
+      <label class="field"><span>Title</span><input name="title" required value="${esc(draft?.tags?.title)}" /></label>
+      <label class="field"><span>Type</span>
+        <select name="type">
+          <option value="">Select a type</option>
+          <option value="guide"${draft?.tags?.type === "guide" ? " selected" : ""}>Guide</option>
+          <option value="implementation"${draft?.tags?.type === "implementation" ? " selected" : ""}>Implementation</option>
+          <option value="faq"${draft?.tags?.type === "faq" ? " selected" : ""}>FAQ</option>
+          <option value="migration"${draft?.tags?.type === "migration" ? " selected" : ""}>Migration</option>
+          <option value="examples"${draft?.tags?.type === "examples" ? " selected" : ""}>Examples</option>
+          <option value="rationale"${draft?.tags?.type === "rationale" ? " selected" : ""}>Rationale</option>
+        </select>
+      </label>
+      <label class="field"><span>Published at (unix seconds)</span><input name="published_at" value="${esc(publishedValue)}" /></label>
+      <label class="field"><span>Language (BCP-47)</span><input name="lang" value="${esc(draft?.tags?.lang)}" /></label>
+      <label class="field"><span>Topics (comma)</span><input name="topics" value="${esc((draft?.tags?.topics || []).join(", "))}" /></label>
+      <label class="field"><span>License</span><input name="license" value="${esc(draft?.tags?.license)}" /></label>
+      <label class="field"><span>Authors (comma)</span><input name="authors" value="${esc((draft?.tags?.authors || []).join(", "))}" /></label>
+      <label class="field"><span>Content (Markdown)</span><textarea name="content">${esc(draft?.content)}</textarea></label>
       <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
     `;
   }
@@ -1161,6 +1197,20 @@ async function handleFormSubmit(kind) {
     };
   }
 
+  if (kind === "supporting") {
+    draft.tags = {
+      title: formData.get("title")?.trim() || "",
+      for: formData.get("for")?.trim() || "",
+      for_event: formData.get("for_event")?.trim() || "",
+      type: formData.get("type")?.trim() || "",
+      published_at: formData.get("published_at")?.trim() || nowSeconds(),
+      lang: formData.get("lang")?.trim() || "",
+      topics: splitList(formData.get("topics")),
+      license: formData.get("license")?.trim() || "",
+      authors: splitList(formData.get("authors"))
+    };
+  }
+
   await saveDraft(draft);
   state.currentDraft[kind] = draft;
   showToast(`${kind.toUpperCase()} draft saved.`);
@@ -1315,6 +1365,12 @@ function validateDraft(draft, kind) {
   if (kind === "endorsement") {
     if (!draft.tags?.endorses) return "Endorses event id is required.";
   }
+  if (kind === "supporting") {
+    if (!draft.tags?.for) return "Target NCC is required.";
+    if (!isNccIdentifier(draft.tags?.for)) return "Target NCC must start with ncc-.";
+    if (!draft.tags?.title) return "Title is required.";
+    if (!draft.tags?.published_at) return "Published at timestamp is required.";
+  }
   return "";
 }
 
@@ -1376,6 +1432,7 @@ async function initForms() {
   renderForm("ncc", null);
   renderForm("nsr", null);
   renderForm("endorsement", null);
+  renderForm("supporting", null);
 
   document.getElementById("ncc-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1389,16 +1446,24 @@ async function initForms() {
     event.preventDefault();
     handleFormSubmit("endorsement");
   });
+  document.getElementById("supporting-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleFormSubmit("supporting");
+  });
 }
 
 async function initLists() {
   await renderDrafts("nsr");
   await renderDrafts("endorsement");
+  await renderDrafts("supporting");
 
   document.getElementById("nsr-list").addEventListener("click", (event) => handleListAction("nsr", event));
   document
     .getElementById("endorsement-list")
     .addEventListener("click", (event) => handleListAction("endorsement", event));
+  document
+    .getElementById("supporting-list")
+    .addEventListener("click", (event) => handleListAction("supporting", event));
 }
 
 function initNav() {
@@ -1423,6 +1488,14 @@ function initNewButtons() {
     state.currentDraft.endorsement = null;
     renderForm("endorsement", null);
   });
+  const newSupportingButton = document.getElementById("new-supporting");
+  if (newSupportingButton) {
+    newSupportingButton.addEventListener("click", () => {
+      state.currentDraft.supporting = null;
+      renderForm("supporting", null);
+      switchView("supporting");
+    });
+  }
 }
 
 function initSettings() {

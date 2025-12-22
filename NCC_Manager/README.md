@@ -45,6 +45,16 @@ Use `npm run dev:all` for the Vite dev server + Express API combo during active 
 - `NCC_SERVER_STORE`: set to `0` to turn off server-side storage.
 - `NCC_MANAGER_DB`: full path to the SQLite file if you need to place it somewhere else (default is per-user storage).
 
+## Supporting documents
+
+You can publish supporting document events (kind: 30053) via the *Supporting Docs* view in the sidebar. At minimum you must supply:
+
+- **Document ID (`d`)**: unique per author (no enforced prefix).
+- **For NCC (`for`)**: which NCC this document supports; it must start with `ncc-`.
+- **Title** and **Published at**: the document metadata.
+
+Additional optional tags are available (for_event, type, language, topics, authors, license) to mirror Appendix E. The editor validates the required relationships before allowing publication.
+
 ## Caching & offline mode
 
 - NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
