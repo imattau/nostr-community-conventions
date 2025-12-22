@@ -473,7 +473,9 @@ async function renderDashboard() {
             }</span>
             <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
             <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
-            <span>Endorsements: ${item.event_id ? endorsementCounts.get(item.event_id) || 0 : 0}</span>
+            <span>Endorsements: ${
+              item.event_id ? endorsementCounts.get(normalizeHexId(item.event_id)) || 0 : 0
+            }</span>
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
@@ -917,7 +919,12 @@ function eventTagValue(tags, name) {
 
 function normalizeEventId(value) {
   if (!value) return "";
-  return value.replace(/^event:/i, "").trim();
+  return value.replace(/^event:/i, "").trim().toLowerCase();
+}
+
+function normalizeHexId(value) {
+  if (!value) return "";
+  return value.trim().toLowerCase();
 }
 
 function isNccDocument(event) {
@@ -1107,7 +1114,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     }
 
     const filtered = events.filter((event) => isNccDocument(event));
-    const eventIds = filtered.map((event) => event.id).filter(Boolean);
+    const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
     let endorsementCounts = state.endorsementCounts || new Map();
     if (eventIds.length && isOnline()) {
       const updatedCounts = new Map();
