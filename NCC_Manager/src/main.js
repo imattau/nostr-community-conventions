@@ -1297,6 +1297,19 @@ async function renderDrafts(kind) {
   }
 
   const signerReady = Boolean(state.signerPubkey);
+  const aggregateByEvent = new Map();
+  const addEntry = (entry) => {
+    const key = normalizeHexId(entry.event_id) || entry.id;
+    const existing = aggregateByEvent.get(key);
+    if (!existing) {
+      aggregateByEvent.set(key, entry);
+      return;
+    }
+    if ((entry.updated_at || 0) <= (existing.updated_at || 0)) return;
+    aggregateByEvent.set(key, entry);
+  };
+  combined.forEach(addEntry);
+  const finalList = Array.from(aggregateByEvent.values());
   const renderActions = (item) => {
     if (item.source !== "local") {
       return `<span class="muted">Published on relays</span>`;
@@ -1319,7 +1332,7 @@ async function renderDrafts(kind) {
     `;
   };
 
-  listEl.innerHTML = combined
+  listEl.innerHTML = finalList
     .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
     .map(
       (draft) => `
