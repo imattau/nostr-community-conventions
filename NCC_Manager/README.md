@@ -7,10 +7,10 @@ Web app for drafting, publishing, and verifying NCC, NSR, and endorsement events
 ### Run without installing globally
 
 ```bash
-npx @0xx0lostcause0xx0/ncc-manager
+npx ncc-manager
 ```
 
-This builds the UI (if needed), serves `dist/` via Express, and opens your browser automatically. Use `--no-open` to skip the browser launch, e.g., `npx ncc-manager --no-open`.
+Since the package exposes a `bin` entry for `ncc-manager` you can also run `npx @0xx0lostcause0xx0/ncc-manager` if you prefer the scoped reference. The CLI builds `dist/` (if needed), starts the Express server, and opens your browser automatically. Pass `--no-open` to skip launching the browser or `--host/--port` to override the defaults (`127.0.0.1` and `5179`).
 
 ### Global install
 
@@ -19,7 +19,7 @@ npm install -g @0xx0lostcause0xx0/ncc-manager
 ncc-manager
 ```
 
-You can also set the host/port on the CLI:
+The globally installed CLI also respects `--host`, `--port`, and `--no-open`:
 
 ```
 ncc-manager --host 0.0.0.0 --port 4322 --no-open
@@ -58,12 +58,12 @@ Additional optional tags are available (for_event, type, language, topics, autho
 ## Caching & offline mode
 
 - NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
-- The UI listens for `online`/`offline` events and informs you via toasts; drafts are always saved locally (IndexedDB + the server’s SQLite store) even when no network is available.
-- Publishing while offline will still attempt to connect to relays, but you can keep editing drafts locally and publish once connectivity returns.
+-- The UI listens for `online`/`offline` events and informs you via toasts; NCC/endorsement events fetched from relays are cached in `localStorage` for five minutes per relay set, so you still see data when temporarily offline.
+-- Drafts are persisted via the server’s SQLite store whenever it is reachable, and a fallback in-memory cache keeps the most recent drafts available even while offline. Publishing while offline will queue the request but eventually retries the relay publish attempts once connectivity returns.
 
 ### Database location
 
-By default the server stores drafts at the OS-specific data path provided by [`env-paths`](https://www.npmjs.com/package/env-paths); for example:
+By default the server stores drafts at the OS-specific data path provided by [`env-paths`](https://www.npmjs.com/package/env-paths), ensuring writable locations even for global installs. For example:
 
 - Linux: `~/.config/ncc-manager/ncc_manager.sqlite`
 - macOS: `~/Library/Application Support/ncc-manager/ncc_manager.sqlite`
