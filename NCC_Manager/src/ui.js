@@ -392,13 +392,15 @@ export function renderDashboard(
             item.d
           )}">Endorsements: ${endorsementCount}</button>`
         : `<span>Endorsements: ${endorsementCount}</span>`;
-      return `
-        <div class="card">
-          <strong>${esc(item.d)} · ${esc(item.title)}</strong>
-          <div class="meta">
-            <span>Status: ${esc(item.status)}</span>
-            <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
-            <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
+            return `
+              <div class="card">
+                <strong>${esc(item.d)} · ${esc(item.title)}</strong>
+                <div class="meta">
+                  <span class="badge status-${esc(item.status).toLowerCase()}">${esc(item.status.toUpperCase())}</span>
+                  <span>Published: ${
+                    item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"
+                  }</span>
+                  <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
             <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
             ${endorsementMeta}
           </div>
