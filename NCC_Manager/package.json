@@ -1,20 +1,35 @@
 {
   "name": "ncc-manager",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Web app for managing NCC drafts, publishing, and verification.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/imattau/nostr-community-conventions.git"
+  },
+  "bin": {
+    "ncc-manager": "./bin/ncc-manager.js"
+  },
+  "files": ["dist", "server.js", "src", "bin", "README.md", "LICENSE"],
   "scripts": {
     "dev": "vite",
     "dev:api": "node server.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
     "build": "vite build",
-    "start": "node server.js"
+    "start": "NODE_ENV=production node server.js",
+    "pack:test": "npm run build && sh -c 'set -e; TARBALL=$(npm pack --silent); echo \"Installing $TARBALL globally\"; npm install -g \"$TARBALL\"; ncc-manager --no-open'"
   },
+  "prepublishOnly": "npm run build",
   "dependencies": {
+    "env-paths": "^3.0.0",
     "express": "^4.19.2",
     "idb": "^8.0.1",
+    "marked": "^12.0.2",
     "nostr-tools": "^2.7.1",
+    "open": "^9.1.0",
+    "sanitize-html": "^2.15.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
