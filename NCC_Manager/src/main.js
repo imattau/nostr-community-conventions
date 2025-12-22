@@ -1260,19 +1260,27 @@ async function renderDrafts(kind) {
       try {
         const events = await fetchAuthorEndorsements(relays, state.signerPubkey);
         if (events.length) {
+          const publishedLocalIds = new Set(
+            drafts
+              .map((draft) => draft.event_id)
+              .filter(Boolean)
+              .map((id) => normalizeHexId(id))
+          );
           combined = combined.concat(
-            events.map((event) => ({
-              id: event.id,
-              d: eventTagValue(event.tags, "d") || "",
-              status: "published",
-              updated_at: (event.created_at || 0) * 1000,
-              event_id: event.id,
-              source: "relay",
-              tags: event.tags || [],
-              published_at: event.created_at,
-              content: event.content || "",
-              author: event.pubkey
-            }))
+            events
+              .filter((event) => !publishedLocalIds.has(normalizeHexId(event.id)))
+              .map((event) => ({
+                id: event.id,
+                d: eventTagValue(event.tags, "d") || "",
+                status: "published",
+                updated_at: (event.created_at || 0) * 1000,
+                event_id: event.id,
+                source: "relay",
+                tags: event.tags || [],
+                published_at: event.created_at,
+                content: event.content || "",
+                author: event.pubkey
+              }))
           );
         }
       } catch (error) {
