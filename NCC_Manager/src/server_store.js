@@ -103,6 +103,11 @@ export async function listDrafts(kind) {
   return rows.map((row) => JSON.parse(row.data));
 }
 
+export async function listDraftData(kind) {
+  const rows = await all("select data from drafts where kind = ?", [kind]);
+  return rows.map((row) => JSON.parse(row.data));
+}
+
 export function getDbPath() {
   return DB_PATH;
 }
