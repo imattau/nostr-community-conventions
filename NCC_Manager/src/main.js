@@ -989,6 +989,10 @@ function renderEndorsementHelpers() {
         return `<option value="${event.id}">${label}</option>`;
       })
       .join("");
+    if (selected.events.length) {
+      eventSelect.value = selected.events[0].id;
+      eventSelect.dispatchEvent(new Event("change"));
+    }
     helper.textContent = "Choose the document event you want to endorse.";
   };
 
@@ -1047,6 +1051,10 @@ function renderNsrHelpers() {
         return `<option value="${event.id}">${label}</option>`;
       })
       .join("");
+    if (selected.events.length) {
+      eventSelect.value = selected.events[0].id;
+      eventSelect.dispatchEvent(new Event("change"));
+    }
     helper.textContent = "Select the event that is authoritative for this NSR.";
   };
 
