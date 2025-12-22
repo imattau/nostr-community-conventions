@@ -58,8 +58,8 @@ Additional optional tags are available (for_event, type, language, topics, autho
 ## Caching & offline mode
 
 - NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
--- The UI listens for `online`/`offline` events and informs you via toasts; NCC/endorsement events fetched from relays are cached in `localStorage` for five minutes per relay set, so you still see data when temporarily offline.
--- Drafts are persisted via the server’s SQLite store whenever it is reachable, and a fallback in-memory cache keeps the most recent drafts available even while offline. Publishing while offline will queue the request but eventually retries the relay publish attempts once connectivity returns.
+- The UI listens for `online`/`offline` events and informs you via toasts; NCC/endorsement events fetched from relays are cached in `localStorage` for five minutes per relay set, so you still see data when temporarily offline.
+- Drafts are persisted via the server’s SQLite store whenever it is reachable, and a fallback in-memory cache keeps the most recent drafts available even while offline. Publishing while offline will queue the request but eventually retries the relay publish attempts once connectivity returns.
 
 ### Database location
 
