@@ -53,6 +53,52 @@ const state = {
   }
 };
 
+const NCC_CACHE_KEY_BASE = "ncc-manager-ncc-cache";
+const NCC_CACHE_TTL_MS = 5 * 60 * 1000;
+const hasLocalStorage = typeof window !== "undefined" && !!window.localStorage;
+
+function buildRelayCacheKey(relays) {
+  if (!relays || !relays.length) return `${NCC_CACHE_KEY_BASE}:default`;
+  const sorted = [...relays].map((relay) => relay.trim()).sort();
+  return `${NCC_CACHE_KEY_BASE}:${sorted.join("|")}`;
+}
+
+function readCachedNcc(key) {
+  if (!hasLocalStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn("Failed to read NCC cache", error);
+    return null;
+  }
+}
+
+function writeCachedNcc(key, events) {
+  if (!hasLocalStorage) return;
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        at: Date.now(),
+        items: events || []
+      })
+    );
+  } catch (error) {
+    console.warn("Failed to write NCC cache", error);
+  }
+}
+
+function formatCacheAge(timestamp) {
+  if (!timestamp) return "just now";
+  const delta = Date.now() - timestamp;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  return `${Math.floor(delta / 86_400_000)}d ago`;
+}
+
 function esc(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -953,7 +999,12 @@ function renderNsrHelpers() {
   };
 }
 
-async function refreshEndorsementHelpers() {
+function isOnline() {
+  if (typeof navigator === "undefined") return true;
+  return navigator.onLine;
+}
+
+async function refreshEndorsementHelpers(forceRefresh = false) {
   const helper = document.getElementById("endorse-helper-text");
   if (helper) helper.textContent = "Loading NCC documents from relays...";
   try {
@@ -962,20 +1013,57 @@ async function refreshEndorsementHelpers() {
       if (helper) helper.textContent = "No relays configured. Add relays in Settings.";
       return;
     }
-    const events = await fetchNccDocuments(relays);
+    const cacheKey = buildRelayCacheKey(relays);
+    const cached = readCachedNcc(cacheKey);
+    const cacheFresh = cached && Date.now() - cached.at < NCC_CACHE_TTL_MS;
+    let events = [];
+    let usedCache = false;
+
+    if ((cacheFresh && !forceRefresh) || !isOnline()) {
+      events = cached?.items || [];
+      usedCache = true;
+      if (!events.length && !isOnline()) {
+        if (helper) helper.textContent = "Offline and no cached NCC documents available.";
+        return;
+      }
+    }
+
+    if (!events.length) {
+      try {
+        const fetched = await fetchNccDocuments(relays);
+        events = fetched;
+        writeCachedNcc(cacheKey, events);
+      } catch (error) {
+        if (cached?.items?.length) {
+          events = cached.items;
+          usedCache = true;
+          if (helper) helper.textContent = "Using cached NCC documents (offline fallback).";
+        } else {
+          throw error;
+        }
+      }
+    }
+
     const filtered = events.filter((event) => isNccDocument(event));
     state.nccOptions = buildNccOptions(filtered);
     state.nccDocs = filtered;
     state.relayStatus = {
       relays: relays.length,
       events: filtered.length,
+      fromCache: usedCache,
       at: Date.now()
     };
     renderEndorsementHelpers();
     renderNsrHelpers();
     renderDashboard();
     if (helper) {
-      helper.textContent = `Loaded ${filtered.length} NCC documents from ${relays.length} relays.`;
+      if (usedCache && cached?.at) {
+        helper.textContent = `Loaded ${filtered.length} cached NCC documents (updated ${formatCacheAge(
+          cached.at
+        )}).`;
+      } else {
+        helper.textContent = `Loaded ${filtered.length} NCC documents from ${relays.length} relays.`;
+      }
     }
     console.info(
       `NCC Manager: fetched ${filtered.length}/${events.length} NCC documents from ${relays.length} relays.`
@@ -1349,7 +1437,7 @@ function initSettings() {
 
   const refreshButton = document.getElementById("refresh-endorsement-data");
   if (refreshButton) {
-    refreshButton.addEventListener("click", refreshEndorsementHelpers);
+    refreshButton.addEventListener("click", () => refreshEndorsementHelpers(true));
   }
 }
 
@@ -1373,3 +1461,16 @@ async function init() {
 }
 
 init();
+
+function setupConnectionListeners() {
+  if (typeof window === "undefined") return;
+  window.addEventListener("online", () => {
+    showToast("Back online. Refreshing NCC documents.", "info");
+    refreshEndorsementHelpers(true);
+  });
+  window.addEventListener("offline", () => {
+    showToast("Offline mode: working from cached NCC data and drafts.", "warning");
+  });
+}
+
+setupConnectionListeners();
