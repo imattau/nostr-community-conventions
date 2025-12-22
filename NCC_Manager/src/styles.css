@@ -322,10 +322,44 @@ p {
   font-size: 0.85rem;
 }
 
+.meta-button {
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border-color: transparent;
+}
+
 .card .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.endorsement-details {
+  margin-top: 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(12, 15, 25, 0.95);
+  border: 1px solid var(--stroke);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.endorsement-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.endorsement-detail {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.endorsement-detail .meta {
+  gap: 6px;
 }
 
 .form {

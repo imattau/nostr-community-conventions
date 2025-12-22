@@ -61,7 +61,10 @@ const state = {
     nsr: [],
     endorsement: [],
     supporting: []
-  }
+  },
+  endorsementDetails: new Map(),
+  selectedEndorsementTarget: "",
+  selectedEndorsementLabel: ""
 };
 
 const NCC_CACHE_KEY_BASE = "ncc-manager-ncc-cache";
@@ -471,8 +474,18 @@ async function renderDashboard() {
   const canPublish = Boolean(state.signerPubkey);
   const endorsementCounts = state.endorsementCounts || new Map();
   listEl.innerHTML = sorted
-    .map(
-      (item) => `
+    .map((item) => {
+      const normalizedEventId = normalizeHexId(item.event_id);
+      const endorsementCount =
+        normalizedEventId && normalizedEventId.length
+          ? endorsementCounts.get(normalizedEventId) || 0
+          : 0;
+      const endorsementMeta = normalizedEventId
+        ? `<button class="ghost meta-button" type="button" data-action="show-endorsements" data-target="${normalizedEventId}" data-label="${esc(
+            item.d
+          )}">Endorsements: ${endorsementCount}</button>`
+        : `<span>Endorsements: ${endorsementCount}</span>`;
+      return `
         <div class="card">
           <strong>${esc(item.d)} · ${esc(item.title)}</strong>
           <div class="meta">
@@ -482,9 +495,7 @@ async function renderDashboard() {
             }</span>
             <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
             <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
-            <span>Endorsements: ${
-              item.event_id ? endorsementCounts.get(normalizeHexId(item.event_id)) || 0 : 0
-            }</span>
+            ${endorsementMeta}
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
@@ -495,9 +506,11 @@ async function renderDashboard() {
             }
           </div>
         </div>
-      `
-    )
+      `;
+    })
     .join("");
+  setupEndorsementCounterButtons();
+  renderEndorsementDetailsPanel();
 
   listEl.querySelectorAll("button[data-action=\"view\"]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -516,6 +529,94 @@ async function renderDashboard() {
       button.disabled = true;
       await publishDraft(targetDraft, kind);
     });
+  });
+}
+
+function renderEndorsementDetailsPanel() {
+  const panel = document.getElementById("endorsement-details-panel");
+  if (!panel) return;
+  const targetId = state.selectedEndorsementTarget;
+  if (!targetId) {
+    panel.hidden = true;
+    panel.innerHTML = "";
+    return;
+  }
+  const entries = state.endorsementDetails?.get(targetId) || [];
+  const label = state.selectedEndorsementLabel || "this NCC";
+  const detailsContent =
+    entries.length > 0
+      ? entries
+          .map((entry) => {
+            const author = entry.author ? shortenKey(entry.author) : "unknown";
+            const eventDate = entry.created_at
+              ? new Date(entry.created_at * 1000).toLocaleString()
+              : "Unknown date";
+            const roles = entry.roles?.length
+              ? `<span class="muted small">Roles: ${esc(entry.roles.join(", "))}</span>`
+              : "";
+            const topics = entry.topics?.length
+              ? `<span class="muted small">Topics: ${esc(entry.topics.join(", "))}</span>`
+              : "";
+            const note = entry.note ? `<p>${esc(entry.note)}</p>` : "";
+            const implementation = entry.implementation
+              ? `<p class="muted small">Implementation: ${esc(entry.implementation)}</p>`
+              : "";
+            const nccLabel = entry.d ? `<span class="muted small">NCC: ${esc(entry.d)}</span>` : "";
+            return `
+              <div class="card endorsement-detail">
+                <div class="meta">
+                  <span>Event: ${shortenKey(entry.id)}</span>
+                  <span>Author: ${esc(author)}</span>
+                  <span>${eventDate}</span>
+                </div>
+                <div class="meta">
+                  ${nccLabel}
+                  ${roles}
+                  ${topics}
+                </div>
+                ${note}
+                ${implementation}
+              </div>
+            `;
+          })
+          .join("")
+      : `<div class="card"><p class="muted small">No endorsement events recorded yet.</p></div>`;
+  panel.innerHTML = `
+    <div class="endorsement-details-header">
+      <strong>Endorsements for ${esc(label)}</strong>
+      <button class="ghost meta-button" type="button" data-action="close-endorsement-details">Close</button>
+    </div>
+    <p class="muted small">${entries.length} event${entries.length === 1 ? "" : "s"} documented.</p>
+    ${detailsContent}
+  `;
+  panel.hidden = false;
+}
+
+function setupEndorsementCounterButtons() {
+  const listEl = document.getElementById("recent-nccs");
+  if (!listEl) return;
+  listEl
+    .querySelectorAll("button[data-action=\"show-endorsements\"]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        state.selectedEndorsementTarget = button.dataset.target || "";
+        state.selectedEndorsementLabel = button.dataset.label || "";
+        renderEndorsementDetailsPanel();
+      });
+    });
+}
+
+function setupEndorsementDetailsControls() {
+  const panel = document.getElementById("endorsement-details-panel");
+  if (!panel) return;
+  panel.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.dataset.action === "close-endorsement-details") {
+      state.selectedEndorsementTarget = "";
+      state.selectedEndorsementLabel = "";
+      renderEndorsementDetailsPanel();
+    }
   });
 }
 
@@ -1090,6 +1191,31 @@ function renderNsrHelpers() {
   };
 }
 
+function buildEndorsementSummary(event) {
+  const roles = [];
+  const topics = [];
+  let implementation = "";
+  let note = "";
+  (event.tags || []).forEach((tag) => {
+    if (!tag[0]) return;
+    if (tag[0] === "role") roles.push(tag[1]);
+    if (tag[0] === "t") topics.push(tag[1]);
+    if (tag[0] === "implementation" && !implementation) implementation = tag[1];
+    if (tag[0] === "note" && !note) note = tag[1];
+  });
+  return {
+    id: event.id,
+    author: event.pubkey || "",
+    pubkey: event.pubkey || "",
+    created_at: event.created_at || 0,
+    d: eventTagValue(event.tags, "d") || "",
+    roles,
+    topics,
+    implementation,
+    note
+  };
+}
+
 function isOnline() {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;
@@ -1138,6 +1264,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     const filtered = events.filter((event) => isNccDocument(event));
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
     let endorsementCounts = state.endorsementCounts || new Map();
+    const detailMap = new Map();
     if (eventIds.length && isOnline()) {
       const updatedCounts = new Map();
       try {
@@ -1149,17 +1276,25 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
           (endorsement.tags || [])
             .filter((tag) => tag[0] === "e")
             .forEach((tag) => targets.add(normalizeEventId(tag[1])));
+          const summary = buildEndorsementSummary(endorsement);
           for (const targetId of targets) {
             if (!targetId) continue;
             updatedCounts.set(targetId, (updatedCounts.get(targetId) || 0) + 1);
+            const existing = detailMap.get(targetId) || [];
+            existing.push(summary);
+            detailMap.set(targetId, existing);
           }
         }
+        detailMap.forEach((list) => {
+          list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        });
         endorsementCounts = updatedCounts;
       } catch (error) {
         console.warn("NCC Manager: failed to fetch endorsement counts", error);
       }
     }
     state.endorsementCounts = endorsementCounts;
+    state.endorsementDetails = detailMap;
     state.nccOptions = buildNccOptions(filtered);
     state.nccDocs = filtered;
     state.relayStatus = {
@@ -1171,6 +1306,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     renderEndorsementHelpers();
     renderNsrHelpers();
     renderDashboard();
+    renderEndorsementDetailsPanel();
     if (helper) {
       if (usedCache && cached?.at) {
         helper.textContent = `Loaded ${filtered.length} cached NCC documents (updated ${formatCacheAge(
@@ -1731,6 +1867,7 @@ async function init() {
   initSettings();
   setupSignerMenu();
   setupSupportingPanelControls();
+  setupEndorsementDetailsControls();
   await loadConfig();
   await fetchDefaults();
   await renderRelays();
