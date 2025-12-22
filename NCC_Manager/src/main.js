@@ -1247,6 +1247,26 @@ function recordPublishedEndorsement(event) {
   state.endorsementDetails = details;
 }
 
+function mergeEndorsementCounts(remote, existing) {
+  const merged = new Map(remote || []);
+  (existing || new Map()).forEach((value, key) => {
+    if (!merged.has(key)) {
+      merged.set(key, value);
+    }
+  });
+  return merged;
+}
+
+function mergeEndorsementDetails(remote, existing) {
+  const merged = new Map(remote || []);
+  (existing || new Map()).forEach((value, key) => {
+    if (!merged.has(key)) {
+      merged.set(key, value);
+    }
+  });
+  return merged;
+}
+
 function isOnline() {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;
@@ -1294,38 +1314,37 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
 
     const filtered = events.filter((event) => isNccDocument(event));
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
-    let endorsementCounts = state.endorsementCounts || new Map();
-    const detailMap = new Map();
+    let remoteCounts = new Map();
+    let remoteDetails = new Map();
     if (eventIds.length && isOnline()) {
       const updatedCounts = new Map();
+      const detailBuffer = new Map();
       try {
         const endorsementEvents = await fetchEndorsements(relays, eventIds);
         for (const endorsement of endorsementEvents || []) {
-          const targets = new Set();
-          const leads = eventTagValue(endorsement.tags, "endorses");
-          if (leads) targets.add(normalizeEventId(leads));
-          (endorsement.tags || [])
-            .filter((tag) => tag[0] === "e")
-            .forEach((tag) => targets.add(normalizeEventId(tag[1])));
+          const targets = getEndorsementTargets(endorsement);
           const summary = buildEndorsementSummary(endorsement);
           for (const targetId of targets) {
             if (!targetId) continue;
             updatedCounts.set(targetId, (updatedCounts.get(targetId) || 0) + 1);
-            const existing = detailMap.get(targetId) || [];
+            const existing = detailBuffer.get(targetId) || [];
             existing.push(summary);
-            detailMap.set(targetId, existing);
+            detailBuffer.set(targetId, existing);
           }
         }
-        detailMap.forEach((list) => {
+        detailBuffer.forEach((list) => {
           list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
         });
-        endorsementCounts = updatedCounts;
+        remoteCounts = updatedCounts;
+        remoteDetails = detailBuffer;
       } catch (error) {
         console.warn("NCC Manager: failed to fetch endorsement counts", error);
       }
     }
-    state.endorsementCounts = endorsementCounts;
-    state.endorsementDetails = detailMap;
+    const mergedCounts = mergeEndorsementCounts(remoteCounts, state.endorsementCounts);
+    const mergedDetails = mergeEndorsementDetails(remoteDetails, state.endorsementDetails);
+    state.endorsementCounts = mergedCounts;
+    state.endorsementDetails = mergedDetails;
     state.nccOptions = buildNccOptions(filtered);
     state.nccDocs = filtered;
     state.relayStatus = {
