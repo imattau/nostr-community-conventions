@@ -260,15 +260,22 @@ export async function fetchEndorsements(relays, eventIds) {
   const normalized = uniqueIds
     .map((id) => id.replace(/^event:/i, "").trim())
     .filter(Boolean);
-  return pool.querySync(
-    relays,
+  const filters = [
     {
       kinds: [30052],
       "#e": normalized,
       limit: 1000
     },
-    { maxWait: 4000 }
-  );
+    {
+      kinds: [30052],
+      "#endorses": normalized,
+      limit: 1000
+    }
+  ];
+  const events = await pool.querySync(relays, filters, { maxWait: 4000 });
+  const dedup = new Map();
+  (events || []).forEach((event) => dedup.set(event.id, event));
+  return Array.from(dedup.values());
 }
 
 export async function fetchAuthorEndorsements(relays, pubkey) {
