@@ -77,6 +77,22 @@ const FALLBACK_RELAYS = [
 
 const NCC_CACHE_TTL_MS = 5 * 60 * 1000;
 
+async function updateAllDrafts() {
+  const [ncc, nsr, endorsement, supporting] = await Promise.all([
+    listDrafts(KINDS.ncc),
+    listDrafts(KINDS.nsr),
+    listDrafts(KINDS.endorsement),
+    listDrafts(KINDS.supporting)
+  ]);
+  
+  updateState({ 
+    nccLocalDrafts: ncc,
+    nsrLocalDrafts: nsr,
+    endorsementLocalDrafts: endorsement,
+    supportingLocalDrafts: supporting
+  });
+}
+
 async function switchShell(mode) {
   console.log("Switching shell to:", mode);
   const classic = document.getElementById("shell-classic");
@@ -103,6 +119,7 @@ async function switchShell(mode) {
     document.body.classList.add("mode-power");
     classic.hidden = true;
     power.hidden = false;
+    await updateAllDrafts();
     try {
       initPowerShell(state, { 
         switchShell,
@@ -127,7 +144,14 @@ async function handlePowerSave(id, content, fullDraft = null) {
   let item = fullDraft;
   
   if (!item) {
-    item = (state.nccLocalDrafts || []).find(d => d.id === id);
+    const allLocal = [
+      ...(state.nccLocalDrafts || []),
+      ...(state.nsrLocalDrafts || []),
+      ...(state.endorsementLocalDrafts || []),
+      ...(state.supportingLocalDrafts || [])
+    ];
+    item = allLocal.find(d => d.id === id);
+    
     if (!item) {
       const relayItem = (state.nccDocs || []).find(d => d.id === id);
       if (relayItem) {
@@ -159,8 +183,7 @@ async function handlePowerSave(id, content, fullDraft = null) {
     }
   }
   
-  const nccDrafts = await listDrafts(KINDS.ncc);
-  updateState({ nccLocalDrafts: nccDrafts });
+  await updateAllDrafts();
   refreshDashboard();
 }
 
@@ -257,9 +280,7 @@ async function updateSignerStatus() {
     showToast
   );
   
-  const nccDrafts = await listDrafts(KINDS.ncc);
-  updateState({ nccLocalDrafts: nccDrafts });
-
+  await updateAllDrafts();
   await refreshDashboard();
 }
 
@@ -645,8 +666,7 @@ async function saveEditDraft() {
     showToast("Draft saved locally.");
   }
 
-  const nccDrafts = await listDrafts(KINDS.ncc);
-  updateState({ nccLocalDrafts: nccDrafts });
+  await updateAllDrafts();
 
   hideEditMode();
   await refreshDashboard();
@@ -660,7 +680,7 @@ async function saveEditDraft() {
       published_at: draft.published_at,
       source: "local"
     },
-    nccDrafts
+    state.nccLocalDrafts
   );
 }
 
@@ -972,10 +992,7 @@ async function handleFormSubmit(kind) {
 
   updateState({ currentDraft: { ...state.currentDraft, [kind]: draft } });
   
-  if (kind === "ncc") {
-    const nccDrafts = await listDrafts(KINDS.ncc);
-    updateState({ nccLocalDrafts: nccDrafts });
-  }
+  await updateAllDrafts();
 
   await renderDrafts(
     kind,
@@ -1015,6 +1032,7 @@ async function handleListAction(kind, event) {
     }
     await deleteDraft(id);
     showToast("Draft deleted.");
+    await updateAllDrafts();
     await renderDrafts(
       kind,
       state,
@@ -1076,6 +1094,7 @@ async function handleListAction(kind, event) {
     }
     await saveDraft(clone);
     showToast("Draft duplicated.");
+    await updateAllDrafts();
     await renderDrafts(
       kind,
       state,
@@ -1188,7 +1207,8 @@ async function refreshDashboard() {
         saveItem: handlePowerSave,
         publishDraft,
         withdrawDraft,
-        openNewNcc
+        openNewNcc,
+        createRevisionDraft
     });
   } else {
     // Refresh Classic UI
