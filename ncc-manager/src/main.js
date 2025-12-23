@@ -429,6 +429,8 @@ function refreshUI() {
 
 async function withdrawDraft(id) {
   try {
+    if (!confirm("Are you sure you want to withdraw this NCC? This will broadcast a withdrawal update to the Nostr network.")) return;
+    
     let draft = (state.nccLocalDrafts || []).find((d) => d.id === id);
     if (!draft) {
       const event = (state.nccDocs || []).find((d) => d.id === id);
