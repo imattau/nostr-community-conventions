@@ -291,7 +291,9 @@ export function renderDashboard(
   publishDraft,
   setupEndorsementCounterButtons,
   renderEndorsementDetailsPanel,
-  withdrawDraft
+  withdrawDraft,
+  handleEdit,
+  handleRevise
 ) {
   const listEl = document.getElementById("recent-nccs");
   const localDrafts = state.nccLocalDrafts || [];
@@ -378,6 +380,29 @@ export function renderDashboard(
       const isOwner = state.signerPubkey && item.author === state.signerPubkey;
       const canWithdraw = isOwner && item.status !== "withdrawn";
 
+      const isDraft = item.status !== "published" && item.status !== "withdrawn";
+      const isPublished = item.status === "published";
+      const isLocal = item.source === "local";
+      const showPublish = canPublish && isLocal && isDraft;
+
+      let buttons = `<button class="ghost" data-action="view" data-id="${item.id}">View</button>`;
+
+      if (isDraft && isLocal && isOwner) {
+         buttons += `<button class="ghost" data-action="edit-dashboard" data-id="${item.id}">Edit</button>`;
+      }
+
+      if (isPublished) {
+         buttons += `<button class="ghost" data-action="revise-dashboard" data-id="${item.id}">Revise</button>`;
+      }
+
+      if (showPublish) {
+         buttons += `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`;
+      }
+
+      if (canWithdraw) {
+         buttons += `<button class="ghost" data-action="withdraw" data-id="${item.id}" style="color: var(--error);">Withdraw</button>`;
+      }
+
       return `
         <div class="card">
           <strong>${esc(item.d)} - ${esc(item.title)}</strong>
@@ -391,17 +416,7 @@ export function renderDashboard(
             ${endorsementMeta}
           </div>
           <div class="actions">
-            <button class="ghost" data-action="view" data-id="${item.id}">View</button>
-            ${ 
-              canPublish && item.source === "local" && item.status !== "published"
-                ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
-                : ""
-            }
-            ${
-              canWithdraw
-                ? `<button class="ghost" data-action="withdraw" data-id="${item.id}" style="color: var(--error);">Withdraw</button>`
-                : ""
-            }
+            ${buttons}
           </div>
         </div>
       `;
@@ -469,6 +484,20 @@ export function renderDashboard(
       button.disabled = true;
       await withdrawDraft(targetId);
       button.disabled = false;
+    });
+  });
+
+  listEl.querySelectorAll('button[data-action="edit-dashboard"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!handleEdit) return;
+      handleEdit(button.dataset.id);
+    });
+  });
+
+  listEl.querySelectorAll('button[data-action="revise-dashboard"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!handleRevise) return;
+      handleRevise(button.dataset.id);
     });
   });
 }
