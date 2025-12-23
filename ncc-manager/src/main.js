@@ -422,6 +422,7 @@ function refreshUI() {
       saveItem: handlePowerSave,
       publishDraft,
       withdrawDraft,
+      deleteItem: handlePowerDelete,
       openNewNcc,
       createRevisionDraft
   });
