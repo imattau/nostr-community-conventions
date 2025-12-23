@@ -890,6 +890,10 @@ async function handleListAction(kind, event) {
   const renderedEntry = findRenderedDraft(kind, id);
 
   if (action === "delete") {
+    if (!state.signerPubkey) {
+      showToast("You must be signed in to delete.", "error");
+      return;
+    }
     const storedDraft = await getDraft(id);
     if (!storedDraft) {
       showToast("Only local drafts can be deleted.", "error");
@@ -927,12 +931,20 @@ async function handleListAction(kind, event) {
   if (!draft) return;
 
   if (action === "edit") {
+    if (!state.signerPubkey) {
+      showToast("You must be signed in to edit.", "error");
+      return;
+    }
     updateState({ currentDraft: { ...state.currentDraft, [kind]: draft } });
     renderForm(kind, draft, state, KINDS);
     return;
   }
 
   if (action === "duplicate") {
+    if (!state.signerPubkey) {
+      showToast("You must be signed in to duplicate.", "error");
+      return;
+    }
     const clone = {
       ...draft,
       id: crypto.randomUUID(),
