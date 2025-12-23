@@ -283,16 +283,13 @@ function renderExplorer() {
     // Conceptual Identity = event_id if it exists, otherwise internal id
     const conceptualMap = new Map();
     
-    const addToPool = (items, sourceLabel) => {
+    const addToPool = (items) => {
         (items || []).forEach(rawItem => {
             if (!rawItem) return;
             
-            // Convert raw Nostr events if necessary (e.g. from nccDocs or remoteDrafts)
-            // But main.js usually already converted local drafts.
-            // Let's ensure we have a draft-like object.
             let item = rawItem;
+            // If it looks like a raw Nostr event, convert it
             if (!item.d && rawItem.tags) {
-                // It looks like a raw event
                 item = payloadToDraft(rawItem);
             }
 
@@ -302,34 +299,26 @@ function renderExplorer() {
             if (!existing) {
                 conceptualMap.set(identity, item);
             } else {
-                // De-duplication logic:
-                // 1. Prefer items with source === "local" (might have unsaved changes)
-                // 2. Prefer items with newer updated_at/created_at
+                // Prefer local source or newer timestamp
                 const existingTs = ensureTimestamp(existing.updated_at || existing.created_at) || 0;
                 const newTs = ensureTimestamp(item.updated_at || item.created_at) || 0;
                 
-                const isLocalBetter = item.source === "local" && existing.source !== "local";
-                const isNewerBetter = newTs > existingTs;
-                
-                if (isLocalBetter || (isNewerBetter && existing.source === item.source)) {
+                if (item.source === "local" || newTs > existingTs) {
                     conceptualMap.set(identity, item);
                 }
             }
         });
     };
 
-    addToPool(_state.nccLocalDrafts, "local");
-    addToPool(_state.nsrLocalDrafts, "local");
-    addToPool(_state.endorsementLocalDrafts, "local");
-    addToPool(_state.supportingLocalDrafts, "local");
-    addToPool(_state.nccDocs, "relay");
-    addToPool(_state.remoteDrafts, "remote");
+    addToPool(_state.nccLocalDrafts);
+    addToPool(_state.nsrLocalDrafts);
+    addToPool(_state.endorsementLocalDrafts);
+    addToPool(_state.supportingLocalDrafts);
+    addToPool(_state.nccDocs);
+    addToPool(_state.remoteDrafts);
 
     const allItems = Array.from(conceptualMap.values());
 
-    // Partition based on user rules:
-    // Published: items that have an eventid AND are marked status as published
-    // Drafts: all other items (drafts with or without eventid)
     const publishedPool = allItems.filter(i => 
         i.event_id && (i.status || "").toLowerCase() === "published"
     );
@@ -337,12 +326,9 @@ function renderExplorer() {
         (i.status || "").toLowerCase() !== "published" || !i.event_id
     );
 
-    const filteredDrafts = filterExplorerItems(draftsPool, query);
-    const filteredPublished = filterExplorerItems(publishedPool, query);
-
     const sections = [
-        { title: "Drafts", items: filteredDrafts, type: "drafts" },
-        { title: "Published", items: filteredPublished, type: "published" }
+        { title: "Drafts", items: filterExplorerItems(draftsPool, query), type: "drafts" },
+        { title: "Published", items: filterExplorerItems(publishedPool, query), type: "published" }
     ];
 
     el.innerHTML = sections.map(renderExplorerSection).join("");
@@ -511,7 +497,8 @@ function renderExplorerBranch(group, sectionType) {
 
 function renderExplorerItem(entry, idx, inheritedStatus) {
     const { item } = entry;
-    const isActive = item.id === currentItemId ? " active" : "";
+    const identity = item.event_id || item.id;
+    const isActive = identity === currentItemId ? " active" : "";
     const status = normalizeStatus(item.status || inheritedStatus);
     const statusLabel =
         status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
@@ -530,7 +517,7 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
     }
 
     return `
-        <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
+        <div class="p-nav-item${isActive}" data-id="${identity}" title="${esc(title)}">
             <div class="p-nav-meta">
                 <span class="p-nav-label">${esc(label)}</span>
                 <span class="p-badge-mini status-${status}">${statusLabel}</span>
@@ -565,9 +552,9 @@ function normalizeStatus(status) {
 
 // Item Handling
 function findItem(id) {
-    if (!_state) return null;
+    if (!_state || !id) return null;
     
-    // Pool everything together to find the item by its identity (event_id or local id)
+    // Pool everything together
     const all = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
@@ -577,18 +564,21 @@ function findItem(id) {
         ...(_state.remoteDrafts || [])
     ];
     
+    // Find the item by its identity (event_id or local id)
     const found = all.find(i => i && (i.id === id || i.event_id === id));
-    if (found) {
-        // Mark as local if it's in any of our local draft arrays
-        const isLocal = [
-            ...(_state.nccLocalDrafts || []), 
-            ...(_state.nsrLocalDrafts || []),
-            ...(_state.endorsementLocalDrafts || []),
-            ...(_state.supportingLocalDrafts || [])
-        ].some(d => d.id === found.id);
-        
-        found._isLocal = isLocal || (found.status && found.status !== "published");
-    }
+    if (!found) return null;
+
+    // To determine if it's local, we need to see if it exists in our local draft sets
+    // regardless of whether we found it by its UUID or its event_id.
+    const localPool = [
+        ...(_state.nccLocalDrafts || []), 
+        ...(_state.nsrLocalDrafts || []),
+        ...(_state.endorsementLocalDrafts || []),
+        ...(_state.supportingLocalDrafts || [])
+    ];
+    
+    found._isLocal = localPool.some(d => d.id === found.id || (d.event_id && d.event_id === found.event_id));
+    
     return found;
 }
 
@@ -745,6 +735,7 @@ function renderInspector(item) {
                 if (found) {
                     renderContent(found);
                     renderInspector(found);
+                    renderExplorer();
                 }
             };
             actionsContainer.appendChild(cancelBtn);
