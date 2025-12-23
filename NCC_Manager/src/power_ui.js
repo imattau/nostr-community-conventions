@@ -40,7 +40,7 @@ export function initPowerShell(state, appActions) {
            <div id="p-status-relays">Relays: ${state.relayStatus?.relays || 0}</div>
            <div id="p-status-msg">Ready</div>
         </footer>
-        <div id="p-palette-overlay" class="p-palette-overlay" hidden>
+        <div id="p-palette-overlay" class="p-palette-overlay" hidden style="display: none;">
            <div class="p-palette">
               <input class="p-palette-input" id="p-palette-input" placeholder="Type a command..." />
               <div class="p-palette-list" id="p-palette-list"></div>
@@ -93,6 +93,8 @@ function toggleCommandPalette(show) {
     const shouldShow = show !== undefined ? show : isHidden;
     
     overlay.hidden = !shouldShow;
+    overlay.style.display = shouldShow ? 'flex' : 'none';
+    
     if (shouldShow) {
         input.value = "";
         renderCommandList("");
