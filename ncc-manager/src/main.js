@@ -100,11 +100,51 @@ async function initShell() {
       withdrawDraft,
       deleteItem: handlePowerDelete,
       openNewNcc,
-      createRevisionDraft
+      createRevisionDraft,
+      promptSigner: promptSignerConnection,
+      signOut: signOutSigner,
+      getConfig,
+      setConfig,
+      updateSignerConfig: handleUpdateSignerConfig,
+      exportAll: handleExportAllDrafts
     });
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
   }
+}
+
+async function handleUpdateSignerConfig(mode, nsec) {
+    updateState({ signerMode: mode });
+    await setConfig("signer_mode", mode);
+    if (mode === "nsec") {
+        if (!nsec) {
+            showToast("nsec is required for local signing", "error");
+            return;
+        }
+        sessionStorage.setItem("ncc-manager-nsec", nsec);
+    } else {
+        sessionStorage.removeItem("ncc-manager-nsec");
+    }
+    await updateSignerStatus();
+    showToast("Signer configuration updated");
+    refreshUI();
+}
+
+async function handleExportAllDrafts() {
+    const drafts = await listDrafts();
+    const payloads = drafts.map((draft) => {
+      const payload = createEventTemplate(draft);
+      payload.event_id = draft.event_id || undefined;
+      payload.author_pubkey = draft.author_pubkey || undefined;
+      return payload;
+    });
+    
+    const blob = new Blob([JSON.stringify(payloads, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "ncc-drafts.json";
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
 
 async function handlePowerDelete(id) {
@@ -424,7 +464,13 @@ function refreshUI() {
       withdrawDraft,
       deleteItem: handlePowerDelete,
       openNewNcc,
-      createRevisionDraft
+      createRevisionDraft,
+      promptSigner: promptSignerConnection,
+      signOut: signOutSigner,
+      getConfig,
+      setConfig,
+      updateSignerConfig: handleUpdateSignerConfig,
+      exportAll: handleExportAllDrafts
   });
 }
 

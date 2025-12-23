@@ -229,6 +229,45 @@ function setupGlobalListeners() {
             }
             return;
         }
+
+        // 7. Signer Dropdown Toggle
+        const signerTrigger = target.closest("#p-signer-trigger");
+        if (signerTrigger) {
+            const dropdown = document.getElementById("p-signer-dropdown");
+            if (dropdown) dropdown.classList.toggle("is-open");
+            return;
+        }
+
+        // 8. Close dropdown when clicking outside
+        const activeDropdown = document.querySelector(".p-dropdown.is-open");
+        if (activeDropdown && !target.closest(".p-signer-wrapper")) {
+            activeDropdown.classList.remove("is-open");
+        }
+
+        // 9. Modal Background Click (Close)
+        const activeModal = target.closest(".p-modal-overlay");
+        if (activeModal && target === activeModal) {
+            activeModal.remove();
+            return;
+        }
+
+        // 10. Global Data Actions
+        const actionBtn = target.closest("[data-action]");
+        if (actionBtn && !target.closest("#p-inspector-actions")) {
+            const action = actionBtn.dataset.action;
+            log("Handling Global action:", action);
+            
+            if (action === "sign-in") {
+                actions.promptSigner?.();
+            } else if (action === "sign-out") {
+                actions.signOut?.();
+            } else if (action === "open-settings") {
+                renderSettingsModal();
+            } else if (action === "close-modal") {
+                const modal = target.closest(".p-modal-overlay");
+                if (modal) modal.remove();
+            }
+        }
     });
 
     const searchInput = document.getElementById("p-search");
@@ -303,18 +342,33 @@ function renderTopBar() {
     if (_state.signerPubkey) {
         const profile = _state.signerProfile;
         const name = profile?.name || shortenKey(_state.signerPubkey);
+        const pic = profile?.picture;
+        
         el.innerHTML = `
-            <div class="p-signer-pill">
-                <span class="p-signer-dot active"></span>
-                <span>Signer: ${esc(name)}</span>
+            <div class="p-signer-wrapper">
+                <button class="p-signer-pill p-clickable" id="p-signer-trigger">
+                    <div class="p-signer-avatar">
+                        ${pic ? `<img src="${esc(pic)}" alt="" />` : `<span class="p-signer-dot active"></span>`}
+                    </div>
+                    <span>${esc(name)}</span>
+                    <span class="p-caret">▾</span>
+                </button>
+                <div class="p-dropdown" id="p-signer-dropdown">
+                    <button class="p-dropdown-item" data-action="open-settings">
+                        <span>⚙️</span> Settings
+                    </button>
+                    <div class="p-dropdown-divider"></div>
+                    <button class="p-dropdown-item p-danger-text" data-action="sign-out">
+                        <span>🚪</span> Sign Out
+                    </button>
+                </div>
             </div>
         `;
     } else {
         el.innerHTML = `
-            <div class="p-signer-pill">
-                <span class="p-signer-dot"></span>
-                <span>Signer: Not connected</span>
-            </div>
+            <button class="p-btn-accent" data-action="sign-in">
+                Sign In
+            </button>
         `;
     }
 }
@@ -1094,4 +1148,116 @@ async function handleSaveShortcut() {
         updateStatus("Save failed");
         console.error("Save error:", e);
     }
+}
+
+function renderSettingsModal() {
+    const modal = document.createElement("div");
+    modal.className = "p-modal-overlay";
+    modal.innerHTML = `
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2>Settings</h2>
+                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+            </div>
+            <div class="p-modal-body p-scroll">
+                <section class="p-modal-section">
+                    <h3>Nostr Relays</h3>
+                    <div id="p-settings-relays" class="p-settings-list">
+                        <!-- Relays will be rendered here -->
+                    </div>
+                    <div class="p-settings-input-group">
+                        <input type="text" id="p-new-relay" placeholder="wss://relay.example.com" />
+                        <button class="p-btn-accent" id="p-add-relay">Add Relay</button>
+                    </div>
+                </section>
+
+                <section class="p-modal-section">
+                    <h3>Signer Configuration</h3>
+                    <div class="p-field">
+                        <label>Signing Mode</label>
+                        <select id="p-signer-mode">
+                            <option value="nip07" ${_state.signerMode === "nip07" ? "selected" : ""}>NIP-07 Browser Extension</option>
+                            <option value="nsec" ${_state.signerMode === "nsec" ? "selected" : ""}>Local nsec (Session Only)</option>
+                        </select>
+                    </div>
+                    <div id="p-nsec-field" class="p-field" style="display: ${_state.signerMode === "nsec" ? "flex" : "none"}">
+                        <label>nsec1...</label>
+                        <input type="password" id="p-nsec-input" placeholder="nsec1..." />
+                    </div>
+                    <button class="p-btn-primary" id="p-save-signer">Update Signer</button>
+                </section>
+
+                <section class="p-modal-section">
+                    <h3>Data Management</h3>
+                    <div class="p-inspector-actions">
+                        <button class="p-btn-ghost" id="p-export-all">Export All Drafts (JSON)</button>
+                        <button class="p-btn-ghost" id="p-clear-cache">Clear Relay Cache</button>
+                    </div>
+                </section>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Initial relay render
+    const refreshRelays = async () => {
+        const container = document.getElementById("p-settings-relays");
+        if (!container) return;
+        const userRelays = await actions.getConfig?.("user_relays", []);
+        container.innerHTML = userRelays.length 
+            ? userRelays.map(r => `
+                <div class="p-settings-row">
+                    <span>${esc(r)}</span>
+                    <button class="p-danger-link" data-relay="${esc(r)}">Remove</button>
+                </div>
+            `).join("")
+            : `<div class="p-muted-text small">No custom relays added</div>`;
+        
+        container.querySelectorAll(".p-danger-link").forEach(btn => {
+            btn.onclick = async () => {
+                const next = userRelays.filter(r => r !== btn.dataset.relay);
+                await actions.setConfig?.("user_relays", next);
+                refreshRelays();
+            };
+        });
+    };
+
+    refreshRelays();
+
+    // Listeners for settings elements
+    const addBtn = document.getElementById("p-add-relay");
+    const relayInput = document.getElementById("p-new-relay");
+    addBtn.onclick = async () => {
+        const val = relayInput.value.trim();
+        if (!val) return;
+        const normalized = val.startsWith("ws") ? val : `wss://${val}`;
+        const current = await actions.getConfig?.("user_relays", []);
+        if (!current.includes(normalized)) {
+            current.push(normalized);
+            await actions.setConfig?.("user_relays", current);
+            relayInput.value = "";
+            refreshRelays();
+        }
+    };
+
+    const modeSelect = document.getElementById("p-signer-mode");
+    const nsecWrap = document.getElementById("p-nsec-field");
+    modeSelect.onchange = () => {
+        nsecWrap.style.display = modeSelect.value === "nsec" ? "flex" : "none";
+    };
+
+    const saveSignerBtn = document.getElementById("p-save-signer");
+    saveSignerBtn.onclick = async () => {
+        const mode = modeSelect.value;
+        const nsec = document.getElementById("p-nsec-input").value.trim();
+        await actions.updateSignerConfig?.(mode, nsec);
+        modal.remove();
+    };
+
+    document.getElementById("p-export-all").onclick = () => actions.exportAll?.();
+    document.getElementById("p-clear-cache").onclick = () => {
+        localStorage.clear();
+        window.location.reload();
+    };
 }
