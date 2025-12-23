@@ -297,6 +297,30 @@ function setupGlobalListeners() {
         renderCommandList(e.target.value);
     });
 
+    // 11. Context Menu (Explorer)
+    document.addEventListener("contextmenu", (e) => {
+        const shell = document.getElementById("shell-power");
+        if (!shell || shell.hidden || shell.style.display === "none") return;
+
+        const target = e.target;
+        const navItem = target.closest(".p-nav-item");
+        
+        // We only care about NCC items for these shortcuts
+        if (navItem && navItem.dataset.id) {
+            const item = findItem(navItem.dataset.id);
+            if (item && item.kind === KINDS.ncc) {
+                e.preventDefault();
+                renderContextMenu(e.clientX, e.clientY, item);
+            }
+        }
+    });
+
+    // Dismiss context menu on any click
+    document.addEventListener("click", () => {
+        const menu = document.getElementById("p-context-menu");
+        if (menu) menu.remove();
+    }, { capture: true });
+
     // Inspector input syncing (Delegation)
     document.addEventListener("input", (e) => {
         const shell = document.getElementById("shell-power");
@@ -1182,6 +1206,196 @@ function executeCommand(id) {
         cmd.run();
         toggleCommandPalette(false);
     }
+}
+
+function renderContextMenu(x, y, item) {
+    // Remove existing
+    const existing = document.getElementById("p-context-menu");
+    if (existing) existing.remove();
+
+    const menu = document.createElement("div");
+    menu.id = "p-context-menu";
+    menu.className = "p-context-menu";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    const isPublished = item.event_id && (item.status || "").toLowerCase() === "published";
+
+    menu.innerHTML = `
+        <div class="p-context-item" data-action="new-endorsement">
+            <span>✅</span> New Endorsement
+        </div>
+        <div class="p-context-item" data-action="new-supporting">
+            <span>📚</span> New Supporting Doc
+        </div>
+        ${isPublished ? `
+            <div class="p-context-divider"></div>
+            <div class="p-context-item" data-action="new-nsr">
+                <span>🔄</span> Create Succession (NSR)
+            </div>
+        ` : ""}
+    `;
+
+    document.body.appendChild(menu);
+
+    menu.addEventListener("click", (e) => {
+        const actionBtn = e.target.closest(".p-context-item");
+        if (!actionBtn) return;
+        const action = actionBtn.dataset.action;
+
+        if (action === "new-endorsement") {
+            openEndorsementModal(item);
+        } else if (action === "new-supporting") {
+            openSupportingDocFlow(item);
+        } else if (action === "new-nsr") {
+            openNsrModal(item);
+        }
+        menu.remove();
+    });
+}
+
+function openEndorsementModal(nccItem) {
+    const modal = document.createElement("div");
+    modal.className = "p-modal-overlay";
+    modal.innerHTML = `
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2>Endorse ${esc(nccItem.d)}</h2>
+                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+            </div>
+            <div class="p-modal-body">
+                <div class="p-modal-form">
+                    <div class="p-field">
+                        <label>Roles (comma separated)</label>
+                        <input type="text" id="m-end-roles" placeholder="author, client, user" />
+                    </div>
+                    <div class="p-field">
+                        <label>Implementation</label>
+                        <input type="text" id="m-end-impl" placeholder="e.g. MyClient v1.0" />
+                    </div>
+                    <div class="p-field">
+                        <label>Note</label>
+                        <textarea id="m-end-note" placeholder="Brief rationale..." style="height: 80px"></textarea>
+                    </div>
+                </div>
+                <div class="p-modal-footer">
+                    <button class="p-btn-ghost" data-action="close-modal">Cancel</button>
+                    <button class="p-btn-accent" id="m-end-submit">Create Endorsement</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById("m-end-submit").onclick = async () => {
+        const roles = document.getElementById("m-end-roles").value.split(",").map(s => s.trim()).filter(Boolean);
+        const impl = document.getElementById("m-end-impl").value.trim();
+        const note = document.getElementById("m-end-note").value.trim();
+
+        const draft = {
+            id: crypto.randomUUID(),
+            kind: KINDS.endorsement,
+            status: "draft",
+            d: nccItem.d,
+            content: note,
+            tags: {
+                endorses: nccItem.event_id || nccItem.id,
+                roles: roles,
+                implementation: impl,
+                note: note
+            }
+        };
+
+        await actions.saveItem?.(draft.id, draft.content, draft);
+        openItem(draft.id);
+        modal.remove();
+        showToast("Endorsement draft created.");
+    };
+}
+
+function openNsrModal(nccItem) {
+    const modal = document.createElement("div");
+    modal.className = "p-modal-overlay";
+    modal.innerHTML = `
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2>New Succession Record</h2>
+                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+            </div>
+            <div class="p-modal-body">
+                <p class="p-muted-text small" style="margin-bottom: 16px">
+                    Transferring stewardship for <strong>${esc(nccItem.d)}</strong>.
+                </p>
+                <div class="p-modal-form">
+                    <div class="p-field">
+                        <label>Authoritative Event ID</label>
+                        <input type="text" id="m-nsr-auth" placeholder="The new canonical event ID" />
+                    </div>
+                    <div class="p-field">
+                        <label>Reason</label>
+                        <input type="text" id="m-nsr-reason" placeholder="e.g. Stewardship handover" />
+                    </div>
+                </div>
+                <div class="p-modal-footer">
+                    <button class="p-btn-ghost" data-action="close-modal">Cancel</button>
+                    <button class="p-btn-accent" id="m-nsr-submit">Create NSR</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById("m-nsr-submit").onclick = async () => {
+        const auth = document.getElementById("m-nsr-auth").value.trim();
+        const reason = document.getElementById("m-nsr-reason").value.trim();
+
+        if (!auth) { return showToast("Authoritative ID is required", "error"); }
+
+        const draft = {
+            id: crypto.randomUUID(),
+            kind: KINDS.nsr,
+            status: "draft",
+            d: nccItem.d,
+            content: reason,
+            tags: {
+                authoritative: auth,
+                previous: nccItem.event_id || nccItem.id,
+                reason: reason,
+                steward: _state.signerPubkey,
+                effective_at: Math.floor(Date.now() / 1000).toString()
+            }
+        };
+
+        await actions.saveItem?.(draft.id, draft.content, draft);
+        openItem(draft.id);
+        modal.remove();
+        showToast("Succession record created.");
+    };
+}
+
+function openSupportingDocFlow(nccItem) {
+    const draft = {
+        id: crypto.randomUUID(),
+        kind: KINDS.supporting,
+        status: "draft",
+        d: `guide-${nccItem.d}`,
+        title: `Supporting Doc for ${nccItem.d}`,
+        content: "",
+        tags: {
+            for: nccItem.d,
+            for_event: nccItem.event_id || nccItem.id,
+            type: "guide",
+            published_at: Math.floor(Date.now() / 1000).toString()
+        }
+    };
+
+    actions.saveItem?.(draft.id, draft.content, draft).then(() => {
+        openItem(draft.id);
+        isEditMode = true;
+        renderContent(draft);
+        renderInspector(draft);
+        showToast("Supporting document draft created.");
+    });
 }
 
 async function handleSaveShortcut() {
