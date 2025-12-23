@@ -99,6 +99,7 @@ async function initShell() {
       publishDraft,
       withdrawDraft,
       deleteItem: handlePowerDelete,
+      deleteItemSilent: handlePowerDeleteSilent,
       openNewNcc,
       createRevisionDraft,
       promptSigner: promptSignerConnection,
@@ -153,6 +154,12 @@ async function handlePowerDelete(id) {
     await updateAllDrafts();
     refreshUI();
     showToast("Draft deleted.");
+}
+
+async function handlePowerDeleteSilent(id) {
+    await deleteDraft(id);
+    await updateAllDrafts();
+    refreshUI();
 }
 
 async function handlePowerSave(id, content, fullDraft = null) {
@@ -503,6 +510,7 @@ function refreshUI() {
       publishDraft,
       withdrawDraft,
       deleteItem: handlePowerDelete,
+      deleteItemSilent: handlePowerDeleteSilent,
       openNewNcc,
       createRevisionDraft,
       promptSigner: promptSignerConnection,

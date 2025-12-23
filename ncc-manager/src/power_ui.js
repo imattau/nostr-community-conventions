@@ -5,6 +5,7 @@ import { payloadToDraft } from "./nostr.js";
 let actions = {};
 let currentItemId = null;
 let isEditMode = false;
+let revisionSourceId = null; // Track the original item during a revision
 let searchQuery = "";
 let _state = null;
 let listenersSetup = false;
@@ -213,11 +214,26 @@ function setupGlobalListeners() {
                 handleSaveShortcut();
             } else if (action === "cancel-item") {
                 isEditMode = false;
-                const found = findItem(currentItemId);
-                if (found) {
-                    renderContent(found);
-                    renderInspector(found);
-                    renderExplorer();
+                
+                if (revisionSourceId) {
+                    log("Cancelling revision, reverting to:", revisionSourceId);
+                    const sourceId = revisionSourceId;
+                    const tempDraftId = currentItemId;
+                    revisionSourceId = null;
+                    
+                    // If we actually created a draft in DB, we should probably delete it
+                    // but findItem relies on state. Let's just switch back first.
+                    openItem(sourceId);
+                    
+                    // Cleanup the temporary draft from storage
+                    actions.deleteItemSilent?.(tempDraftId);
+                } else {
+                    const found = findItem(currentItemId);
+                    if (found) {
+                        renderContent(found);
+                        renderInspector(found);
+                        renderExplorer();
+                    }
                 }
             }
             return;
@@ -929,6 +945,9 @@ async function handleReviseAction(id) {
     
     const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
     if (draft) {
+        // Track where we came from so Cancel can revert
+        revisionSourceId = id;
+
         // Ensure the draft is truly a fresh local item
         draft.id = crypto.randomUUID();
         draft.event_id = "";
@@ -1147,6 +1166,7 @@ async function handleSaveShortcut() {
         }
         
         isEditMode = false; // Transition out of edit mode on successful save
+        revisionSourceId = null; // Finalize revision
         renderContent(item);
         renderInspector(item);
         renderExplorer();
