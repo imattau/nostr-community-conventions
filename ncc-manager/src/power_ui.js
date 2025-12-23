@@ -157,6 +157,37 @@ function setupGlobalListeners() {
     paletteInput?.addEventListener("input", (e) => {
         renderCommandList(e.target.value);
     });
+
+    // Inspector input syncing
+    const inspectorBody = document.getElementById("p-inspector-body");
+    inspectorBody?.addEventListener("input", (e) => {
+        if (!isEditMode || !currentItemId) return;
+        const item = findItem(currentItemId);
+        if (!item) return;
+
+        const target = e.target;
+        const key = target.name;
+        if (!key) return;
+
+        updateStatus("• Unsaved changes");
+
+        if (key === "title") {
+            item.title = target.value;
+        } else if (key === "d") {
+            item.d = target.value.startsWith("ncc-") ? target.value : `ncc-${target.value.replace(/\D/g, "")}`;
+        } else if (key.startsWith("tag:")) {
+            const tagName = key.split(":")[1];
+            item.tags = item.tags || {};
+            
+            // Handle array tags (comma separated)
+            const arrayTags = ["topics", "authors", "supersedes", "roles", "t"];
+            if (arrayTags.includes(tagName)) {
+                item.tags[tagName] = target.value.split(",").map(s => s.trim()).filter(Boolean);
+            } else {
+                item.tags[tagName] = target.value;
+            }
+        }
+    });
 }
 // UI Refreshers
 function refreshUI() {
@@ -616,7 +647,7 @@ function renderInspector(item) {
         el.innerHTML = `
             <div class="p-section">
                 <span class="p-section-title">Inspector</span>
-                <p class="p-nav-label">Select an NCC to view metadata and actions.</p>
+                <p class="p-nav-label">Select an item to view metadata and actions.</p>
             </div>
         `;
         return;
@@ -626,24 +657,32 @@ function renderInspector(item) {
     const status = normalizeStatus(item.status || "published");
     const author = item.author || item.pubkey || "Unknown";
     const updatedAt = formatFullDate(item.updated_at || item.created_at);
-    const supersedes = Array.isArray(item.tags?.supersedes) ? item.tags.supersedes : [];
     const badgeLabel = status.toUpperCase();
     const relayStatus = _state?.relayStatus || {};
     const lastSync = relayStatus.at ? new Date(relayStatus.at).toLocaleTimeString() : "-";
-    const networkDetails = `
-        <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
-        <div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id || "Draft")}</span></div>
-        <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
-        <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
-        ${supersedes.length ? `<div class="p-prop-row"><span class="p-prop-key">Supersedes</span><span class="p-prop-val">${esc(supersedes.join(", "))}</span></div>` : ""}
-    `;
+
+    const isLocalDraft = item._isLocal;
+
+    let metadataContent = "";
+    if (isEditMode && isLocalDraft) {
+        metadataContent = renderEditFields(item);
+    } else {
+        const supersedes = Array.isArray(item.tags?.supersedes) ? item.tags.supersedes : [];
+        metadataContent = `
+            <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id || "Draft")}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
+            ${supersedes.length ? `<div class="p-prop-row"><span class="p-prop-key">Supersedes</span><span class="p-prop-val">${esc(supersedes.join(", "))}</span></div>` : ""}
+        `;
+    }
 
     el.innerHTML = `
         <div class="p-section">
             <span class="p-section-title">Item Metadata</span>
-            <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
-            ${networkDetails}
+            ${metadataContent}
         </div>
         <div class="p-section">
             <span class="p-section-title">Actions</span>
@@ -661,10 +700,10 @@ function renderInspector(item) {
     if (!actionsContainer) return;
     actionsContainer.innerHTML = "";
 
-    if (item._isLocal) {
+    if (isLocalDraft) {
         const editBtn = document.createElement("button");
         editBtn.className = isEditMode ? "p-btn-primary" : "p-btn-accent";
-        editBtn.textContent = isEditMode ? "View" : "Edit";
+        editBtn.textContent = isEditMode ? "View Mode" : "Edit";
         editBtn.onclick = () => {
             isEditMode = !isEditMode;
             renderContent(item);
@@ -726,6 +765,52 @@ function renderInspector(item) {
             actionsContainer.appendChild(withdrawBtn);
         }
     }
+}
+
+function renderEditFields(item) {
+    const fields = [];
+    
+    const addField = (label, name, value, placeholder = "") => {
+        fields.push(`
+            <div class="p-field">
+                <label>${label}</label>
+                <input type="text" name="${name}" value="${esc(value)}" placeholder="${placeholder}" autocomplete="off" />
+            </div>
+        `);
+    };
+
+    addField("Title", "title", item.title || "");
+    
+    if (item.kind === KINDS.ncc) {
+        addField("NCC Number", "d", item.d ? item.d.replace(/^ncc-/, "") : "", "e.g. 00");
+        addField("Summary", "tag:summary", item.tags?.summary || "");
+        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
+        addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
+        addField("Version", "tag:version", item.tags?.version || "");
+        addField("Language", "tag:lang", item.tags?.lang || "");
+        addField("License", "tag:license", item.tags?.license || "");
+        addField("Supersedes", "tag:supersedes", (item.tags?.supersedes || []).join(", "));
+    }
+
+    if (item.kind === KINDS.nsr) {
+        addField("Reason", "tag:reason", item.tags?.reason || "");
+        addField("Effective At", "tag:effective_at", item.tags?.effective_at || "");
+    }
+
+    if (item.kind === KINDS.endorsement) {
+        addField("Roles", "tag:roles", (item.tags?.roles || []).join(", "));
+        addField("Implementation", "tag:implementation", item.tags?.implementation || "");
+        addField("Note", "tag:note", item.tags?.note || "");
+        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
+    }
+
+    if (item.kind === KINDS.supporting) {
+        addField("Type", "tag:type", item.tags?.type || "");
+        addField("For NCC", "tag:for", item.tags?.for || "");
+        addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
+    }
+
+    return fields.join("");
 }
 
 
@@ -878,6 +963,8 @@ async function handleSaveShortcut() {
             item.content = content;
         }
         
+        isEditMode = false; // Transition out of edit mode on successful save
+        renderContent(item);
         renderInspector(item);
         renderExplorer();
     } catch (e) {
