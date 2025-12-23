@@ -2,15 +2,15 @@
 import {
   esc,
   shortenKey,
-  formatCacheAge,
-  renderMarkdown,
-  eventTagValue,
-  normalizeHexId,
-  buildNccOptions,
   stripNccNumber,
   nowSeconds,
-  splitList
+  eventTagValue,
+  normalizeHexId,
+  buildNccOptions
 } from "./utils.js";
+
+import { getRelays } from "./state.js";
+import { getConfig } from "./store.js";
 
 export function hideSignerMenu() {
   const menu = document.getElementById("signer-menu");
@@ -99,7 +99,7 @@ export function renderRelays(defaults, userRelays, setConfig) {
     btn.addEventListener("click", async () => {
       const next = userRelays.filter((relay) => relay !== btn.dataset.relay);
       await setConfig("user_relays", next);
-      renderRelays(defaults, next, setConfig); // Re-render with updated userRelays
+      renderRelays(defaults, next, setConfig);
     });
   });
 }
@@ -112,8 +112,9 @@ export function renderForm(kind, draft, state, KINDS) {
     ? `Edit ${kind.toUpperCase()} draft`
     : `Create ${kind.toUpperCase()}`;
 
+  const publishedValue = draft?.published_at ? draft.published_at : nowSeconds();
+
   if (kind === "ncc") {
-    const publishedValue = draft?.published_at ? draft.published_at : nowSeconds();
     form.innerHTML = `
       <label class="field"><span>NCC number</span><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00" value="${esc(
         stripNccNumber(draft?.d)
@@ -151,9 +152,10 @@ export function renderForm(kind, draft, state, KINDS) {
       )}" /></label>
       <div class="form-actions">
         <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
-        ${isEdit
-          ? `<button class="ghost" type="button" data-action="backup" data-kind="ncc">Backup to Relays</button>`
-          : ""
+        ${
+          isEdit
+            ? `<button class="ghost" type="button" data-action="save-remote" data-kind="ncc">Save to Relays</button>`
+            : ""
         }
       </div>
     `;
@@ -179,9 +181,10 @@ export function renderForm(kind, draft, state, KINDS) {
       )}</textarea></label>
       <div class="form-actions">
         <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
-        ${isEdit
-          ? `<button class="ghost" type="button" data-action="backup" data-kind="nsr">Backup to Relays</button>`
-          : ""
+        ${
+          isEdit
+            ? `<button class="ghost" type="button" data-action="save-remote" data-kind="nsr">Save to Relays</button>`
+            : ""
         }
       </div>
     `;
@@ -209,9 +212,10 @@ export function renderForm(kind, draft, state, KINDS) {
       )}</textarea></label>
       <div class="form-actions">
         <button class="primary" type="submit">${isEdit ? "Save" : "Create"}</button>
-        ${isEdit
-          ? `<button class="ghost" type="button" data-action="backup" data-kind="endorsement">Backup to Relays</button>`
-          : ""
+        ${
+          isEdit
+            ? `<button class="ghost" type="button" data-action="save-remote" data-kind="endorsement">Save to Relays</button>`
+            : ""
         }
       </div>
     `;
@@ -270,9 +274,10 @@ export function renderForm(kind, draft, state, KINDS) {
       </div>
       <div class="form-actions">
         <button class="primary" type="submit" hidden>${isEdit ? "Save" : "Create"}</button>
-        ${isEdit
-          ? `<button class="ghost" type="button" data-action="backup" data-kind="supporting" hidden>Backup to Relays</button>`
-          : ""
+        ${
+          isEdit
+            ? `<button class="ghost" type="button" data-action="save-remote" data-kind="supporting" hidden>Save to Relays</button>`
+            : ""
         }
       </div>
     `;
@@ -290,7 +295,7 @@ export function renderDashboard(
   const listEl = document.getElementById("recent-nccs");
   const localDrafts = state.nccLocalDrafts || [];
   const relayDocs = state.nccDocs || [];
-  const remoteBackups = state.remoteBackups || [];
+  const remoteDrafts = state.remoteDrafts || [];
 
   const localMap = new Map(
     localDrafts
@@ -336,34 +341,6 @@ export function renderDashboard(
     });
   }
 
-  // Remote Backups
-  // Filter for backups that are NOT locally present (or present a way to import)
-  const backups = remoteBackups.map((event) => {
-    const d = eventTagValue(event.tags, "d").replace(/^draft:/, "");
-    const title = eventTagValue(event.tags, "title") || "Untitled Draft";
-    return {
-      id: event.id,
-      d,
-      title,
-      status: "remote-backup",
-      published_at: null,
-      event_id: event.id,
-      source: "relay-backup",
-      content: event.content || "",
-      tags: event.tags || [],
-      updated_at: (event.created_at || 0) * 1000,
-      author: event.pubkey,
-      isBackup: true
-    };
-  });
-
-  // We should render backups separately or merged?
-  // Let's create a separate section or list for "Remote Drafts" if they exist.
-  // For now, I'll append them to the combined list but clearly marked.
-  // Actually, keeping them separate is better UI.
-  // But `renderDashboard` writes to `listEl` which is "recent-nccs".
-  // I will inject a "Remote Drafts" header if we have backups.
-
   const grouped = new Map();
   for (const item of combined) {
     if (!item.d) continue;
@@ -383,7 +360,7 @@ export function renderDashboard(
   let html = sorted
     .map((item) => {
       const normalizedEventId = normalizeHexId(item.event_id);
-      const endorsementCount =
+      const endorsementCount = 
         normalizedEventId && normalizedEventId.length
           ? endorsementCounts.get(normalizedEventId) || 0
           : 0;
@@ -392,23 +369,28 @@ export function renderDashboard(
             item.d
           )}">Endorsements: ${endorsementCount}</button>`
         : `<span>Endorsements: ${endorsementCount}</span>`;
-            return `
-              <div class="card">
-                <strong>${esc(item.d)} · ${esc(item.title)}</strong>
-                <div class="meta">
-                  <span class="badge status-${esc(item.status).toLowerCase()}">${esc(item.status.toUpperCase())}</span>
-                  <span>Published: ${
-                    item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"
-                  }</span>
-                  <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
+      
+      const statusClass = `status-${(item.status || "draft").toLowerCase()}`;
+      const statusLabel = (item.status || "DRAFT").toUpperCase();
+
+      return `
+        <div class="card">
+          <strong>${esc(item.d)} - ${esc(item.title)}</strong>
+          <div class="meta">
+            <span class="badge ${statusClass}">${esc(statusLabel)}</span>
+            <span>Published: ${ 
+              item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"
+            }</span>
+            <span>Event ID: ${item.event_id ? `${item.event_id.slice(0, 10)}…` : "-"}</span>
             <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
             ${endorsementMeta}
           </div>
           <div class="actions">
             <button class="ghost" data-action="view" data-id="${item.id}">View</button>
-            ${canPublish && item.source === "local" && item.status !== "published"
-              ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
-              : ""
+            ${ 
+              canPublish && item.source === "local" && item.status !== "published"
+                ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
+                : ""
             }
           </div>
         </div>
@@ -416,24 +398,31 @@ export function renderDashboard(
     })
     .join("");
 
-  if (backups.length > 0) {
-    html += `<div class="divider"></div><h3>Remote Draft Backups (from Relays)</h3>`;
-    html += backups.map(item => `
+  if (remoteDrafts.length > 0) {
+    html += `<div class="divider"></div><h3>Remote Drafts (on Relays)</h3>`;
+    html += remoteDrafts.map((event) => {
+      const d = eventTagValue(event.tags, "d").replace(/^draft:/, "");
+      const title = eventTagValue(event.tags, "title") || "Untitled Draft";
+      const updated = (event.created_at || 0) * 1000;
+      const author = event.pubkey;
+      
+      return `
         <div class="card" style="border-color: var(--accent);">
-          <strong>${esc(item.d)} · ${esc(item.title)}</strong>
+          <strong>${esc(d)} - ${esc(title)}</strong>
           <div class="meta">
-            <span>Source: Remote Backup</span>
-            <span>Saved: ${new Date(item.updated_at).toLocaleString()}</span>
-            <span>Author: ${esc(item.author ? shortenKey(item.author) : "unknown")}</span>
+            <span>Source: Remote Draft</span>
+            <span>Saved: ${new Date(updated).toLocaleString()}</span>
+            <span>Author: ${esc(author ? shortenKey(author) : "unknown")}</span>
           </div>
           <div class="actions">
-            <button class="ghost" data-action="import-backup" data-id="${item.id}">Import as Local Draft</button>
+            <button class="ghost" data-action="import-remote" data-id="${event.id}">Import as Local Draft</button>
           </div>
         </div>
-    `).join("");
+      `;
+    }).join("");
   }
 
-  if (!sorted.length && !backups.length) {
+  if (!sorted.length && !remoteDrafts.length) {
     listEl.innerHTML = `<div class="card">No NCCs available yet.</div>`;
     return;
   }
@@ -474,7 +463,7 @@ export function renderEndorsementDetailsPanel(state) {
   }
   const entries = state.endorsementDetails?.get(targetId) || [];
   const label = state.selectedEndorsementLabel || "this NCC";
-  const detailsContent =
+  const detailsContent = 
     entries.length > 0
       ? entries
           .map((entry) => {
@@ -681,7 +670,12 @@ export function renderDrafts(
     }));
 
     if (kind === "endorsement" && state.signerPubkey) {
-      const relays = await state.getRelays(); // Assuming getRelays is part of state or passed
+      let relays = [];
+      try {
+        relays = await getRelays(getConfig);
+      } catch (error) {
+        console.warn("NCC Manager: failed to load relay list for endorsements", error);
+      }
       if (relays.length) {
         try {
           const events = await fetchAuthorEndorsements(relays, state.signerPubkey);
@@ -747,7 +741,7 @@ export function renderDrafts(
         const hint = ownerKey ? "" : " — sign in to manage your endorsements";
         return `<span class="muted">Published on relays${hint}</span>`;
       }
-      const publishButton =
+      const publishButton = 
         item.status !== "published"
           ? `<button class="primary" data-action="publish" data-id="${item.id}" ${ownerKey ? "" : 'disabled title="Sign in to publish"'}>Publish</button>`
           : "";
