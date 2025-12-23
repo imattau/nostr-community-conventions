@@ -90,18 +90,6 @@ async function initShell() {
   }
   
   updateState({ uiMode: "power" });
-  
-  let powerCss = document.getElementById("power-css-link");
-  if (!powerCss) {
-      powerCss = document.createElement("link");
-      powerCss.id = "power-css-link";
-      powerCss.rel = "stylesheet";
-      powerCss.href = "/src/power.css";
-      document.head.appendChild(powerCss);
-  }
-  
-  if (powerCss) powerCss.disabled = false;
-  document.body.classList.add("mode-power");
   power.hidden = false;
   
   await updateAllDrafts();
@@ -322,9 +310,6 @@ function openNewNcc() {
     }
   };
   
-  // Logic to open this draft in Power UI
-  // Since we are in Power UI, we should probably just select it if we added it to state
-  // For now, let's just save it and refresh
   saveDraft(draft).then(() => {
       updateAllDrafts().then(() => {
           refreshUI();

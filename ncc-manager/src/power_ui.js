@@ -59,13 +59,10 @@ export function initPowerShell(state, appActions) {
             <span class="p-search-kb">Ctrl+K</span>
           </div>
         </div>
-        <div class="p-top-right">
-          <div id="p-top-signer" class="p-signer-status"></div>
-          <button class="p-ghost-btn" id="p-btn-classic" type="button" aria-label="Switch to Classic UI">
-            🪟
-          </button>
-        </div>
-      </header>
+          <div class="p-top-right">
+             <div id="p-top-signer" class="p-signer-status"></div>
+          </div>
+        </header>
 
       <div class="p-main">
         <aside class="p-pane p-explorer">
@@ -133,9 +130,6 @@ function setupGlobalListeners() {
             openItem(item.dataset.id);
         }
     });
-
-    const classicBtn = document.getElementById("p-btn-classic");
-    classicBtn && (classicBtn.onclick = () => actions.switchShell?.("classic"));
 
     const brand = document.querySelector(".p-brand");
     brand && (brand.onclick = () => {
@@ -625,7 +619,6 @@ function renderInspector(item) {
 const COMMANDS = [
     { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
     { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => actions.openNewNcc?.() },
-    { id: "classic", title: "Switch to Classic Mode", kb: "", run: () => actions.switchShell?.("classic") },
     { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
