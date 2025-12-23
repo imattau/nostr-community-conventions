@@ -26,7 +26,7 @@ body.mode-power {
   font-family: var(--ui);
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Body must not scroll */
+  overflow: hidden; /* Body MUST NOT scroll */
   height: 100vh;
   width: 100vw;
 }
@@ -34,9 +34,10 @@ body.mode-power {
 body.mode-power #app {
   padding: 0 !important;
   margin: 0 !important;
-  height: 100%;
-  width: 100%;
+  height: 100vh;
+  width: 100vw;
   display: block;
+  overflow: hidden; /* App MUST NOT scroll */
 }
 
 body.mode-power button {
@@ -59,16 +60,16 @@ body.mode-power button:hover {
 }
 
 /* =========================
-   Main layout (Single Height Authority)
+   Main layout (3-row grid)
    ========================= */
 
 #shell-power {
+  height: 100vh;
+  width: 100vw;
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr) 28px;
   grid-template-columns: 100%;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+  overflow: hidden; /* The shell itself must not scroll */
 }
 
 .p-topbar {
@@ -79,18 +80,21 @@ body.mode-power button:hover {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   gap: 20px;
-}
-
-.p-topbar > * {
-  min-width: 0; /* Allow children to shrink */
+  min-width: 0;
 }
 
 .p-workspace {
   grid-row: 2;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 0; 
+  height: 100%;
+  min-height: 0; /* Critical for grid children overflow */
   overflow: hidden;
+}
+
+.p-workspace > * {
+  min-height: 0;
+  min-width: 0;
 }
 
 .p-status {
@@ -102,26 +106,26 @@ body.mode-power button:hover {
   align-items: center;
   padding: 0 10px;
   font-size: 0.7rem;
+  position: sticky; /* Safety net */
+  bottom: 0;
+  z-index: 10;
 }
 
 .p-nav {
   background: var(--panel);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
+  overflow-y: auto; /* Nav is the scroll container */
   overflow-x: hidden;
   height: 100%;
+  min-height: 0;
 }
 
 .p-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  grid-template-columns: 1fr 420px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-}
-
-.p-split > * {
-  min-width: 0; /* Allow children to shrink */
 }
 
 /* =========================
@@ -153,6 +157,7 @@ body.mode-power button:hover {
   text-transform: uppercase;
   padding: 6px 12px;
   color: var(--muted);
+  letter-spacing: 0.05em;
 }
 
 .p-nav-item {
@@ -195,6 +200,7 @@ body.mode-power button:hover {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -259,6 +265,7 @@ body.mode-power button:hover {
   background: var(--panel);
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
