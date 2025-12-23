@@ -111,26 +111,30 @@ export function initPowerShell(state, appActions) {
 }
 
 function setupGlobalListeners() {
-    const shell = document.getElementById("shell-power");
-    if (!shell) return;
+    // Use delegation on the document for maximum stability
+    document.addEventListener("click", (e) => {
+        const shell = document.getElementById("shell-power");
+        if (!shell || shell.hidden) return;
 
-    // Use delegation on the root shell for dynamic parts
-    shell.addEventListener("click", (e) => {
-        // Explorer Item Click
+        // 1. Explorer Item Click
         const navItem = e.target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
+            e.preventDefault();
+            e.stopPropagation();
             openItem(navItem.dataset.id);
             return;
         }
 
-        // Explorer Branch Toggle
+        // 2. Explorer Branch Toggle
         const branch = e.target.closest("[data-branch]");
         if (branch) {
+            e.preventDefault();
+            e.stopPropagation();
             toggleBranch(branch.dataset.branch);
             return;
         }
 
-        // Brand Click (Reset)
+        // 3. Brand Click (Reset)
         const brand = e.target.closest(".p-brand");
         if (brand) {
             currentItemId = null;
@@ -141,14 +145,14 @@ function setupGlobalListeners() {
             return;
         }
 
-        // Command Palette Item Click
+        // 4. Command Palette Item Click
         const paletteItem = e.target.closest(".p-palette-item");
         if (paletteItem && paletteItem.dataset.cmd) {
             executeCommand(paletteItem.dataset.cmd);
             return;
         }
 
-        // Command Palette Overlay Click (Close)
+        // 5. Command Palette Overlay Click (Close)
         const overlay = document.getElementById("p-palette-overlay");
         if (e.target === overlay) {
             toggleCommandPalette(false);
@@ -168,8 +172,7 @@ function setupGlobalListeners() {
     });
 
     // Inspector input syncing (Delegation)
-    const inspector = document.getElementById("p-inspector-body");
-    shell.addEventListener("input", (e) => {
+    document.addEventListener("input", (e) => {
         if (!isEditMode || !currentItemId) return;
         
         const target = e.target;
@@ -554,7 +557,7 @@ function normalizeStatus(status) {
 function findItem(id) {
     if (!_state || !id) return null;
     
-    // Pool everything together
+    // Pool everything
     const all = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
@@ -564,11 +567,10 @@ function findItem(id) {
         ...(_state.remoteDrafts || [])
     ];
     
-    // Find the item by its unique ID
-    const found = all.find(i => i && i.id === id);
+    // Aggressive search: match on id or event_id
+    const found = all.find(i => i && (i.id === id || i.event_id === id));
     if (!found) return null;
 
-    // Check if it's local (editable)
     const localPool = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
@@ -576,7 +578,7 @@ function findItem(id) {
         ...(_state.supportingLocalDrafts || [])
     ];
     
-    found._isLocal = localPool.some(d => d.id === found.id);
+    found._isLocal = localPool.some(d => d.id === found.id || (d.event_id && d.event_id === found.event_id));
     
     return found;
 }
