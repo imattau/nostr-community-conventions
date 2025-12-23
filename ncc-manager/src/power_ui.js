@@ -130,6 +130,20 @@ function setupGlobalListeners() {
     overlay.addEventListener("click", (e) => {
         if (e.target === overlay) toggleCommandPalette(false);
     });
+
+    // Palette input listeners
+    const paletteInput = document.getElementById("p-palette-input");
+    paletteInput.addEventListener("input", (e) => {
+        renderCommandList(e.target.value);
+    });
+    paletteInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            const firstItem = document.querySelector(".p-palette-item");
+            if (firstItem && firstItem.dataset.cmd) {
+                executeCommand(firstItem.dataset.cmd);
+            }
+        }
+    });
 }
 
 function handleCreate(kindStr) {
