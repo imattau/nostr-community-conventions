@@ -797,6 +797,22 @@ function openItem(id) {
     updateStatus(`Opened ${item.d || "item"}`);
 }
 
+export function focusItem(id, editMode = false) {
+    const item = findItem(id);
+    if (!item) {
+        log("Failed to focus item, not found:", id);
+        return;
+    }
+
+    currentItemId = id;
+    isEditMode = Boolean(editMode);
+
+    renderExplorer();
+    renderContent(item);
+    renderInspector(item);
+    updateStatus(`Opened ${item.d || "item"}`);
+}
+
 function renderContent(item) {
     const container = document.getElementById("p-content-column");
     if (!container) return;
