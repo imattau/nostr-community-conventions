@@ -63,6 +63,8 @@ import {
   writeCachedNcc
 } from "./state.js";
 
+import { initPowerShell } from "./power_ui.js";
+
 
 const FALLBACK_RELAYS = [
   "wss://relay.damus.io",
@@ -74,6 +76,26 @@ const FALLBACK_RELAYS = [
 ];
 
 const NCC_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function switchShell(mode) {
+  const classic = document.getElementById("shell-classic");
+  const power = document.getElementById("shell-power");
+  
+  if (!classic || !power) return;
+  
+  updateState({ uiMode: mode });
+  
+  if (mode === "power") {
+    document.body.classList.add("mode-power");
+    classic.hidden = true;
+    power.hidden = false;
+    initPowerShell(state, { switchShell });
+  } else {
+    document.body.classList.remove("mode-power");
+    power.hidden = true;
+    classic.hidden = false;
+  }
+}
 
 async function refreshSignerProfile() {
   if (!state.signerPubkey) {
@@ -204,9 +226,17 @@ async function fetchDefaults() {
 async function loadConfig() {
   const defaultRelays = (await getConfig("default_relays", [])) || [];
   const signerMode = (await getConfig("signer_mode", "nip07")) || "nip07";
+  const uiMode = (await getConfig("ui_mode", "classic")) || "classic";
+  
   updateState({ defaults: defaultRelays, signerMode: signerMode });
+  
   const modeSelect = document.getElementById("signer-mode");
-  modeSelect.value = state.signerMode;
+  if (modeSelect) modeSelect.value = state.signerMode;
+  
+  const uiSelect = document.getElementById("ui-mode-select");
+  if (uiSelect) uiSelect.value = uiMode;
+  
+  await switchShell(uiMode);
   updateSignerStatus();
 }
 
@@ -1620,6 +1650,15 @@ function initSettings() {
   });
 
   document.getElementById("export-all").addEventListener("click", exportAllDrafts);
+
+  const uiSelect = document.getElementById("ui-mode-select");
+  if (uiSelect) {
+    uiSelect.addEventListener("change", async () => {
+      const mode = uiSelect.value;
+      await setConfig("ui_mode", mode);
+      switchShell(mode);
+    });
+  }
 
   const refreshButton = document.getElementById("refresh-endorsement-data");
   if (refreshButton) {
