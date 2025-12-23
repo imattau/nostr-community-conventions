@@ -27,6 +27,8 @@ body.mode-power {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  height: 100vh;
+  width: 100vw;
 }
 
 body.mode-power #app {
@@ -34,6 +36,7 @@ body.mode-power #app {
   margin: 0 !important;
   height: 100vh;
   width: 100vw;
+  display: block; /* Remove grid from #app to avoid nesting issues */
 }
 
 body.mode-power button {
@@ -64,26 +67,27 @@ body.mode-power button:hover {
   width: 100vw;
   display: grid;
   grid-template-rows: 48px 1fr 28px;
+  grid-template-columns: 100%;
   overflow: hidden;
 }
 
 .p-topbar {
   grid-row: 1;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
   align-items: center;
   padding: 0 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  gap: 20px;
+  min-width: 0;
 }
 
 .p-workspace {
   grid-row: 2;
   display: grid;
   grid-template-columns: 260px 1fr;
-  height: 100%;
-  min-height: 0; /* Critical for grid children overflow */
+  min-height: 0; 
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -96,20 +100,24 @@ body.mode-power button:hover {
   align-items: center;
   padding: 0 10px;
   font-size: 0.7rem;
+  min-width: 0;
 }
 
 .p-nav {
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100%;
+  min-width: 0;
 }
 
 .p-split {
   display: grid;
   grid-template-columns: 1fr 420px;
-  height: 100%;
   min-height: 0;
+  min-width: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -118,12 +126,14 @@ body.mode-power button:hover {
    ========================= */
 
 .p-top-search {
+  flex: 1;
   max-width: 420px;
-  width: 100%;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 6px 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  outline: none;
 }
 
 /* =========================
@@ -139,14 +149,29 @@ body.mode-power button:hover {
   text-transform: uppercase;
   padding: 6px 12px;
   color: var(--muted);
+  letter-spacing: 0.05em;
 }
 
 .p-nav-item {
   display: flex;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.p-nav-item > div:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.p-nav-item div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .p-nav-item:hover {
@@ -154,8 +179,9 @@ body.mode-power button:hover {
 }
 
 .p-nav-item.active {
-  background: rgba(106, 169, 255, 0.15);
+  background: rgba(106, 169, 255, 0.1);
   border-left: 3px solid var(--accent);
+  padding-left: 9px;
 }
 
 .meta {
@@ -172,13 +198,13 @@ body.mode-power button:hover {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .p-pane-header {
-  padding: 6px 10px;
+  padding: 0 10px;
   font-size: 0.75rem;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -186,26 +212,29 @@ body.mode-power button:hover {
   align-items: center;
   height: 32px;
   flex-shrink: 0;
+  background: var(--panel);
 }
 
 .p-editor-body {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: auto 1fr;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .p-gutter {
   background: var(--panel);
-  color: var(--muted);
+  color: #4b5263;
   font-family: var(--mono);
   font-size: 0.75rem;
   text-align: right;
-  padding: 6px;
+  padding: 16px 8px;
   overflow: hidden;
   user-select: none;
   line-height: 1.5;
+  min-width: 32px;
 }
 
 .p-editor-textarea {
@@ -214,13 +243,15 @@ body.mode-power button:hover {
   border: none;
   resize: none;
   font-family: var(--mono);
-  font-size: 0.85rem;
-  padding: 6px;
+  font-size: 0.9rem;
+  padding: 16px;
   outline: none;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre; /* Keep code-like behavior */
   height: 100%;
-  overflow-y: auto;
+  width: 100%;
+  overflow: auto; /* Both directions */
+  tab-size: 4;
 }
 
 /* =========================
@@ -231,13 +262,13 @@ body.mode-power button:hover {
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .p-details-header {
-  padding: 10px;
+  padding: 12px;
   border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
@@ -255,23 +286,30 @@ body.mode-power button:hover {
 
 .p-details-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
 }
 
 .p-tabs-bar {
   display: flex;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  background: var(--panel-2);
 }
 
 .p-tab-btn {
-  padding: 6px 10px;
+  padding: 8px 16px;
   font-size: 0.75rem;
   border: none !important;
   background: transparent;
   color: var(--muted);
   border-bottom: 2px solid transparent !important;
   border-radius: 0 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .p-tab-btn.active {
@@ -281,7 +319,7 @@ body.mode-power button:hover {
 
 .p-tab-content {
   display: none;
-  padding: 12px;
+  padding: 16px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -291,27 +329,26 @@ body.mode-power button:hover {
   display: block;
 }
 
-.p-tab-content h1, 
-.p-tab-content h2, 
-.p-tab-content h3, 
-.p-tab-content p {
-  margin-top: 0;
-}
+/* Reset markdown margins in preview */
+.p-tab-content > *:first-child { margin-top: 0; }
+.p-tab-content > *:last-child { margin-bottom: 0; }
 
 /* =========================
    Badges
    ========================= */
 
 .p-badge {
-  font-size: 0.65rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--panel-2);
+  font-size: 0.6rem;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
   display: inline-block;
+  font-weight: 700;
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
-.status-draft { color: var(--warning); }
-.status-published { color: var(--success); }
+.status-draft { color: var(--warning); border-color: rgba(255, 204, 102, 0.2); }
+.status-published { color: var(--success); border-color: rgba(106, 255, 154, 0.2); }
 
 /* =========================
    Command palette
@@ -320,11 +357,11 @@ body.mode-power button:hover {
 .p-palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.7);
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 120px;
+  padding-top: 10vh;
   z-index: 9999;
 }
 
@@ -335,37 +372,55 @@ body.mode-power button:hover {
 .p-palette {
   background: var(--panel);
   border: 1px solid var(--border);
-  width: 420px;
-  border-radius: 6px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  width: 600px;
+  max-width: 90vw;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.6);
   overflow: hidden;
 }
 
 .p-palette-input {
   width: 100%;
-  padding: 10px;
+  padding: 14px;
   border: none;
   background: var(--panel-2);
   color: var(--text);
   outline: none;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  font-family: var(--mono);
+  border-bottom: 1px solid var(--border);
 }
 
 .p-palette-item {
-  padding: 8px 10px;
+  padding: 12px 16px;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
 }
 
 .p-palette-item:hover,
 .p-palette-item.selected {
   background: rgba(106,169,255,0.15);
+  color: var(--accent);
+}
+
+.shortcut {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  opacity: 0.5;
 }
 
 .p-palette-list {
-  max-height: 300px;
+  max-height: 400px;
   overflow-y: auto;
+}
+
+.p-empty-state {
+  padding: 12px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.8rem;
+  text-align: center;
 }
