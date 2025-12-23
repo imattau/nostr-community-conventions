@@ -97,7 +97,7 @@ export function payloadToDraft(payload) {
   }, {});
 
   const draft = {
-    id: crypto.randomUUID(),
+    id: payload.id || payload.event_id || crypto.randomUUID(),
     kind: payload.kind,
     d: tagMap.d?.[0] || "",
     title: tagMap.title?.[0] || "",

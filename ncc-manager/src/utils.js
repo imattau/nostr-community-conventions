@@ -13,6 +13,7 @@ export function esc(value) {
 export function shortenKey(value, head = 6, tail = 4) {
   if (!value) return "";
   if (value.length <= head + tail + 1) return value;
+  if (tail === 0) return value.slice(0, head) + "…";
   return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
