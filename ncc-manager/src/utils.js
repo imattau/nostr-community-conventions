@@ -92,6 +92,14 @@ export function buildNccIdentifier(numberValue) {
   return `ncc-${digits}`;
 }
 
+export function incrementVersion(version) {
+  if (!version) return "1";
+  const match = version.match(/^([^0-9]*)([0-9]+)([^0-9]*)$/);
+  if (!match) return version;
+  const [_, prefix, num, suffix] = match;
+  return `${prefix}${parseInt(num, 10) + 1}${suffix}`;
+}
+
 export function buildDraftIdentifier(dValue) {
   if (!dValue) return "";
   return `draft:${dValue}`;

@@ -39,7 +39,8 @@ import {
   isDraftIdentifier,
   stripDraftPrefix,
   isOnline,
-  showToast
+  showToast,
+  incrementVersion
 } from "./utils.js";
 
 import {
@@ -205,6 +206,10 @@ async function handlePowerSave(id, content, fullDraft = null) {
   item.content = content;
   item.updated_at = Date.now();
   
+  if (state.signerPubkey && !item.author_pubkey) {
+    item.author_pubkey = state.signerPubkey;
+  }
+  
   // Save local draft
   await saveDraft(item);
   
@@ -337,6 +342,7 @@ function toDraftFromRelay(item) {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
     status: "draft",
+    author_pubkey: item.pubkey || item.author_pubkey || "",
     d: buildNccIdentifier(eventTagValue(item.tags || [], "d")) || item.d || "",
     title: eventTagValue(item.tags || [], "title") || item.title || "",
     content: item.content || "",
@@ -382,10 +388,12 @@ function createRevisionDraft(item, localDrafts) {
       ...base,
       id: crypto.randomUUID(),
       status: "draft",
+      author_pubkey: state.signerPubkey,
       event_id: "",
       published_at: null,
       tags: {
         ...base.tags,
+        version: incrementVersion(base.tags?.version),
         supersedes: buildRevisionSupersedes(base.tags, eventId)
       },
       source: "local"
@@ -398,10 +406,12 @@ function createRevisionDraft(item, localDrafts) {
     ...baseDraft,
     id: crypto.randomUUID(),
     status: "draft",
+    author_pubkey: state.signerPubkey,
     event_id: "",
     published_at: null,
     tags: {
       ...baseDraft.tags,
+      version: incrementVersion(baseDraft.tags?.version),
       supersedes: buildRevisionSupersedes(baseDraft.tags, eventId)
     }
   };
@@ -416,6 +426,7 @@ function openNewNcc() {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
     status: "draft",
+    author_pubkey: state.signerPubkey,
     d: "",
     title: "",
     content: "",
@@ -426,7 +437,7 @@ function openNewNcc() {
       summary: "",
       topics: [],
       lang: "",
-      version: "",
+      version: "1",
       supersedes: [],
       license: "",
       authors: []
