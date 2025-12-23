@@ -175,6 +175,11 @@ async function handlePowerSave(id, content, fullDraft = null) {
   let item = fullDraft;
   
   if (!item) {
+    const pending = state.pendingDrafts?.get(id);
+    if (pending) {
+      item = pending;
+    }
+
     const allLocal = [
       ...(state.nccLocalDrafts || []),
       ...(state.nsrLocalDrafts || []),
@@ -401,7 +406,7 @@ function createRevisionDraft(item, localDrafts) {
   };
 }
 
-async function openNewNcc() {
+function openNewNcc() {
   if (!state.signerPubkey) {
     showToast("You must be signed in to create an NCC.", "error");
     return;
@@ -427,15 +432,8 @@ async function openNewNcc() {
     }
   };
   
-  try {
-    await saveDraft(draft);
-    await updateAllDrafts();
-    refreshUI();
-    focusItem(draft.id, true);
-  } catch (error) {
-    console.error("Failed to create new NCC draft:", error);
-    showToast(`Failed to create draft: ${error.message}`, "error");
-  }
+  state.pendingDrafts?.set(draft.id, draft);
+  focusItem(draft.id, true);
 }
 
 async function persistRelayEvents(events) {

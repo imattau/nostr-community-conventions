@@ -32,6 +32,7 @@ export const state = {
   supportingLocalDrafts: [],
   endorsementDetails: new Map(),
   persistedRelayEvents: new Set(),
+  pendingDrafts: new Map(),
   remoteDrafts: [],
   FALLBACK_RELAYS: FALLBACK_RELAYS
 };
