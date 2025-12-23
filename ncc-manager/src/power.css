@@ -245,6 +245,17 @@ body.mode-power {
 .p-nav-branch-body { display: none; padding-left: 16px; }
 .p-nav-branch-body.is-open { display: block; }
 
+.p-nav-subtree {
+  margin-top: 4px;
+}
+.p-nav-subtree .p-nav-branch-header {
+  padding: 4px 0;
+  opacity: 0.8;
+}
+.p-nav-subtree .p-nav-branch-title {
+  font-size: 0.8rem;
+}
+
 .p-nav-item {
   padding: 6px 8px;
   border-radius: 4px;

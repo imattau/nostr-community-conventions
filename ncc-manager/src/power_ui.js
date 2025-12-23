@@ -290,7 +290,7 @@ function filterExplorerItems(items, query) {
 
 
 function renderExplorerSection(section) {
-    const { title, items, type } = section;
+    const { title, items, type: sectionType } = section;
     const groups = buildRevisionGroups(items);
     return `
         <div class="p-nav-group">
@@ -303,38 +303,50 @@ function renderExplorerSection(section) {
 }
 
 function buildRevisionGroups(items) {
-    const map = new Map();
+    const dMap = new Map();
     items.forEach((item) => {
-        const kindLabel = TYPE_LABELS[item.kind] || "DOC";
-        const d = (item.d || "").toUpperCase().trim() || "Untitled";
-        const key = `${item.kind}:${d}`;
-        const bucket = map.get(key) || { kind: item.kind, kindLabel, d, entries: [] };
-        bucket.entries.push(item);
-        map.set(key, bucket);
+        const d = (item.d || "").toUpperCase().trim() || "UNTITLED";
+        const bucket = dMap.get(d) || [];
+        bucket.push(item);
+        dMap.set(d, bucket);
     });
 
-    return Array.from(map.values())
-        .map((group) => {
+    return Array.from(dMap.entries())
+        .map(([d, groupItems]) => {
+            const byKind = {
+                [KINDS.ncc]: groupItems.filter(i => i.kind === KINDS.ncc),
+                [KINDS.nsr]: groupItems.filter(i => i.kind === KINDS.nsr),
+                [KINDS.endorsement]: groupItems.filter(i => i.kind === KINDS.endorsement),
+                [KINDS.supporting]: groupItems.filter(i => i.kind === KINDS.supporting)
+            };
+
+            // Sort helper for internal versions
+            const sortItems = (list) => {
+                return list.map(item => ({ 
+                    item, 
+                    depth: computeRevisionDepth(item, list) 
+                })).sort((a, b) => {
+                    if (b.depth !== a.depth) return b.depth - a.depth;
+                    const aTs = ensureTimestamp(a.item.updated_at || a.item.created_at);
+                    const bTs = ensureTimestamp(b.item.updated_at || b.item.created_at);
+                    return (bTs || 0) - (aTs || 0);
+                });
+            };
+
             return {
-                label: group.d,
-                kind: group.kind,
-                kindLabel: group.kindLabel,
-                rawKey: `${group.kind}:${group.d}`,
-                entries: group.entries
-                    .map((item) => ({ item, depth: computeRevisionDepth(item, group.entries) }))
-                    .sort((a, b) => {
-                        if (b.depth !== a.depth) return b.depth - a.depth;
-                        const aTs = ensureTimestamp(a.item.updated_at || a.item.created_at);
-                        const bTs = ensureTimestamp(b.item.updated_at || b.item.created_at);
-                        return (bTs || 0) - (aTs || 0);
-                    })
+                label: d,
+                rawKey: d,
+                kinds: {
+                    ncc: sortItems(byKind[KINDS.ncc]),
+                    nsr: sortItems(byKind[KINDS.nsr]),
+                    endorsement: sortItems(byKind[KINDS.endorsement]),
+                    supporting: sortItems(byKind[KINDS.supporting])
+                },
+                // Use the latest NCC or the latest item overall for the group timestamp
+                latestTs: Math.max(...groupItems.map(i => ensureTimestamp(i.updated_at || i.created_at) || 0))
             };
         })
-        .sort((a, b) => {
-            const aTs = ensureTimestamp(a.entries[0]?.item.updated_at || a.entries[0]?.item.created_at);
-            const bTs = ensureTimestamp(b.entries[0]?.item.updated_at || b.entries[0]?.item.created_at);
-            return (bTs || 0) - (aTs || 0);
-        });
+        .sort((a, b) => b.latestTs - a.latestTs);
 }
 
 function computeRevisionDepth(item, peers) {
@@ -362,25 +374,60 @@ function computeRevisionDepth(item, peers) {
     return depth(item);
 }
 
-function renderExplorerBranch(group, type) {
-    const branchKey = `${type}:${group.rawKey}`;
+function renderExplorerBranch(group, sectionType) {
+    const branchKey = `${sectionType}:${group.rawKey}`;
     const isClosed = collapsedBranches.has(branchKey);
-    const firstEntry = group.entries[0];
-    const status = determineStatus(firstEntry?.item, type);
-    const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
     
-    // Short type label for the branch
-    const typeIndicator = group.kind === KINDS.ncc ? "" : `<span class="p-type-tag">${group.kindLabel}</span>`;
+    // Main group identity comes from the latest NCC item if it exists
+    const mainNcc = group.kinds.ncc[0]?.item;
+    const title = mainNcc ? (mainNcc.title || eventTagValue(mainNcc.tags, "title")) : group.label;
+    const status = determineStatus(mainNcc || group.kinds.endorsement[0]?.item || group.kinds.supporting[0]?.item || group.kinds.nsr[0]?.item, sectionType);
+    const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
+
+    let bodyHtml = "";
+    
+    // 1. NCC Revisions (Directly under the branch)
+    if (group.kinds.ncc.length) {
+        bodyHtml += group.kinds.ncc.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("");
+    }
+
+    // 2. Sub-trees for other types
+    const subTrees = [
+        { key: "endorsement", label: "Endorsements", items: group.kinds.endorsement },
+        { key: "nsr", label: "Succession", items: group.kinds.nsr },
+        { key: "supporting", label: "Supporting Docs", items: group.kinds.supporting }
+    ];
+
+    subTrees.forEach(sub => {
+        if (sub.items.length) {
+            const subKey = `${branchKey}:${sub.key}`;
+            const subClosed = collapsedBranches.has(subKey);
+            bodyHtml += `
+                <div class="p-nav-tree p-nav-subtree">
+                    <button class="p-nav-branch-header" data-branch="${subKey}">
+                        <span class="p-nav-branch-icon">${subClosed ? "▸" : "▾"}</span>
+                        <span class="p-nav-branch-title">
+                            <span class="p-type-tag">${sub.label}</span>
+                            <small class="p-muted-text">(${sub.items.length})</small>
+                        </span>
+                    </button>
+                    <div class="p-nav-branch-body ${subClosed ? "" : "is-open"}">
+                        ${sub.items.map((entry, idx) => renderExplorerItem(entry, idx, "published")).join("")}
+                    </div>
+                </div>
+            `;
+        }
+    });
 
     return `
         <div class="p-nav-tree">
             <button class="p-nav-branch-header" data-branch="${branchKey}">
                 <span class="p-nav-branch-icon">${isClosed ? "▸" : "▾"}</span>
-                <span class="p-nav-branch-title">${typeIndicator}${esc(group.label)}</span>
+                <span class="p-nav-branch-title">${esc(group.label)} <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small></span>
                 <span class="p-badge-mini status-${status}">${badgeLabel}</span>
             </button>
             <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
-                ${group.entries.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("")}
+                ${bodyHtml}
             </div>
         </div>
     `;
@@ -392,28 +439,31 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
     const status = normalizeStatus(item.status || inheritedStatus);
     const statusLabel =
         status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
-    const baseId = (item.d || "").toUpperCase() || "UNTITLED";
+    
     const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
     const dateStr = formatShortDate(item.updated_at || item.created_at);
-    const suffix =
-        idx === 0
-            ? ""
-            : ` (${REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)]})`;
     
-    const typeLabel = TYPE_LABELS[item.kind] || "DOC";
-    const showType = item.kind !== KINDS.ncc;
+    // Simplified label for revisions
+    let label = title;
+    if (item.kind === KINDS.ncc) {
+        if (idx > 0) label = REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)];
+    } else {
+        // For sub-tree items, show the author or a short summary
+        const author = item.author_pubkey || item.author || item.pubkey || "";
+        label = `${shortenKey(author)} · ${formatShortDate(item.updated_at || item.created_at)}`;
+    }
 
     return `
         <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
             <div class="p-nav-meta">
-                <span class="p-nav-id">${showType ? `<small class="p-muted-type">${typeLabel}:</small> ` : ""}${esc(baseId)}</span>
+                <span class="p-nav-label">${esc(label)}</span>
                 <span class="p-badge-mini status-${status}">${statusLabel}</span>
             </div>
-            <div class="p-nav-label">${esc(title)}${suffix}</div>
             <div class="p-nav-date">${dateStr}</div>
         </div>
     `;
 }
+
 
 
 function toggleBranch(id) {
