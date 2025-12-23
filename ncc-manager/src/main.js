@@ -349,7 +349,7 @@ function buildRevisionSupersedes(tags, eventId) {
   if (eventId) {
     const normalized = normalizeEventId(eventId);
     if (normalized) {
-      const target = `event:${normalized}`;
+      const target = normalized; // No prefix for supersedes
       if (!list.includes(target)) list.push(target);
     }
   }
