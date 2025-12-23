@@ -171,14 +171,7 @@ async function updateSignerStatus() {
   const nccDrafts = await listDrafts(KINDS.ncc);
   updateState({ nccLocalDrafts: nccDrafts });
 
-  await renderDashboard(
-    state,
-    listDrafts,
-    openNccView,
-    publishDraft,
-    setupEndorsementCounterButtons,
-    renderEndorsementDetailsPanel
-  );
+  await refreshDashboard();
 }
 
 function switchView(view) {
@@ -189,14 +182,7 @@ function switchView(view) {
     btn.classList.toggle("active", btn.dataset.view === view);
   });
   if (view === "dashboard") {
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
   }
 }
 
@@ -513,14 +499,7 @@ async function saveEditDraft() {
   await saveDraft(draft);
   showToast("Draft saved.");
   hideEditMode();
-  await renderDashboard(
-    state,
-    listDrafts,
-    openNccView,
-    publishDraft,
-    setupEndorsementCounterButtons,
-    renderEndorsementDetailsPanel
-  );
+  await refreshDashboard();
   updateState({ currentDraft: { ...state.currentDraft, ncc: draft } });
   openNccView(
     {
@@ -737,14 +716,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     const nccDrafts = await listDrafts(KINDS.ncc);
     updateState({ nccLocalDrafts: nccDrafts });
 
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
     renderEndorsementDetailsPanel(state);
     if (helper) {
       if (usedCache && cached?.at) {
@@ -845,14 +817,7 @@ async function handleFormSubmit(kind) {
     verifyDraft,
     showToast
   );
-  renderDashboard(
-    state,
-    listDrafts,
-    openNccView,
-    publishDraft,
-    setupEndorsementCounterButtons,
-    renderEndorsementDetailsPanel
-  );
+  refreshDashboard();
 }
 
 async function handleListAction(kind, event) {
@@ -886,14 +851,7 @@ async function handleListAction(kind, event) {
       verifyDraft,
       showToast
     );
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
     return;
   }
 
@@ -946,14 +904,7 @@ async function handleListAction(kind, event) {
       verifyDraft,
       showToast
     );
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
     return;
   }
 
@@ -975,6 +926,69 @@ async function handleListAction(kind, event) {
 
   if (action === "verify") {
     await verifyDraft(draft);
+  }
+}
+
+async function refreshDashboard() {
+  await renderDashboard(
+    state,
+    listDrafts,
+    openNccView,
+    publishDraft,
+    setupEndorsementCounterButtons,
+    renderEndorsementDetailsPanel,
+    withdrawDraft
+  );
+}
+
+async function withdrawDraft(id) {
+  try {
+    let draft = (state.nccLocalDrafts || []).find((d) => d.id === id);
+    if (!draft) {
+      const event = (state.nccDocs || []).find((d) => d.id === id);
+      if (event) {
+        draft = toDraftFromRelay(event);
+        // Using existing ID logic from toDraftFromRelay
+      }
+    }
+    
+    if (!draft) throw new Error("Draft not found.");
+
+    const relays = await getRelays(getConfig);
+    if (!relays.length) throw new Error("No relays configured");
+    const signerMode = state.signerMode;
+    const nsec = sessionStorage.getItem("ncc-manager-nsec");
+    const signer = await getSigner(signerMode, nsec);
+
+    const withdrawnDraft = { 
+      ...draft, 
+      status: "withdrawn",
+      published_at: nowSeconds() 
+    };
+
+    const template = createEventTemplate(withdrawnDraft);
+    const event = await signer.signEvent(template);
+    const result = await publishEvent(relays, event);
+
+    const updated = {
+      ...withdrawnDraft,
+      event_id: event.id,
+      author_pubkey: signer.pubkey,
+      raw_event: event,
+      raw_tags: event.tags || []
+    };
+    
+    await saveDraft(updated);
+    
+    const nccDrafts = await listDrafts(KINDS.ncc);
+    updateState({ nccLocalDrafts: nccDrafts });
+    
+    await refreshDashboard();
+
+    showToast(`NCC withdrawn and update published to ${result.accepted}/${result.total} relays.`);
+
+  } catch (error) {
+    showToast(`Withdraw failed: ${error.message}`, "error");
   }
 }
 
@@ -1023,14 +1037,7 @@ async function publishDraft(draft, kind) {
       verifyDraft,
       showToast
     );
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
     showToast(
       `Published to ${result.accepted}/${result.total} relays (took ${result.attempts} attempt${
         result.attempts === 1 ? "" : "s"
@@ -1093,14 +1100,7 @@ async function saveDraftToRelays(draft, kind) {
     // Refresh dashboard to update event ID display
     const nccDrafts = await listDrafts(KINDS.ncc);
     updateState({ nccLocalDrafts: nccDrafts });
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
 
     showToast(
       `Draft saved to ${result.accepted}/${result.total} relays.`
@@ -1180,14 +1180,7 @@ async function importDraft(file) {
       verifyDraft,
       showToast
     );
-    renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel
-    );
+    refreshDashboard();
   } catch (error) {
     showToast("Import failed.", "error");
   }
@@ -1482,14 +1475,7 @@ async function init() {
   renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
   await initForms();
   await initLists();
-  await renderDashboard(
-    state,
-    listDrafts,
-    openNccView,
-    publishDraft,
-    setupEndorsementCounterButtons,
-    renderEndorsementDetailsPanel
-  );
+  await refreshDashboard();
   await refreshEndorsementHelpers();
 
   document.getElementById("ncc-view-back").addEventListener("click", () => switchView("dashboard"));
@@ -1546,14 +1532,7 @@ async function init() {
             showToast
           );
         }
-        renderDashboard(
-          state,
-          listDrafts,
-          openNccView,
-          publishDraft,
-          setupEndorsementCounterButtons,
-          renderEndorsementDetailsPanel
-        );
+        refreshDashboard();
       }
     }
   });

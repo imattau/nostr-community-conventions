@@ -290,7 +290,8 @@ export function renderDashboard(
   openNccView,
   publishDraft,
   setupEndorsementCounterButtons,
-  renderEndorsementDetailsPanel
+  renderEndorsementDetailsPanel,
+  withdrawDraft
 ) {
   const listEl = document.getElementById("recent-nccs");
   const localDrafts = state.nccLocalDrafts || [];
@@ -325,7 +326,7 @@ export function renderDashboard(
     if (localMap.has(event.id)) continue;
     const publishedAtRaw = eventTagValue(event.tags, "published_at");
     const publishedAt =
-      publishedAtRaw && String(publishedAtRaw).match(/^\\d+$/) ? Number(publishedAtRaw) : null;
+      publishedAtRaw && String(publishedAtRaw).match(/^\d+$/) ? Number(publishedAtRaw) : null;
     const statusTag = eventTagValue(event.tags, "status");
     combined.push({
       id: event.id,
@@ -373,6 +374,9 @@ export function renderDashboard(
       
       const statusClass = `status-${(item.status || "draft").toLowerCase()}`;
       const statusLabel = (item.status || "DRAFT").toUpperCase();
+      
+      const isOwner = state.signerPubkey && item.author === state.signerPubkey;
+      const canWithdraw = isOwner && item.status !== "withdrawn";
 
       return `
         <div class="card">
@@ -391,6 +395,11 @@ export function renderDashboard(
             ${ 
               canPublish && item.source === "local" && item.status !== "published"
                 ? `<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`
+                : ""
+            }
+            ${
+              canWithdraw
+                ? `<button class="ghost" data-action="withdraw" data-id="${item.id}" style="color: var(--error);">Withdraw</button>`
                 : ""
             }
           </div>
@@ -449,6 +458,17 @@ export function renderDashboard(
       if (!targetDraft) return;
       button.disabled = true;
       await publishDraft(targetDraft, kind);
+    });
+  });
+
+  listEl.querySelectorAll('button[data-action="withdraw"]').forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!withdrawDraft) return;
+      const targetId = button.dataset.id;
+      if (!confirm("Are you sure you want to withdraw this NCC? This will publish a withdrawal update to relays.")) return;
+      button.disabled = true;
+      await withdrawDraft(targetId);
+      button.disabled = false;
     });
   });
 }
