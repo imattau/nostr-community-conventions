@@ -851,4 +851,8 @@ body.mode-power #app {
 .p-palette-item .shortcut {
   font-size: 0.75rem;
   opacity: 0.7;
-}\n.p-palette-overlay[hidden] { display: none !important; }
+}
+
+.p-palette-overlay[hidden] {
+  display: none !important;
+}
