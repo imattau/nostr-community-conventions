@@ -248,7 +248,7 @@ function renderCommandList(query) {
     list.innerHTML = matches.map((c, i) => `
         <div class="p-palette-item ${i === 0 ? 'selected' : ''}" data-cmd="${c.id}">
             <span>${esc(c.title)}</span>
-            <span class="shortcut">${esc(c.shortcut || "")}
+            <span class="shortcut">${esc(c.shortcut || "")}</span>
         </div>
     `).join("");
 }
