@@ -82,7 +82,8 @@ export function initPowerShell(state, appActions) {
 }
 
 const COMMANDS = [
-    { id: "new-ncc", title: "New NCC Draft", run: () => console.log("New NCC") },
+    { id: "save", title: "Save Current File", shortcut: "Ctrl+S", run: () => handleSaveShortcut() },
+    { id: "new-ncc", title: "New NCC Draft", run: () => actions.openNewNcc?.() },
     { id: "toggle-bottom", title: "Toggle Bottom Panel", run: () => toggleBottomPanel() },
     { id: "switch-classic", title: "Switch to Classic Mode", run: () => actions.switchShell?.("classic") },
     { id: "reload", title: "Reload Window", run: () => window.location.reload() }
@@ -94,10 +95,23 @@ function setupKeyboardShortcuts() {
             e.preventDefault();
             toggleCommandPalette();
         }
+        if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+            e.preventDefault();
+            handleSaveShortcut();
+        }
         if (e.key === "Escape") {
             toggleCommandPalette(false);
         }
     });
+}
+
+async function handleSaveShortcut() {
+    if (!currentItemId || !actions.saveItem) return;
+    const content = document.getElementById("p-editor").value;
+    const msg = document.getElementById("p-status-msg");
+    if (msg) msg.textContent = "Saving...";
+    await actions.saveItem(currentItemId, content);
+    if (msg) msg.textContent = `Saved at ${new Date().toLocaleTimeString()}`;
 }
 
 function toggleCommandPalette(show) {
