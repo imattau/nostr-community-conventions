@@ -440,19 +440,33 @@ function renderExplorer() {
                 item = payloadToDraft(rawItem);
             }
 
-            // Conceptual Identity for de-duplication (Event ID if it exists, otherwise UUID)
-            const conceptualId = item.event_id || item.id;
-            const existing = conceptualMap.get(conceptualId);
+            // Conceptual Identity:
+            // Published: Event ID
+            // Drafts: Kind + Normalized D (to merge local and relay backups)
+            let identity = item.event_id || item.id;
+            const isDraft = (item.status || "").toLowerCase() !== "published";
+            
+            if (isDraft) {
+                const cleanD = (item.d || "").replace(/^draft:/, "");
+                identity = `draft-group:${item.kind}:${cleanD}`;
+            }
+
+            const existing = conceptualMap.get(identity);
             
             if (!existing) {
-                conceptualMap.set(conceptualId, item);
+                conceptualMap.set(identity, item);
             } else {
-                // Prefer local source or newer timestamp
+                // De-duplication logic:
+                // 1. Prefer local source
+                // 2. Prefer newer timestamp
                 const existingTs = ensureTimestamp(existing.updated_at || existing.created_at) || 0;
                 const newTs = ensureTimestamp(item.updated_at || item.created_at) || 0;
                 
-                if (item.source === "local" || newTs > existingTs) {
-                    conceptualMap.set(conceptualId, item);
+                const isLocalBetter = item.source === "local" && existing.source !== "local";
+                const isNewerBetter = newTs > existingTs;
+                
+                if (isLocalBetter || (isNewerBetter && item.source === existing.source)) {
+                    conceptualMap.set(identity, item);
                 }
             }
         });
@@ -595,10 +609,13 @@ function renderExplorerBranch(group, sectionType) {
     const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
 
     let bodyHtml = "";
+    const isDraftSection = sectionType === "drafts";
     
     // 1. NCC Revisions (Directly under the branch)
     if (group.kinds.ncc.length) {
-        bodyHtml += group.kinds.ncc.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("");
+        // If it's a draft, only show the latest (first) item, no revision history
+        const nccItems = isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc;
+        bodyHtml += nccItems.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("");
     }
 
     // 2. Sub-trees for other types
@@ -612,17 +629,21 @@ function renderExplorerBranch(group, sectionType) {
         if (sub.items.length) {
             const subKey = `${branchKey}:${sub.key}`;
             const subClosed = collapsedBranches.has(subKey);
+            
+            // For drafts, we usually only want the latest of these too
+            const itemsToShow = isDraftSection ? [sub.items[0]] : sub.items;
+
             bodyHtml += `
                 <div class="p-nav-tree p-nav-subtree">
                     <button class="p-nav-branch-header" data-branch="${subKey}">
                         <span class="p-nav-branch-icon">${subClosed ? "▸" : "▾"}</span>
                         <span class="p-nav-branch-title">
                             <span class="p-type-tag">${sub.label}</span>
-                            <small class="p-muted-text">(${sub.items.length})</small>
+                            <small class="p-muted-text">(${itemsToShow.length})</small>
                         </span>
                     </button>
                     <div class="p-nav-branch-body ${subClosed ? "" : "is-open"}">
-                        ${sub.items.map((entry, idx) => renderExplorerItem(entry, idx, "published")).join("")}
+                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published")).join("")}
                     </div>
                 </div>
             `;
@@ -835,7 +856,7 @@ function renderInspector(item) {
             <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
             <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
             <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id || "Draft")}</span></div>
+            ${item.event_id && status === "published" ? `<div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id)}</span></div>` : ""}
             <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
             <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
             ${supersedes.length ? `<div class="p-prop-row"><span class="p-prop-key">Supersedes</span><span class="p-prop-val">${esc(supersedes.join(", "))}</span></div>` : ""}
