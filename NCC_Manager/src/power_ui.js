@@ -1,14 +1,22 @@
-
-import { esc, stripNccNumber, renderMarkdown } from "./utils.js";
+import { esc, stripNccNumber, renderMarkdown, eventTagValue } from "./utils.js";
 
 let actions = {};
 let currentItemId = null;
+let currentItemSource = null;
+let lastLineCount = 0;
+let _currentState = null;
 
 export function initPowerShell(state, appActions) {
+    _currentState = state;
+    renderPowerShell(state, appActions);
+}
+
+function renderPowerShell(state, appActions) {
   actions = appActions || {};
   const shell = document.getElementById("shell-power");
   if (!shell) return;
   
+  // Initial render if empty
   if (!shell.innerHTML.includes("p-topbar")) {
       shell.innerHTML = `
         <header class="p-topbar">
@@ -67,7 +75,7 @@ export function initPowerShell(state, appActions) {
         </main>
         
         <footer class="p-status">
-           <div id="p-status-relays">Relays: ${state.relayStatus?.relays || 0}</div>
+           <div>Relays: <span id="p-status-relays"></span></div>
            <div id="p-status-msg">Ready</div>
         </footer>
         
@@ -85,6 +93,33 @@ export function initPowerShell(state, appActions) {
   
   renderNavTree(state);
   updateSignerIndicator(state);
+  refreshFooter(state);
+  
+  if (currentItemId) {
+      const item = findItem(currentItemId, state);
+      if (item) refreshDetails(item, state);
+  }
+}
+
+function refreshFooter(state) {
+    const el = document.getElementById("p-status-relays");
+    if (el) el.textContent = state.relayStatus?.relays || 0;
+}
+
+function findItem(id, state) {
+    const drafts = state.nccLocalDrafts || [];
+    const published = state.nccDocs || [];
+    let item = drafts.find(d => d.id === id);
+    if (item) {
+        item._source = "local";
+        return item;
+    }
+    item = published.find(d => d.id === id);
+    if (item) {
+        item._source = "remote";
+        return item;
+    }
+    return null;
 }
 
 function setupEventListeners() {
@@ -92,18 +127,23 @@ function setupEventListeners() {
     const gutter = document.getElementById("p-gutter");
     const preview = document.getElementById("p-tab-preview");
     
-    // Editor sync
-    editor.addEventListener("input", () => {
-        // Update gutter
-        const lines = editor.value.split("\n").length;
-        gutter.innerHTML = Array(lines).fill(0).map((_, i) => i + 1).join("<br>");
-        
-        // Update preview
-        if (preview) {
-            preview.innerHTML = renderMarkdown(editor.value);
+    if (!editor || !gutter || !preview) return;
+    
+    editor.addEventListener("input", (e) => {
+        const val = editor.value;
+        const lines = val.split("\n").length;
+        if (lines !== lastLineCount) {
+            gutter.innerHTML = Array(lines).fill(0).map((_, i) => i + 1).join("<br>");
+            lastLineCount = lines;
         }
         
-        // Dirty state
+        const isPreviewActive = document.getElementById("p-tab-preview").classList.contains("active");
+        if (isPreviewActive) {
+            preview.innerHTML = renderMarkdown(val);
+        }
+        
+        if (!e.isTrusted) return;
+        
         document.getElementById("p-file-status").textContent = "• Unsaved";
     });
     
@@ -111,58 +151,49 @@ function setupEventListeners() {
         gutter.scrollTop = editor.scrollTop;
     });
     
-    // Tabs
     document.getElementById("p-tabs").addEventListener("click", (e) => {
         if (!e.target.classList.contains("p-tab-btn")) return;
         
-        // Switch active tab btn
         document.querySelectorAll(".p-tab-btn").forEach(b => b.classList.remove("active"));
         e.target.classList.add("active");
         
-        // Switch content
         const tab = e.target.dataset.tab;
         document.querySelectorAll(".p-tab-content").forEach(c => c.classList.remove("active"));
         document.getElementById(`p-tab-${tab}`).classList.add("active");
+        
+        if (tab === "preview") {
+             preview.innerHTML = renderMarkdown(editor.value);
+        }
     });
     
-    // Palette
     const overlay = document.getElementById("p-palette-overlay");
     overlay.addEventListener("click", (e) => {
         if (e.target === overlay) toggleCommandPalette(false);
+    });
+    
+    document.getElementById("p-palette-list").addEventListener("click", (e) => {
+        const item = e.target.closest(".p-palette-item");
+        if (item && item.dataset.cmd) {
+            const cmdId = item.dataset.cmd;
+            const cmd = COMMANDS.find(c => c.id === cmdId);
+            if (cmd) {
+                cmd.run();
+                toggleCommandPalette(false);
+            }
+        }
     });
     
     document.getElementById("p-palette-input").addEventListener("input", (e) => {
         renderCommandList(e.target.value);
     });
 
-    // Nav
     document.getElementById("p-nav").addEventListener("click", (e) => {
-        const item = e.target.closest(".p-nav-item");
-        if (item && item.dataset.id) {
-            // Need access to state? We passed it to init but it's not global here.
-            // We need to fetch item from main state.
-            // Hack: Trigger a custom event or use a global store if available.
-            // Or just pass ID to openItem and let it find it via a callback or exported state?
-            // `actions.openItem`? No, `openItem` is local.
-            // `initPowerShell` takes state.
-            // We can re-fetch state from `actions` if we modify it to include a getter?
-            // Or just rely on the fact that `renderNavTree` rendered the ID.
-            // We need the data.
-            // Let's attach the data to the DOM element? No, too big.
-            // We'll expose `openItem` which finds it in the passed state?
-            // State is updated on re-render.
-            // Let's store a reference to the latest state.
-            window.nccState = window.nccState || {}; 
-            // Better: use the imported utils/store if possible?
-            // `state` arg in initPowerShell is the snapshot.
-            // We can attach it to the module scope variable?
-            // `latestState = state;`
-            openItem(item.dataset.id);
+        const navItem = e.target.closest(".p-nav-item");
+        if (navItem && navItem.dataset.id) {
+            openItem(navItem.dataset.id);
         }
     });
 }
-
-let latestState = null; // Module-scoped state reference
 
 const COMMANDS = [
     { id: "save", title: "Save Current File", shortcut: "Ctrl+S", run: () => handleSaveShortcut() },
@@ -215,27 +246,14 @@ function renderCommandList(query) {
     );
     
     list.innerHTML = matches.map((c, i) => `
-        <div class="p-palette-item ${i === 0 ? 'selected' : ''}" onclick="window.runCommand('${c.id}')">
+        <div class="p-palette-item ${i === 0 ? 'selected' : ''}" data-cmd="${c.id}">
             <span>${esc(c.title)}</span>
-            <span class="shortcut">${c.id}</span>
+            <span class="shortcut">${esc(c.shortcut || "")}
         </div>
     `).join("");
-    
-    window.runCommand = (id) => {
-        const cmd = COMMANDS.find(c => c.id === id);
-        if (cmd) {
-            cmd.run();
-            toggleCommandPalette(false);
-        }
-    };
-}
-
-function toggleBottomPanel() {
-    // Deprecated in this layout
 }
 
 function renderNavTree(state) {
-  latestState = state;
   const nav = document.getElementById("p-nav");
   if (!nav) return;
   
@@ -252,7 +270,7 @@ function renderNavTree(state) {
       html += `<div class="p-nav-item${active}" data-id="${draft.id}">
         <div>
            <div>${esc(draft.d)}</div>
-           <div class="meta">${esc(draft.title)}</div>
+           <div class="meta">${esc(getItemTitle(draft))}</div>
         </div>
         <div style="text-align: right;">
            <span class="p-badge status-draft">DRAFT</span>
@@ -269,7 +287,7 @@ function renderNavTree(state) {
       html += `<div class="p-nav-item${active}" data-id="${doc.id}">
         <div>
            <div>${esc(doc.d || "unknown")}</div>
-           <div class="meta">${esc(eventTagValue(doc.tags, "title") || "Untitled")}</div>
+           <div class="meta">${esc(getItemTitle(doc))}</div>
         </div>
         <div><span class="p-badge status-published">PUB</span></div>
       </div>`;
@@ -279,49 +297,63 @@ function renderNavTree(state) {
   nav.innerHTML = html;
 }
 
+function getItemTitle(item) {
+    if (!item) return "Untitled";
+    return item.title || eventTagValue(item.tags, "title") || item.d || "Untitled";
+}
+
 function openItem(id) {
-    if (!latestState) return;
-    const drafts = latestState.nccLocalDrafts || [];
-    const published = latestState.nccDocs || [];
-    
-    let item = drafts.find(d => d.id === id);
-    if (!item) {
-        item = published.find(d => d.id === id);
-    }
-    
+    if (!_currentState) return;
+    const item = findItem(id, _currentState);
     if (!item) return;
     
     currentItemId = id;
+    currentItemSource = item._source;
     
-    // Update active state in nav
     document.querySelectorAll(".p-nav-item").forEach(el => {
         el.classList.toggle("active", el.dataset.id === id);
     });
     
     const editor = document.getElementById("p-editor");
-    const preview = document.getElementById("p-tab-preview");
     const filename = document.getElementById("p-file-name");
     const status = document.getElementById("p-file-status");
-    const gutter = document.getElementById("p-gutter");
     
-    // Details pane updates
-    document.getElementById("p-detail-title").textContent = item.d + " - " + (item.title || eventTagValue(item.tags, "title"));
+    if (editor) {
+        editor.value = item.content || "";
+        const lines = editor.value.split("\n").length;
+        document.getElementById("p-gutter").innerHTML = Array(lines).fill(0).map((_, i) => i + 1).join("<br>");
+        lastLineCount = lines;
+        
+        if (document.getElementById("p-tab-preview").classList.contains("active")) {
+             document.getElementById("p-tab-preview").innerHTML = renderMarkdown(editor.value);
+        }
+    }
+    
+    if (filename) filename.textContent = getItemTitle(item);
+    if (status) status.textContent = "";
+    
+    refreshDetails(item, _currentState);
+    
+    const msg = document.getElementById("p-status-msg");
+    if (msg) msg.textContent = `Opened: ${item.d}`;
+}
+
+function refreshDetails(item, state) {
+    document.getElementById("p-detail-title").textContent = getItemTitle(item);
     const badge = document.getElementById("p-detail-badge");
-    badge.textContent = (item.status || "draft").toUpperCase();
-    badge.className = `p-badge status-${(item.status || "draft").toLowerCase()}`;
+    const status = (item.status || "draft").toUpperCase();
+    badge.textContent = status;
+    badge.className = `p-badge status-${status.toLowerCase()}`;
     badge.style.display = "inline-block";
     
-    // Actions
     const actionsDiv = document.getElementById("p-detail-actions");
-    const canPublish = latestState.signerPubkey && (item.source === "local" || !item.source); // Simplify check
-    
     actionsDiv.innerHTML = "";
+    
+    const canPublish = state.signerPubkey && (item._source === "local");
+    
     if (canPublish) {
-       // Using window.publish wrapper or directly actions.publishDraft?
-       // actions.publishDraft needs (draft, kind).
-       // We can bind a button.
        const btn = document.createElement("button");
-       btn.className = "primary meta-button";
+       btn.className = "primary";
        btn.textContent = "Publish";
        btn.onclick = () => {
            if (confirm("Publish this NCC?")) {
@@ -330,27 +362,22 @@ function openItem(id) {
        };
        actionsDiv.appendChild(btn);
     }
-    
-    if (editor && preview) {
-        editor.value = item.content || "";
-        preview.innerHTML = renderMarkdown(item.content || "");
-        filename.textContent = item.d || "Untitled";
-        status.textContent = "";
-        
-        // Trigger input event to update gutter
-        editor.dispatchEvent(new Event("input"));
-    }
-    
-    const msg = document.getElementById("p-status-msg");
-    if (msg) msg.textContent = `Opened: ${item.d || item.id}`;
 }
 
 async function handleSaveShortcut() {
     if (!currentItemId || !actions.saveItem) return;
+    
+    if (currentItemSource !== "local") {
+        document.getElementById("p-status-msg").textContent = "Cannot save published item. Create a draft first.";
+        return;
+    }
+
     const content = document.getElementById("p-editor").value;
     const msg = document.getElementById("p-status-msg");
     if (msg) msg.textContent = "Saving...";
+    
     await actions.saveItem(currentItemId, content);
+    
     const status = document.getElementById("p-file-status");
     if (status) status.textContent = "";
     if (msg) msg.textContent = `Saved at ${new Date().toLocaleTimeString()}`;
@@ -364,10 +391,4 @@ function updateSignerIndicator(state) {
             : "Signer: Not connected";
         el.style.color = state.signerPubkey ? "var(--accent)" : "var(--muted)";
     }
-}
-
-function eventTagValue(tags, name) {
-  if (!Array.isArray(tags)) return "";
-  const found = tags.find((tag) => tag[0] === name);
-  return found ? found[1] : "";
 }
