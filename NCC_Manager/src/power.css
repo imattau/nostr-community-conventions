@@ -36,7 +36,7 @@ body.mode-power #app {
   margin: 0 !important;
   height: 100vh;
   width: 100vw;
-  display: block; /* Remove grid from #app to avoid nesting issues */
+  display: block;
 }
 
 body.mode-power button {
@@ -66,7 +66,7 @@ body.mode-power button:hover {
   height: 100vh;
   width: 100vw;
   display: grid;
-  grid-template-rows: 48px 1fr 28px;
+  grid-template-rows: 48px minmax(0, 1fr) 28px;
   grid-template-columns: 100%;
   overflow: hidden;
 }
@@ -85,9 +85,9 @@ body.mode-power button:hover {
 .p-workspace {
   grid-row: 2;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 100%;
   min-height: 0; 
-  min-width: 0;
   overflow: hidden;
 }
 
@@ -100,24 +100,21 @@ body.mode-power button:hover {
   align-items: center;
   padding: 0 10px;
   font-size: 0.7rem;
-  min-width: 0;
+  height: 28px;
 }
 
 .p-nav {
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
-  overflow-x: hidden;
   height: 100%;
-  min-width: 0;
 }
 
 .p-split {
   display: grid;
   grid-template-columns: 1fr 420px;
-  min-height: 0;
-  min-width: 0;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -198,8 +195,7 @@ body.mode-power button:hover {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  min-width: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -220,7 +216,6 @@ body.mode-power button:hover {
   grid-template-columns: auto 1fr;
   flex: 1;
   min-height: 0;
-  min-width: 0;
   overflow: hidden;
 }
 
@@ -247,10 +242,10 @@ body.mode-power button:hover {
   padding: 16px;
   outline: none;
   line-height: 1.5;
-  white-space: pre; /* Keep code-like behavior */
+  white-space: pre;
   height: 100%;
   width: 100%;
-  overflow: auto; /* Both directions */
+  overflow: auto;
   tab-size: 4;
 }
 
@@ -262,8 +257,7 @@ body.mode-power button:hover {
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  min-width: 0;
+  height: 100%;
   overflow: hidden;
 }
 
