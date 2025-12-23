@@ -22,6 +22,37 @@ const TYPE_LABELS = {
     [KINDS.supporting]: "Supporting"
 };
 
+// Widely used SPDX identifiers for the license dropdown.
+const LICENSE_OPTIONS = [
+    { value: "MIT", label: "MIT" },
+    { value: "Apache-2.0", label: "Apache 2.0" },
+    { value: "GPL-3.0-only", label: "GPL 3.0" },
+    { value: "GPL-2.0-only", label: "GPL 2.0" },
+    { value: "LGPL-3.0-only", label: "LGPL 3.0" },
+    { value: "AGPL-3.0-only", label: "AGPL 3.0" },
+    { value: "BSD-3-Clause", label: "BSD 3-Clause" },
+    { value: "BSD-2-Clause", label: "BSD 2-Clause" },
+    { value: "ISC", label: "ISC" },
+    { value: "MPL-2.0", label: "MPL 2.0" },
+    { value: "Unlicense", label: "Unlicense" },
+    { value: "CC0-1.0", label: "CC0 (Public Domain)" },
+    { value: "CC-BY-4.0", label: "CC BY 4.0" }
+];
+
+const LANGUAGE_OPTIONS = [
+    { value: "en", label: "English" },
+    { value: "es", label: "Spanish" },
+    { value: "fr", label: "French" },
+    { value: "de", label: "German" },
+    { value: "zh", label: "Chinese" },
+    { value: "ja", label: "Japanese" },
+    { value: "ru", label: "Russian" },
+    { value: "pt", label: "Portuguese" },
+    { value: "it", label: "Italian" },
+    { value: "ko", label: "Korean" },
+    { value: "ar", label: "Arabic" }
+];
+
 const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
 
 function ensureTimestamp(value) {
@@ -354,7 +385,7 @@ function setupGlobalListeners() {
             const tagName = key.split(":")[1];
             item.tags = item.tags || {};
             
-            const arrayTags = ["topics", "authors", "supersedes", "roles", "t"];
+            const arrayTags = ["topics", "authors", "supersedes", "roles", "role", "t"];
             if (arrayTags.includes(tagName)) {
                 item.tags[tagName] = target.value.split(",").map(s => s.trim()).filter(Boolean);
             } else {
@@ -719,7 +750,7 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
         if (idx > 0) label = REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)];
     } else {
         // For sub-tree items, show the author or a short summary
-        const author = item.author_pubkey || item.author || item.pubkey || "";
+        const author = item.author_pubkey || item.author || item.pubkey || (item._isLocal ? _state.signerPubkey : "") || "";
         label = `${shortenKey(author)} · ${formatShortDate(item.updated_at || item.created_at)}`;
     }
 
@@ -908,7 +939,8 @@ function renderInspector(item) {
 
     const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
     const status = normalizeStatus(item.status || "published");
-    const author = item.author || item.pubkey || "Unknown";
+    // Fallback to current signer if it's a local draft with no author set
+    const author = item.author_pubkey || item.author || item.pubkey || (item._isLocal ? _state.signerPubkey : "") || "Unknown";
     const updatedAt = formatFullDate(item.updated_at || item.created_at);
     const badgeLabel = status.toUpperCase();
     const relayStatus = _state?.relayStatus || {};
@@ -917,19 +949,57 @@ function renderInspector(item) {
     const isPublished = item.event_id && (item.status || "").toLowerCase() === "published";
 
     let metadataContent = "";
+    
+    // Core fields that are always visible
+    const coreFields = `
+        <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
+        <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
+        <div class="p-prop-row" style="margin-bottom: 12px"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
+    `;
+
     if (isEditMode && !isPublished) {
-        metadataContent = renderEditFields(item);
+        metadataContent = coreFields + renderEditFields(item);
     } else {
-        const supersedes = Array.isArray(item.tags?.supersedes) ? item.tags.supersedes : [];
-        metadataContent = `
-            <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
-            ${item.event_id && status === "published" ? `<div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id)}</span></div>` : ""}
-            <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
-            ${supersedes.length ? `<div class="p-prop-row"><span class="p-prop-key">Supersedes</span><span class="p-prop-val">${esc(supersedes.join(", "))}</span></div>` : ""}
-        `;
+        const rows = [];
+        const addRow = (key, val) => {
+            if (val) rows.push(`<div class="p-prop-row"><span class="p-prop-key">${key}</span><span class="p-prop-val">${esc(val)}</span></div>`);
+        };
+
+        addRow("Title", title);
+        addRow("Identifier", item.d);
+        if (item.event_id) addRow("Event ID", item.event_id);
+
+        if (item.kind === KINDS.ncc) {
+            addRow("Version", item.tags?.version);
+            addRow("Summary", item.tags?.summary);
+            addRow("Topics", (item.tags?.topics || []).join(", "));
+            addRow("Authors", (item.tags?.authors || []).join(", "));
+            addRow("Language", item.tags?.lang);
+            addRow("License", item.tags?.license);
+            addRow("Supersedes", (item.tags?.supersedes || []).join(", "));
+        } else if (item.kind === KINDS.nsr) {
+            addRow("Authoritative", item.tags?.authoritative);
+            addRow("Previous", item.tags?.previous);
+            addRow("Steward", item.tags?.steward);
+            addRow("Reason", item.tags?.reason);
+            addRow("Effective", item.tags?.effective_at);
+        } else if (item.kind === KINDS.endorsement) {
+            addRow("Endorses", item.tags?.endorses);
+            addRow("Roles", (item.tags?.roles || []).join(", "));
+            addRow("Implementation", item.tags?.implementation);
+            addRow("Topics", (item.tags?.topics || []).join(", "));
+            addRow("Note", item.tags?.note);
+        } else if (item.kind === KINDS.supporting) {
+            addRow("For NCC", item.tags?.for);
+            addRow("For Event", item.tags?.for_event);
+            addRow("Type", item.tags?.type);
+            addRow("Topics", (item.tags?.topics || []).join(", "));
+            addRow("Authors", (item.tags?.authors || []).join(", "));
+            addRow("Language", item.tags?.lang);
+            addRow("License", item.tags?.license);
+        }
+
+        metadataContent = coreFields + rows.join("");
     }
 
     el.innerHTML = `
@@ -1070,25 +1140,41 @@ async function handleReviseAction(id) {
 function renderEditFields(item) {
     const fields = [];
     
-    const addField = (label, name, value, placeholder = "") => {
+    const addField = (label, name, value, placeholder = "", mandatory = false) => {
         fields.push(`
             <div class="p-field">
-                <label>${label}</label>
+                <label>${label}${mandatory ? " <span class=\"p-danger-text\">*</span>" : ""}</label>
                 <input type="text" name="${name}" value="${esc(value)}" placeholder="${placeholder}" autocomplete="off" />
             </div>
         `);
     };
 
-    addField("Title", "title", item.title || "");
+    const addDatalistField = (label, name, value, options, placeholder = "", mandatory = false) => {
+        const listId = `list-${name.replace(/:/g, "-")}`;
+        const optionHtml = options
+            .map((opt) => `<option value="${esc(opt.value)}">${esc(opt.label)}</option>`)
+            .join("");
+        fields.push(`
+            <div class="p-field">
+                <label>${label}${mandatory ? " <span class=\"p-danger-text\">*</span>" : ""}</label>
+                <input type="text" name="${name}" value="${esc(value)}" list="${listId}" placeholder="${placeholder}" autocomplete="off" />
+                <datalist id="${listId}">
+                    ${optionHtml}
+                </datalist>
+            </div>
+        `);
+    };
+
+    addField("Title", "title", item.title || "", "", true);
     
     if (item.kind === KINDS.ncc) {
-        addField("NCC Number", "d", item.d ? item.d.replace(/^ncc-/, "") : "", "e.g. 00");
+        addField("NCC Number", "d", item.d ? item.d.replace(/^ncc-/, "") : "", "e.g. 00", true);
         addField("Summary", "tag:summary", item.tags?.summary || "");
         addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
         addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
         addField("Version", "tag:version", item.tags?.version || "");
-        addField("Language", "tag:lang", item.tags?.lang || "");
-        addField("License", "tag:license", item.tags?.license || "");
+        addDatalistField("Language", "tag:lang", item.tags?.lang || "", LANGUAGE_OPTIONS, "e.g. en");
+        addDatalistField("License", "tag:license", item.tags?.license || "", LICENSE_OPTIONS, "e.g. MIT");
         
         // Strip legacy 'event:' prefix for display
         const supersedesDisplay = (item.tags?.supersedes || [])
@@ -1098,23 +1184,27 @@ function renderEditFields(item) {
     }
 
     if (item.kind === KINDS.nsr) {
-        addField("Reason", "tag:reason", item.tags?.reason || "");
+        addField("Authoritative ID", "tag:authoritative", (item.tags?.authoritative || "").replace(/^event:/i, ""), "Event hex", true);
+        addField("Reason", "tag:reason", item.tags?.reason || "", "", true);
         addField("Effective At", "tag:effective_at", item.tags?.effective_at || "");
     }
 
     if (item.kind === KINDS.endorsement) {
-        addField("Endorses", "tag:endorses", (item.tags?.endorses || "").replace(/^event:/i, ""), "Event hex");
-        addField("Roles", "tag:roles", (item.tags?.roles || []).join(", "));
+        addField("Endorses", "tag:endorses", (item.tags?.endorses || "").replace(/^event:/i, ""), "Event hex", true);
+        addField("Roles", "tag:role", (item.tags?.roles || item.tags?.role || []).join(", "));
         addField("Implementation", "tag:implementation", item.tags?.implementation || "");
         addField("Note", "tag:note", item.tags?.note || "");
         addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
     }
 
     if (item.kind === KINDS.supporting) {
-        addField("Type", "tag:type", item.tags?.type || "");
-        addField("For NCC", "tag:for", item.tags?.for || "");
+        addField("Type", "tag:type", item.tags?.type || "", "e.g. guide", true);
+        addField("For NCC", "tag:for", item.tags?.for || "", "ncc-XX", true);
         addField("For Event", "tag:for_event", (item.tags?.for_event || "").replace(/^event:/i, ""), "Event hex");
+        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
         addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
+        addDatalistField("Language", "tag:lang", item.tags?.lang || "", LANGUAGE_OPTIONS, "e.g. en");
+        addDatalistField("License", "tag:license", item.tags?.license || "", LICENSE_OPTIONS, "e.g. MIT");
     }
 
     return fields.join("");
@@ -1332,6 +1422,7 @@ function openEndorsementModal(nccItem) {
             id: crypto.randomUUID(),
             kind: KINDS.endorsement,
             status: "draft",
+            author_pubkey: _state.signerPubkey,
             d: nccItem.d,
             content: note,
             tags: {
@@ -1391,6 +1482,7 @@ function openNsrModal(nccItem) {
             id: crypto.randomUUID(),
             kind: KINDS.nsr,
             status: "draft",
+            author_pubkey: _state.signerPubkey,
             d: nccItem.d,
             content: reason,
             tags: {
@@ -1414,6 +1506,7 @@ function openSupportingDocFlow(nccItem) {
         id: crypto.randomUUID(),
         kind: KINDS.supporting,
         status: "draft",
+        author_pubkey: _state.signerPubkey,
         d: `guide-${nccItem.d}`,
         title: `Supporting Doc for ${nccItem.d}`,
         content: "",
