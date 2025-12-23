@@ -57,7 +57,7 @@ export function initPowerShell(appState, appActions, appVersion) {
         </div>
         <div class="p-top-center">
           <div class="p-search-wrapper">
-            <span class="p-search-icon">🔍</span>
+            <span class="p-search-icon">></span>
             <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
             <span class="p-search-kb">Ctrl+K</span>
           </div>
@@ -349,11 +349,11 @@ function renderTopBar() {
                 </button>
                 <div class="p-dropdown" id="p-signer-dropdown">
                     <button class="p-dropdown-item" data-action="open-settings">
-                        <span>⚙️</span> Settings
+                        <span>~</span> Settings
                     </button>
                     <div class="p-dropdown-divider"></div>
                     <button class="p-dropdown-item p-danger-text" data-action="sign-out">
-                        <span>🚪</span> Sign Out
+                        <span>x</span> Sign Out
                     </button>
                 </div>
             </div>
@@ -389,7 +389,7 @@ function renderEmptyState() {
     if (!container) return;
     container.innerHTML = `
         <div class="p-empty-state">
-          <div class="p-empty-icon">📂</div>
+          <div class="p-empty-icon">_</div>
           <div class="p-empty-text">Select an item from the Explorer to begin</div>
           <div class="p-empty-hint">Press <code>Ctrl+K</code> for commands</div>
         </div>
@@ -563,15 +563,15 @@ function renderContextMenu(x, y, item) {
 
     menu.innerHTML = `
         <div class="p-context-item" data-action="new-endorsement">
-            <span>✅</span> New Endorsement
+            <span>+</span> New Endorsement
         </div>
         <div class="p-context-item" data-action="new-supporting">
-            <span>📚</span> New Supporting Doc
+            <span>[</span> New Supporting Doc
         </div>
         ${isPublished ? `
             <div class="p-context-divider"></div>
             <div class="p-context-item" data-action="new-nsr">
-                <span>🔄</span> Create Succession (NSR)
+                <span>~</span> Create Succession (NSR)
             </div>
         ` : ""}
     `;
@@ -601,7 +601,7 @@ function openEndorsementModal(nccItem) {
         <div class="p-modal">
             <div class="p-modal-header">
                 <h2>Endorse ${esc(nccItem.d)}</h2>
-                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+                <button class="p-ghost-btn" data-action="close-modal">X</button>
             </div>
             <div class="p-modal-body">
                 <div class="p-modal-form">
@@ -660,7 +660,7 @@ function openNsrModal(nccItem) {
         <div class="p-modal">
             <div class="p-modal-header">
                 <h2>New Succession Record</h2>
-                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+                <button class="p-ghost-btn" data-action="close-modal">X</button>
             </div>
             <div class="p-modal-body">
                 <p class="p-muted-text small" style="margin-bottom: 16px">
@@ -742,7 +742,7 @@ function renderSettingsModal() {
         <div class="p-modal">
             <div class="p-modal-header">
                 <h2>Settings</h2>
-                <button class="p-ghost-btn" data-action="close-modal">✕</button>
+                <button class="p-ghost-btn" data-action="close-modal">X</button>
             </div>
             <div class="p-modal-body p-scroll">
                 <section class="p-modal-section">
@@ -778,7 +778,7 @@ function renderSettingsModal() {
                         <label>nsec1...</label>
                         <input type="password" id="p-nsec-input" placeholder="nsec1..." />
                         <p class="p-muted-text small" style="margin-top: 8px; color: var(--warning)">
-                            ⚠️ <strong>Security Warning:</strong> Your nsec is kept in memory for this session only. 
+                            !!! <strong>Security Warning:</strong> Your nsec is kept in memory for this session only. 
                             Never share your nsec or paste it into untrusted applications.
                         </p>
                     </div>
