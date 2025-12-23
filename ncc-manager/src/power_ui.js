@@ -510,13 +510,17 @@ function renderExplorer() {
     const publishedPool = allItems.filter(i => 
         i.event_id && (i.status || "").toLowerCase() === "published"
     );
+    const withdrawnPool = allItems.filter(i => 
+        (i.status || "").toLowerCase() === "withdrawn"
+    );
     const draftsPool = allItems.filter(i => 
-        (i.status || "").toLowerCase() !== "published" || !i.event_id
+        (i.status || "").toLowerCase() !== "published" && (i.status || "").toLowerCase() !== "withdrawn" || !i.event_id
     );
 
     const sections = [
         { title: "Drafts", items: filterExplorerItems(draftsPool, query), type: "drafts" },
-        { title: "Published", items: filterExplorerItems(publishedPool, query), type: "published" }
+        { title: "Published", items: filterExplorerItems(publishedPool, query), type: "published" },
+        { title: "Withdrawn", items: filterExplorerItems(withdrawnPool, query), type: "withdrawn" }
     ];
 
     el.innerHTML = sections.map(renderExplorerSection).join("");
