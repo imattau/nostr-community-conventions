@@ -297,7 +297,7 @@ function renderExplorerSection(section) {
             <div class="p-nav-header">
                 <span>${title} (${items.length})</span>
             </div>
-            ${groups.length ? groups.map((group) => renderExplorerBranch(group, type)).join("") : `<div class="p-nav-empty">No items found</div>`}
+            ${groups.length ? groups.map((group) => renderExplorerBranch(group, sectionType)).join("") : `<div class="p-nav-empty">No items found</div>`}
         </div>
     `;
 }
