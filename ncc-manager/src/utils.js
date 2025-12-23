@@ -92,6 +92,22 @@ export function buildNccIdentifier(numberValue) {
   return `ncc-${digits}`;
 }
 
+export function suggestNextNccNumber(nccDocs) {
+  if (!Array.isArray(nccDocs) || nccDocs.length === 0) return "01";
+  
+  const numbers = nccDocs
+    .map(doc => {
+      const d = eventTagValue(doc.tags || [], "d");
+      return parseInt(stripNccNumber(d), 10);
+    })
+    .filter(n => !isNaN(n));
+
+  if (numbers.length === 0) return "01";
+  
+  const next = Math.max(...numbers) + 1;
+  return next.toString().padStart(2, "0");
+}
+
 export function incrementVersion(version) {
   if (!version) return "1";
   const match = version.match(/^([^0-9]*)([0-9]+)([^0-9]*)$/);
