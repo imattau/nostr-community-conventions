@@ -293,18 +293,19 @@ function renderExplorer() {
                 item = payloadToDraft(rawItem);
             }
 
-            const identity = item.event_id || item.id;
-            const existing = conceptualMap.get(identity);
+            // Conceptual Identity for de-duplication (Event ID if it exists, otherwise UUID)
+            const conceptualId = item.event_id || item.id;
+            const existing = conceptualMap.get(conceptualId);
             
             if (!existing) {
-                conceptualMap.set(identity, item);
+                conceptualMap.set(conceptualId, item);
             } else {
                 // Prefer local source or newer timestamp
                 const existingTs = ensureTimestamp(existing.updated_at || existing.created_at) || 0;
                 const newTs = ensureTimestamp(item.updated_at || item.created_at) || 0;
                 
                 if (item.source === "local" || newTs > existingTs) {
-                    conceptualMap.set(identity, item);
+                    conceptualMap.set(conceptualId, item);
                 }
             }
         });
@@ -497,8 +498,7 @@ function renderExplorerBranch(group, sectionType) {
 
 function renderExplorerItem(entry, idx, inheritedStatus) {
     const { item } = entry;
-    const identity = item.event_id || item.id;
-    const isActive = identity === currentItemId ? " active" : "";
+    const isActive = item.id === currentItemId ? " active" : "";
     const status = normalizeStatus(item.status || inheritedStatus);
     const statusLabel =
         status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
@@ -517,7 +517,7 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
     }
 
     return `
-        <div class="p-nav-item${isActive}" data-id="${identity}" title="${esc(title)}">
+        <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
             <div class="p-nav-meta">
                 <span class="p-nav-label">${esc(label)}</span>
                 <span class="p-badge-mini status-${status}">${statusLabel}</span>
@@ -564,12 +564,11 @@ function findItem(id) {
         ...(_state.remoteDrafts || [])
     ];
     
-    // Find the item by its identity (event_id or local id)
-    const found = all.find(i => i && (i.id === id || i.event_id === id));
+    // Find the item by its unique ID
+    const found = all.find(i => i && i.id === id);
     if (!found) return null;
 
-    // To determine if it's local, we need to see if it exists in our local draft sets
-    // regardless of whether we found it by its UUID or its event_id.
+    // Check if it's local (editable)
     const localPool = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
@@ -577,7 +576,7 @@ function findItem(id) {
         ...(_state.supportingLocalDrafts || [])
     ];
     
-    found._isLocal = localPool.some(d => d.id === found.id || (d.event_id && d.event_id === found.event_id));
+    found._isLocal = localPool.some(d => d.id === found.id);
     
     return found;
 }
