@@ -1,17 +1,23 @@
-import { esc, renderMarkdown, eventTagValue, shortenKey, normalizeEventId } from "./utils.js";
+import { esc, shortenKey, normalizeEventId } from "./utils.js";
 import { KINDS } from "./state.js";
-import { payloadToDraft } from "./nostr.js";
+import { renderExplorer } from "./ui/explorer.js";
+import { renderInspector } from "./ui/inspector.js";
+import { renderContent } from "./ui/editor.js";
+import { 
+    toggleCommandPalette, 
+    renderCommandList, 
+    executeCommand as paletteExecuteCommand,
+    handlePaletteNavigation
+} from "./ui/palette.js";
 
 let actions = {};
 let currentItemId = null;
 let isEditMode = false;
-let revisionSourceId = null; // Track the original item during a revision
+let revisionSourceId = null; 
 let searchQuery = "";
 let _state = null;
 let listenersSetup = false;
 let keyboardHooked = false;
-let paletteMatches = [];
-let paletteIndex = 0;
 const collapsedBranches = new Set();
 let _appVersion = "v0.0.0";
 
@@ -22,63 +28,17 @@ const TYPE_LABELS = {
     [KINDS.supporting]: "Supporting"
 };
 
-// Widely used SPDX identifiers for the license dropdown.
-const LICENSE_OPTIONS = [
-    { value: "MIT", label: "MIT" },
-    { value: "Apache-2.0", label: "Apache 2.0" },
-    { value: "GPL-3.0-only", label: "GPL 3.0" },
-    { value: "GPL-2.0-only", label: "GPL 2.0" },
-    { value: "LGPL-3.0-only", label: "LGPL 3.0" },
-    { value: "AGPL-3.0-only", label: "AGPL 3.0" },
-    { value: "BSD-3-Clause", label: "BSD 3-Clause" },
-    { value: "BSD-2-Clause", label: "BSD 2-Clause" },
-    { value: "ISC", label: "ISC" },
-    { value: "MPL-2.0", label: "MPL 2.0" },
-    { value: "Unlicense", label: "Unlicense" },
-    { value: "CC0-1.0", label: "CC0 (Public Domain)" },
-    { value: "CC-BY-4.0", label: "CC BY 4.0" }
+const COMMANDS = [
+    { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
+    { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => actions.openNewNcc?.() },
+    { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
-const LANGUAGE_OPTIONS = [
-    { value: "en", label: "English" },
-    { value: "es", label: "Spanish" },
-    { value: "fr", label: "French" },
-    { value: "de", label: "German" },
-    { value: "zh", label: "Chinese" },
-    { value: "ja", label: "Japanese" },
-    { value: "ru", label: "Russian" },
-    { value: "pt", label: "Portuguese" },
-    { value: "it", label: "Italian" },
-    { value: "ko", label: "Korean" },
-    { value: "ar", label: "Arabic" }
-];
-
-const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
-
-function ensureTimestamp(value) {
-    if (!value) return null;
-    return value > 1e12 ? value : value * 1000;
-}
-
-function formatShortDate(value) {
-    const ts = ensureTimestamp(value);
-    if (!ts) return "—";
-    return new Date(ts).toLocaleDateString();
-}
-
-function formatFullDate(value) {
-    const ts = ensureTimestamp(value);
-    if (!ts) return "-";
-    return new Date(ts).toLocaleString();
-}
-
-// Debugging
 const DEBUG = true;
 function log(...args) {
     if (DEBUG) console.log("%c[PowerUI]", "color: #58a6ff; font-weight: bold", ...args);
 }
 
-// Initialization
 export function initPowerShell(appState, appActions, appVersion) {
     _state = appState || {};
     actions = appActions || {};
@@ -94,7 +54,8 @@ export function initPowerShell(appState, appActions, appVersion) {
         <div class="p-brand" role="button">
           <span class="p-accent">></span> NCC Console
           <span class="p-version">${_appVersion}</span>
-        </div>        <div class="p-top-center">
+        </div>
+        <div class="p-top-center">
           <div class="p-search-wrapper">
             <span class="p-search-icon">🔍</span>
             <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
@@ -111,13 +72,7 @@ export function initPowerShell(appState, appActions, appVersion) {
           <div id="p-explorer-body" class="p-scroll"></div>
         </aside>
         <section class="p-pane p-content">
-          <div id="p-content-column" class="p-content-inner">
-            <div class="p-empty-state">
-              <div class="p-empty-icon">📂</div>
-              <div class="p-empty-text">Select an item from the Explorer to begin</div>
-              <div class="p-empty-hint">Press <code>Ctrl+K</code> for commands</div>
-            </div>
-          </div>
+          <div id="p-content-column" class="p-content-inner"></div>
         </section>
         <aside class="p-pane p-inspector">
           <div id="p-inspector-body" class="p-inspector-inner"></div>
@@ -153,129 +108,46 @@ export function initPowerShell(appState, appActions, appVersion) {
 }
 
 function setupGlobalListeners() {
-    if (listenersSetup) return;
-    listenersSetup = true;
-
-    log("Setting up global listeners");
-
     document.addEventListener("click", async (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
 
         const target = e.target;
         
-        // Debug: Log all clicks within shell
-        if (shell.contains(target)) {
-            log("Click detected on:", target.tagName, target.className, { 
-                id: target.id,
-                dataset: target.dataset 
-            });
-        }
-
-        // 1. Explorer Item Click
         const navItem = target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
-            log("Handling Explorer item click:", navItem.dataset.id);
             e.preventDefault();
-            e.stopPropagation();
             openItem(navItem.dataset.id);
             return;
         }
 
-        // 2. Explorer Branch Toggle
         const branchHeader = target.closest(".p-nav-branch-header");
         if (branchHeader && branchHeader.dataset.branch) {
-            log("Handling Branch toggle:", branchHeader.dataset.branch);
             e.preventDefault();
-            e.stopPropagation();
             toggleBranch(branchHeader.dataset.branch);
             return;
         }
 
-        // 3. Brand Click (Reset)
         const brand = target.closest(".p-brand");
         if (brand) {
-            log("Handling Brand reset click");
             currentItemId = null;
             isEditMode = false;
-            renderEmptyState();
-            renderExplorer();
-            renderInspector();
+            refreshUI();
             return;
         }
 
-        // 4. Command Palette Item Click
         const paletteItem = target.closest(".p-palette-item");
         if (paletteItem && paletteItem.dataset.cmd) {
-            log("Handling Palette command click:", paletteItem.dataset.cmd);
             executeCommand(paletteItem.dataset.cmd);
             return;
         }
 
-        // 6. Inspector Actions (Delegated)
         const inspectorBtn = target.closest("#p-inspector-actions button");
         if (inspectorBtn && inspectorBtn.dataset.action) {
-            const action = inspectorBtn.dataset.action;
-            const id = inspectorBtn.dataset.id || currentItemId;
-            log("Handling Inspector action:", action, id);
-            
-            if (action === "delete-item") {
-                actions.deleteItem?.(id);
-            } else if (action === "withdraw-item") {
-                actions.withdrawDraft?.(id);
-            } else if (action === "edit-item") {
-                isEditMode = true;
-                const item = findItem(id);
-                if (item) {
-                    renderContent(item);
-                    renderInspector(item);
-                }
-            } else if (action === "publish-item") {
-                const item = findItem(id);
-                if (item && confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
-                    actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
-                }
-            } else if (action === "revise-item") {
-                handleReviseAction(id);
-            } else if (action === "save-item") {
-                handleSaveShortcut();
-            } else if (action === "cancel-item") {
-                isEditMode = false;
-                
-                if (_state?.pendingDrafts?.has(currentItemId)) {
-                    _state.pendingDrafts.delete(currentItemId);
-                    currentItemId = null;
-                    renderExplorer();
-                    renderEmptyState();
-                    renderInspector();
-                    return;
-                }
-
-                if (revisionSourceId) {
-                    log("Cancelling revision, reverting to:", revisionSourceId);
-                    const sourceId = revisionSourceId;
-                    const tempDraftId = currentItemId;
-                    revisionSourceId = null;
-                    
-                    // Switch active pointer back first
-                    currentItemId = sourceId;
-                    
-                    // Cleanup the temporary draft. This triggers global refreshUI.
-                    // Since currentItemId is now sourceId, the re-init will render correctly.
-                    await actions.deleteItemSilent?.(tempDraftId);
-                } else {
-                    const found = findItem(currentItemId);
-                    if (found) {
-                        renderContent(found);
-                        renderInspector(found);
-                        renderExplorer();
-                    }
-                }
-            }
+            handleInspectorAction(inspectorBtn.dataset.action, inspectorBtn.dataset.id || currentItemId);
             return;
         }
 
-        // 7. Signer Dropdown Toggle
         const signerTrigger = target.closest("#p-signer-trigger");
         if (signerTrigger) {
             const dropdown = document.getElementById("p-signer-dropdown");
@@ -283,57 +155,34 @@ function setupGlobalListeners() {
             return;
         }
 
-        // 8. Close dropdown when clicking outside
         const activeDropdown = document.querySelector(".p-dropdown.is-open");
         if (activeDropdown && !target.closest(".p-signer-wrapper")) {
             activeDropdown.classList.remove("is-open");
         }
 
-        // 9. Modal Background Click (Close)
         const activeModal = target.closest(".p-modal-overlay");
         if (activeModal && target === activeModal) {
             activeModal.remove();
             return;
         }
 
-        // 10. Global Data Actions
         const actionBtn = target.closest("[data-action]");
         if (actionBtn && !target.closest("#p-inspector-actions")) {
-            const action = actionBtn.dataset.action;
-            log("Handling Global action:", action);
-            
-            // Auto-close dropdown if action came from it
-            if (target.closest(".p-dropdown")) {
-                target.closest(".p-dropdown").classList.remove("is-open");
-            }
-
-            if (action === "sign-in") {
-                actions.promptSigner?.();
-            } else if (action === "sign-out") {
-                actions.signOut?.();
-            } else if (action === "open-settings") {
-                renderSettingsModal();
-            } else if (action === "close-modal") {
-                const modal = target.closest(".p-modal-overlay");
-                if (modal) modal.remove();
-            }
+            handleGlobalAction(actionBtn.dataset.action, target);
         }
     });
 
     const searchInput = document.getElementById("p-search");
     searchInput?.addEventListener("input", (e) => {
         searchQuery = e.target.value.toLowerCase();
-        log("Search query updated:", searchQuery);
-        renderExplorer();
+        refreshUI();
     });
 
     const paletteInput = document.getElementById("p-palette-input");
     paletteInput?.addEventListener("input", (e) => {
-        log("Palette input updated:", e.target.value);
-        renderCommandList(e.target.value);
+        renderCommandList(e.target.value, COMMANDS);
     });
 
-    // 11. Context Menu (Explorer)
     document.addEventListener("contextmenu", (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
@@ -341,7 +190,6 @@ function setupGlobalListeners() {
         const target = e.target;
         const navItem = target.closest(".p-nav-item");
         
-        // We only care about published NCC items for these shortcuts
         if (navItem && navItem.dataset.id) {
             const item = findItem(navItem.dataset.id);
             const isPublished = item && item.event_id && (item.status || "").toLowerCase() === "published";
@@ -353,13 +201,11 @@ function setupGlobalListeners() {
         }
     });
 
-    // Dismiss context menu on any click
     document.addEventListener("click", () => {
         const menu = document.getElementById("p-context-menu");
         if (menu) menu.remove();
     }, { capture: true });
 
-    // Inspector input syncing (Delegation)
     document.addEventListener("input", (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
@@ -375,7 +221,6 @@ function setupGlobalListeners() {
         if (!key) return;
 
         updateStatus("• Unsaved changes");
-        log("Inspector input sync:", key, target.value);
 
         if (key === "title") {
             item.title = target.value;
@@ -394,20 +239,93 @@ function setupGlobalListeners() {
         }
     });
 }
-// UI Refreshers
+
+async function handleInspectorAction(action, id) {
+    if (action === "delete-item") {
+        actions.deleteItem?.(id);
+    } else if (action === "withdraw-item") {
+        actions.withdrawDraft?.(id);
+    } else if (action === "edit-item") {
+        isEditMode = true;
+        const item = findItem(id);
+        if (item) {
+            renderContent(document.getElementById("p-content-column"), item, { isEditMode, updateStatus, TYPE_LABELS });
+            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, actions, findItem });
+        }
+    } else if (action === "publish-item") {
+        const item = findItem(id);
+        if (item && confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
+            actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+        }
+    } else if (action === "revise-item") {
+        handleReviseAction(id);
+    } else if (action === "save-item") {
+        handleSaveShortcut();
+    } else if (action === "cancel-item") {
+        isEditMode = false;
+        
+        if (_state?.pendingDrafts?.has(currentItemId)) {
+            _state.pendingDrafts.delete(currentItemId);
+            currentItemId = null;
+            refreshUI();
+            return;
+        }
+
+        if (revisionSourceId) {
+            const sourceId = revisionSourceId;
+            const tempDraftId = currentItemId;
+            revisionSourceId = null;
+            currentItemId = sourceId;
+            await actions.deleteItemSilent?.(tempDraftId);
+        } else {
+            const found = findItem(currentItemId);
+            if (found) {
+                renderContent(document.getElementById("p-content-column"), found, { isEditMode, updateStatus, TYPE_LABELS });
+                renderInspector(document.getElementById("p-inspector-body"), found, _state, { isEditMode, actions, findItem });
+                refreshUI();
+            }
+        }
+    }
+}
+
+function handleGlobalAction(action, target) {
+    if (target.closest(".p-dropdown")) {
+        target.closest(".p-dropdown").classList.remove("is-open");
+    }
+
+    if (action === "sign-in") {
+        actions.promptSigner?.();
+    } else if (action === "sign-out") {
+        actions.signOut?.();
+    } else if (action === "open-settings") {
+        renderSettingsModal();
+    } else if (action === "close-modal") {
+        const modal = target.closest(".p-modal-overlay");
+        if (modal) modal.remove();
+    }
+}
+
 function refreshUI() {
-    renderExplorer();
+    renderExplorer(document.getElementById("p-explorer-body"), _state, {
+        searchQuery,
+        currentItemId,
+        collapsedBranches,
+        findItem
+    });
     renderTopBar();
     renderStatusBar();
     
     if (currentItemId) {
         const item = findItem(currentItemId);
         if (item) {
-            renderInspector(item);
+            renderContent(document.getElementById("p-content-column"), item, { isEditMode, updateStatus, TYPE_LABELS });
+            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, actions, findItem });
         } else {
             currentItemId = null;
             renderEmptyState();
         }
+    } else {
+        renderEmptyState();
     }
 }
 
@@ -480,320 +398,6 @@ function renderEmptyState() {
     if (inspector) inspector.innerHTML = "";
 }
 
-
-// Explorer
-function renderExplorer() {
-    const el = document.getElementById("p-explorer-body");
-    if (!el || !_state) return;
-
-    const query = searchQuery.trim();
-    
-    // Pool all items with conceptual de-duplication
-    // Conceptual Identity = event_id if it exists, otherwise internal id
-    const conceptualMap = new Map();
-    
-    const addToPool = (items) => {
-        (items || []).forEach(rawItem => {
-            if (!rawItem) return;
-            
-            let item = rawItem;
-            // If it looks like a raw Nostr event, convert it
-            if (!item.d && rawItem.tags) {
-                item = payloadToDraft(rawItem);
-            }
-
-            // Conceptual Identity:
-            // Published: Event ID
-            // Drafts: Kind + Normalized D (to merge local and relay backups)
-            let identity = item.event_id || item.id;
-            const isDraft = (item.status || "").toLowerCase() !== "published";
-            
-            if (isDraft) {
-                const cleanD = (item.d || "").replace(/^draft:/, "");
-                if (cleanD) {
-                    identity = `draft-group:${item.kind}:${cleanD}`;
-                } else {
-                    identity = `draft:${item.id}`;
-                }
-            }
-
-            const existing = conceptualMap.get(identity);
-            
-            if (!existing) {
-                conceptualMap.set(identity, item);
-            } else {
-                // De-duplication logic:
-                // 1. Prefer local source
-                // 2. Prefer newer timestamp
-                const existingTs = ensureTimestamp(existing.updated_at || existing.created_at) || 0;
-                const newTs = ensureTimestamp(item.updated_at || item.created_at) || 0;
-                
-                const isLocalBetter = item.source === "local" && existing.source !== "local";
-                const isNewerBetter = newTs > existingTs;
-                
-                if (isLocalBetter || (isNewerBetter && item.source === existing.source)) {
-                    conceptualMap.set(identity, item);
-                }
-            }
-        });
-    };
-
-    addToPool(_state.nccLocalDrafts);
-    addToPool(_state.nsrLocalDrafts);
-    addToPool(_state.endorsementLocalDrafts);
-    addToPool(_state.supportingLocalDrafts);
-    addToPool(_state.nccDocs);
-    addToPool(_state.remoteDrafts);
-
-    const allItems = Array.from(conceptualMap.values());
-
-    const publishedPool = allItems.filter(i => 
-        i.event_id && (i.status || "").toLowerCase() === "published"
-    );
-    const withdrawnPool = allItems.filter(i => 
-        (i.status || "").toLowerCase() === "withdrawn"
-    );
-    const draftsPool = allItems.filter(i => 
-        (i.status || "").toLowerCase() !== "published" && (i.status || "").toLowerCase() !== "withdrawn" || !i.event_id
-    );
-
-    const sections = [
-        { title: "Drafts", items: filterExplorerItems(draftsPool, query), type: "drafts" },
-        { title: "Published", items: filterExplorerItems(publishedPool, query), type: "published" },
-        { title: "Withdrawn", items: filterExplorerItems(withdrawnPool, query), type: "withdrawn" }
-    ];
-
-    el.innerHTML = sections.map(renderExplorerSection).join("");
-}
-
-function filterExplorerItems(items, query) {
-    if (!items.length) return [];
-    return items
-        .filter((item) => {
-            if (!query) return true;
-            const label = (item.d || "").toLowerCase();
-            const title = (item.title || eventTagValue(item.tags, "title") || "").toLowerCase();
-            return label.includes(query) || title.includes(query);
-        })
-        .sort((a, b) => {
-            const aTs = ensureTimestamp(a.updated_at || a.created_at);
-            const bTs = ensureTimestamp(b.updated_at || b.created_at);
-            return (bTs || 0) - (aTs || 0);
-        });
-}
-
-
-function renderExplorerSection(section) {
-    const { title, items, type: sectionType } = section;
-    const groups = buildRevisionGroups(items);
-    return `
-        <div class="p-nav-group">
-            <div class="p-nav-header">
-                <span>${title} (${items.length})</span>
-            </div>
-            ${groups.length ? groups.map((group) => renderExplorerBranch(group, sectionType)).join("") : `<div class="p-nav-empty">No items found</div>`}
-        </div>
-    `;
-}
-
-function buildRevisionGroups(items) {
-    const dMap = new Map();
-    items.forEach((item) => {
-        const d = (item.d || "").toUpperCase().trim() || "UNTITLED";
-        const bucket = dMap.get(d) || [];
-        bucket.push(item);
-        dMap.set(d, bucket);
-    });
-
-    return Array.from(dMap.entries())
-        .map(([d, groupItems]) => {
-            const byKind = {
-                [KINDS.ncc]: groupItems.filter(i => i.kind === KINDS.ncc),
-                [KINDS.nsr]: groupItems.filter(i => i.kind === KINDS.nsr),
-                [KINDS.endorsement]: groupItems.filter(i => i.kind === KINDS.endorsement),
-                [KINDS.supporting]: groupItems.filter(i => i.kind === KINDS.supporting)
-            };
-
-            // Sort helper for internal versions
-            const sortItems = (list) => {
-                return list.map(item => ({ 
-                    item, 
-                    depth: computeRevisionDepth(item, list) 
-                })).sort((a, b) => {
-                    if (b.depth !== a.depth) return b.depth - a.depth;
-                    const aTs = ensureTimestamp(a.item.updated_at || a.item.created_at);
-                    const bTs = ensureTimestamp(b.item.updated_at || b.item.created_at);
-                    return (bTs || 0) - (aTs || 0);
-                });
-            };
-
-            return {
-                label: d,
-                rawKey: d,
-                kinds: {
-                    ncc: sortItems(byKind[KINDS.ncc]),
-                    nsr: sortItems(byKind[KINDS.nsr]),
-                    endorsement: sortItems(byKind[KINDS.endorsement]),
-                    supporting: sortItems(byKind[KINDS.supporting])
-                },
-                // Use the latest NCC or the latest item overall for the group timestamp
-                latestTs: Math.max(...groupItems.map(i => ensureTimestamp(i.updated_at || i.created_at) || 0))
-            };
-        })
-        .sort((a, b) => b.latestTs - a.latestTs);
-}
-
-function computeRevisionDepth(item, peers) {
-    const visited = new Set();
-    function depth(current) {
-        const key = normalizeEventId(current.event_id || current.id || current.d);
-        if (!key || visited.has(key)) return 0;
-        visited.add(key);
-        let depthValue = 0;
-        const supersedes = (current.tags?.supersedes || [])
-            .map((val) => normalizeEventId(val))
-            .filter(Boolean);
-        supersedes.forEach((targetId) => {
-            const target = peers.find((entry) => {
-                const candidateKey = normalizeEventId(entry.event_id || entry.id || entry.d);
-                return candidateKey === targetId;
-            });
-            if (target) {
-                depthValue = Math.max(depthValue, 1 + depth(target));
-            }
-        });
-        visited.delete(key);
-        return depthValue;
-    }
-    return depth(item);
-}
-
-function renderExplorerBranch(group, sectionType) {
-    const branchKey = `${sectionType}:${group.rawKey}`;
-    const isClosed = collapsedBranches.has(branchKey);
-    
-    // Main group identity comes from the latest NCC item if it exists
-    const mainNcc = group.kinds.ncc[0]?.item;
-    const title = mainNcc ? (mainNcc.title || eventTagValue(mainNcc.tags, "title")) : group.label;
-    const status = determineStatus(mainNcc || group.kinds.endorsement[0]?.item || group.kinds.supporting[0]?.item || group.kinds.nsr[0]?.item, sectionType);
-    const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
-
-    let bodyHtml = "";
-    const isDraftSection = sectionType === "drafts";
-    
-    // 1. NCC Revisions (Directly under the branch)
-    if (group.kinds.ncc.length) {
-        // If it's a draft, only show the latest (first) item, no revision history
-        const nccItems = isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc;
-        bodyHtml += nccItems.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("");
-    }
-
-    // 2. Sub-trees for other types
-    const subTrees = [
-        { key: "endorsement", label: "Endorsements", items: group.kinds.endorsement },
-        { key: "nsr", label: "Succession", items: group.kinds.nsr },
-        { key: "supporting", label: "Supporting Docs", items: group.kinds.supporting }
-    ];
-
-    subTrees.forEach(sub => {
-        if (sub.items.length) {
-            const subKey = `${branchKey}:${sub.key}`;
-            const subClosed = collapsedBranches.has(subKey);
-            
-            // For drafts, we usually only want the latest of these too
-            const itemsToShow = isDraftSection ? [sub.items[0]] : sub.items;
-
-            bodyHtml += `
-                <div class="p-nav-tree p-nav-subtree">
-                    <button class="p-nav-branch-header" data-branch="${subKey}">
-                        <span class="p-nav-branch-icon">${subClosed ? "▸" : "▾"}</span>
-                        <span class="p-nav-branch-title">
-                            <span class="p-type-tag">${sub.label}</span>
-                            <small class="p-muted-text">(${itemsToShow.length})</small>
-                        </span>
-                    </button>
-                    <div class="p-nav-branch-body ${subClosed ? "" : "is-open"}">
-                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published")).join("")}
-                    </div>
-                </div>
-            `;
-        }
-    });
-
-    return `
-        <div class="p-nav-tree">
-            <button class="p-nav-branch-header" data-branch="${branchKey}">
-                <span class="p-nav-branch-icon">${isClosed ? "▸" : "▾"}</span>
-                <span class="p-nav-branch-title">${esc(group.label)} <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small></span>
-                <span class="p-badge-mini status-${status}">${badgeLabel}</span>
-            </button>
-            <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
-                ${bodyHtml}
-            </div>
-        </div>
-    `;
-}
-
-function renderExplorerItem(entry, idx, inheritedStatus) {
-    const { item } = entry;
-    const isActive = item.id === currentItemId ? " active" : "";
-    const status = normalizeStatus(item.status || inheritedStatus);
-    const statusLabel =
-        status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
-    
-    const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
-    const dateStr = formatShortDate(item.updated_at || item.created_at);
-    
-    // Simplified label for revisions
-    let label = title;
-    if (item.kind === KINDS.ncc) {
-        if (idx > 0) label = REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)];
-    } else {
-        // For sub-tree items, show the author or a short summary
-        const author = item.author_pubkey || item.author || item.pubkey || (item._isLocal ? _state.signerPubkey : "") || "";
-        label = `${shortenKey(author)} · ${formatShortDate(item.updated_at || item.created_at)}`;
-    }
-
-    return `
-        <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
-            <div class="p-nav-meta">
-                <span class="p-nav-label">${esc(label)}</span>
-                <span class="p-badge-mini status-${status}">${statusLabel}</span>
-            </div>
-            <div class="p-nav-date">${dateStr}</div>
-        </div>
-    `;
-}
-
-
-
-function toggleBranch(id) {
-    if (!id) return;
-    if (collapsedBranches.has(id)) collapsedBranches.delete(id);
-    else collapsedBranches.add(id);
-    renderExplorer();
-}
-
-function determineStatus(item, type) {
-    if (item && item.status) return item.status.toLowerCase();
-    // Fallback: If we are viewing an item in this branch, use its status
-    if (currentItemId) {
-        const active = findItem(currentItemId);
-        if (active && active.d === item?.d) return active.status.toLowerCase();
-    }
-    return type === "published" ? "published" : "draft";
-}
-
-function normalizeStatus(status) {
-    if (!status) return "draft";
-    const val = status.toLowerCase();
-    if (val === "published") return "published";
-    if (val === "withdrawn") return "withdrawn";
-    return "draft";
-}
-
-
-// Item Handling
 function findItem(id) {
     if (!_state || !id) return null;
     const pending = _state.pendingDrafts?.get(id);
@@ -802,7 +406,6 @@ function findItem(id) {
         return pending;
     }
     
-    // Pool everything
     const all = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
@@ -812,7 +415,6 @@ function findItem(id) {
         ...(_state.remoteDrafts || [])
     ];
     
-    // Aggressive search: match on id or event_id
     const found = all.find(i => i && (i.id === id || i.event_id === id));
     if (!found) return null;
 
@@ -829,394 +431,83 @@ function findItem(id) {
 }
 
 function openItem(id) {
-    log("Opening item:", id);
     const item = findItem(id);
-    if (!item) {
-        log("FAILED to find item for id:", id);
-        return;
-    }
+    if (!item) return;
     
     currentItemId = id;
     isEditMode = false; 
-    
-    log("Rendering components for item:", item.d || item.id);
-    renderExplorer(); 
-    renderContent(item);
-    renderInspector(item);
-    updateStatus(`Opened ${item.d || "item"}`);
+    refreshUI();
 }
 
 export function focusItem(id, editMode = false) {
     const item = findItem(id);
-    if (!item) {
-        log("Failed to focus item, not found:", id);
-        return;
-    }
+    if (!item) return;
 
     currentItemId = id;
     isEditMode = Boolean(editMode);
-
-    renderExplorer();
-    renderContent(item);
-    renderInspector(item);
-    updateStatus(`Opened ${item.d || "item"}`);
+    refreshUI();
 }
 
-function renderContent(item) {
-    const container = document.getElementById("p-content-column");
-    if (!container) return;
-    
-    container.innerHTML = "";
-    container.scrollTop = 0;
-
-    if (isEditMode) {
-        const wrap = document.createElement("div");
-        wrap.className = "p-edit-view";
-        wrap.innerHTML = `
-            <div class="p-gutter" id="p-gutter">1</div>
-            <textarea class="p-editor-textarea" id="p-editor" spellcheck="false" placeholder="Write NCC content in Markdown..."></textarea>
-        `;
-        container.appendChild(wrap);
-        
-        const textarea = wrap.querySelector("textarea");
-        textarea.value = item.content || "";
-        
-        textarea.oninput = (e) => {
-            if (e.isTrusted) updateStatus("• Unsaved changes");
-            syncGutter(textarea);
-        };
-        textarea.onscroll = () => {
-            const gutter = document.getElementById("p-gutter");
-            if (gutter) gutter.scrollTop = textarea.scrollTop;
-        };
-
-        // Defer focus and initial sync to prevent forced reflow violations
-        requestAnimationFrame(() => {
-            syncGutter(textarea);
-            textarea.focus();
-        });
-    } else {
-        const view = document.createElement("article");
-        view.className = "p-read-view";
-        
-        let headerHtml = `<div class="p-content-header">
-            <h1>${esc(item.title || eventTagValue(item.tags, "title") || "Untitled")}</h1>
-            <div class="p-content-meta">
-                <span class="p-badge">${TYPE_LABELS[item.kind]}</span>
-                <span class="p-badge status-${(item.status || "published").toLowerCase()}">${(item.status || "published").toUpperCase()}</span>
-                <span>${item.d || ""}</span>
-            </div>
-        </div>`;
-        
-        view.innerHTML = headerHtml + renderMarkdown(item.content || "_No content available._");
-        container.appendChild(view);
-    }
+function toggleBranch(id) {
+    if (!id) return;
+    if (collapsedBranches.has(id)) collapsedBranches.delete(id);
+    else collapsedBranches.add(id);
+    refreshUI();
 }
-
-function syncGutter(textarea) {
-    const gutter = document.getElementById("p-gutter");
-    if (!gutter) return;
-    const lineCount = textarea.value.split("\n").length;
-    let gutterHtml = "";
-    for (let i = 1; i <= lineCount; i++) {
-        gutterHtml += i + "<br>";
-    }
-    gutter.innerHTML = gutterHtml;
-}
-
-function renderInspector(item) {
-    const el = document.getElementById("p-inspector-body");
-    if (!el) return;
-    if (!item) {
-        el.innerHTML = `
-            <div class="p-section">
-                <span class="p-section-title">Inspector</span>
-                <p class="p-nav-label">Select an item to view metadata and actions.</p>
-            </div>
-        `;
-        return;
-    }
-
-    const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
-    const status = normalizeStatus(item.status || "published");
-    // Fallback to current signer if it's a local draft with no author set
-    const author = item.author_pubkey || item.author || item.pubkey || (item._isLocal ? _state.signerPubkey : "") || "Unknown";
-    const updatedAt = formatFullDate(item.updated_at || item.created_at);
-    const badgeLabel = status.toUpperCase();
-    const relayStatus = _state?.relayStatus || {};
-    const lastSync = relayStatus.at ? new Date(relayStatus.at).toLocaleTimeString() : "-";
-
-    const isPublished = item.event_id && (item.status || "").toLowerCase() === "published";
-
-    let metadataContent = "";
-    
-    // Core fields that are always visible
-    const coreFields = `
-        <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
-        <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
-        <div class="p-prop-row" style="margin-bottom: 12px"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
-    `;
-
-    if (isEditMode && !isPublished) {
-        metadataContent = coreFields + renderEditFields(item);
-    } else {
-        const rows = [];
-        const addRow = (key, val) => {
-            if (val) rows.push(`<div class="p-prop-row"><span class="p-prop-key">${key}</span><span class="p-prop-val">${esc(val)}</span></div>`);
-        };
-
-        addRow("Title", title);
-        addRow("Identifier", item.d);
-        if (item.event_id) addRow("Event ID", item.event_id);
-
-        if (item.kind === KINDS.ncc) {
-            addRow("Version", item.tags?.version);
-            addRow("Summary", item.tags?.summary);
-            addRow("Topics", (item.tags?.topics || []).join(", "));
-            addRow("Authors", (item.tags?.authors || []).join(", "));
-            addRow("Language", item.tags?.lang);
-            addRow("License", item.tags?.license);
-            addRow("Supersedes", (item.tags?.supersedes || []).join(", "));
-        } else if (item.kind === KINDS.nsr) {
-            addRow("Authoritative", item.tags?.authoritative);
-            addRow("Previous", item.tags?.previous);
-            addRow("Steward", item.tags?.steward);
-            addRow("Reason", item.tags?.reason);
-            addRow("Effective", item.tags?.effective_at);
-        } else if (item.kind === KINDS.endorsement) {
-            addRow("Endorses", item.tags?.endorses);
-            addRow("Roles", (item.tags?.roles || []).join(", "));
-            addRow("Implementation", item.tags?.implementation);
-            addRow("Topics", (item.tags?.topics || []).join(", "));
-            addRow("Note", item.tags?.note);
-        } else if (item.kind === KINDS.supporting) {
-            addRow("For NCC", item.tags?.for);
-            addRow("For Event", item.tags?.for_event);
-            addRow("Type", item.tags?.type);
-            addRow("Topics", (item.tags?.topics || []).join(", "));
-            addRow("Authors", (item.tags?.authors || []).join(", "));
-            addRow("Language", item.tags?.lang);
-            addRow("License", item.tags?.license);
-        }
-
-        metadataContent = coreFields + rows.join("");
-    }
-
-    el.innerHTML = `
-        <div class="p-section">
-            <span class="p-section-title">Item Metadata</span>
-            ${metadataContent}
-        </div>
-        <div class="p-section">
-            <span class="p-section-title">Actions</span>
-            <div class="p-inspector-actions" id="p-inspector-actions"></div>
-        </div>
-        <div class="p-section">
-            <span class="p-section-title">Relay Status</span>
-            <div class="p-prop-row"><span class="p-prop-key">Relays</span><span class="p-prop-val">${relayStatus.relays || 0}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Events</span><span class="p-prop-val">${relayStatus.events || 0}</span></div>
-            <div class="p-prop-row"><span class="p-prop-key">Last sync</span><span class="p-prop-val">${lastSync}</span></div>
-        </div>
-    `;
-
-    const actionsContainer = document.getElementById("p-inspector-actions");
-    if (!actionsContainer) return;
-    actionsContainer.innerHTML = "";
-
-    if (!isEditMode) {
-        // VIEW MODE ACTIONS
-        if (!isPublished) {
-            // It's a DRAFT (local or remote)
-            const editBtn = document.createElement("button");
-            editBtn.className = "p-btn-accent";
-            editBtn.textContent = "Edit";
-            editBtn.dataset.action = "edit-item";
-            editBtn.dataset.id = item.id;
-            actionsContainer.appendChild(editBtn);
-
-            const publishBtn = document.createElement("button");
-            publishBtn.className = "p-btn-ghost";
-            publishBtn.textContent = "Publish";
-            publishBtn.dataset.action = "publish-item";
-            publishBtn.dataset.id = item.id;
-            actionsContainer.appendChild(publishBtn);
-
-            // DELETE or WITHDRAW logic for draft
-            if (!item.event_id) {
-                const deleteBtn = document.createElement("button");
-                deleteBtn.className = "p-btn-ghost";
-                deleteBtn.style.color = "var(--danger)";
-                deleteBtn.textContent = "Delete";
-                deleteBtn.dataset.action = "delete-item";
-                deleteBtn.dataset.id = item.id;
-                actionsContainer.appendChild(deleteBtn);
-            } else if (item.status !== "withdrawn") {
-                const withdrawBtn = document.createElement("button");
-                withdrawBtn.className = "p-btn-ghost";
-                withdrawBtn.style.color = "var(--danger)";
-                withdrawBtn.textContent = "Withdraw";
-                withdrawBtn.dataset.action = "withdraw-item";
-                withdrawBtn.dataset.id = item.id;
-                actionsContainer.appendChild(withdrawBtn);
-            }
-        } else {
-            // Published Item
-            const reviseBtn = document.createElement("button");
-            reviseBtn.className = "p-btn-accent";
-            reviseBtn.textContent = "Revise";
-            reviseBtn.dataset.action = "revise-item";
-            reviseBtn.dataset.id = item.id;
-            actionsContainer.appendChild(reviseBtn);
-
-            if (actions.withdrawDraft && item.status !== "withdrawn") {
-                const withdrawBtn = document.createElement("button");
-                withdrawBtn.className = "p-btn-ghost";
-                withdrawBtn.style.color = "var(--danger)";
-                withdrawBtn.textContent = "Withdraw";
-                withdrawBtn.dataset.action = "withdraw-item";
-                withdrawBtn.dataset.id = item.id;
-                actionsContainer.appendChild(withdrawBtn);
-            }
-        }
-    } else {
-        // EDIT MODE ACTIONS
-        if (!isPublished) {
-            const saveBtn = document.createElement("button");
-            saveBtn.className = "p-btn-accent";
-            saveBtn.textContent = "Save (Ctrl+S)";
-            saveBtn.dataset.action = "save-item";
-            actionsContainer.appendChild(saveBtn);
-        } else {
-            const saveMsg = document.createElement("span");
-            saveMsg.className = "p-muted-text small";
-            saveMsg.style.padding = "6px 0";
-            saveMsg.textContent = "Published items are read-only";
-            actionsContainer.appendChild(saveMsg);
-        }
-
-        const cancelBtn = document.createElement("button");
-        cancelBtn.className = "p-btn-ghost";
-        cancelBtn.textContent = "Cancel";
-        cancelBtn.dataset.action = "cancel-item";
-        actionsContainer.appendChild(cancelBtn);
-    }
-}
-
 
 async function handleReviseAction(id) {
-    log("Handling Revise action for id:", id);
     const item = findItem(id);
     if (!item) return;
     
     const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
     if (draft) {
-        // Track where we came from so Cancel can revert
         revisionSourceId = id;
-
-        // Ensure the draft is truly a fresh local item
         draft.id = crypto.randomUUID();
         draft.event_id = "";
         draft.status = "draft";
         draft.source = "local";
         
-        log("Revision draft created:", draft.id, "superseding:", item.event_id || item.id);
-        
-        // IMPORTANT: Update active pointers BEFORE the save action
-        // This ensures that when saveItem triggers a global refreshUI, 
-        // PowerShell already knows it's looking at the new draft.
         currentItemId = draft.id;
         isEditMode = true;
 
-        // Save it locally. This updates DB/State and triggers global UI refresh.
         await actions.saveItem?.(draft.id, draft.content, draft);
-        
-        // Final local sync to ensure everything is rendered
-        renderExplorer();
-        renderContent(draft);
-        renderInspector(draft);
+        refreshUI();
     }
 }
 
-function renderEditFields(item) {
-    const fields = [];
-    
-    const addField = (label, name, value, placeholder = "", mandatory = false) => {
-        fields.push(`
-            <div class="p-field">
-                <label>${label}${mandatory ? " <span class=\"p-danger-text\">*</span>" : ""}</label>
-                <input type="text" name="${name}" value="${esc(value)}" placeholder="${placeholder}" autocomplete="off" />
-            </div>
-        `);
-    };
+async function handleSaveShortcut() {
+    if (!currentItemId || !isEditMode) return;
+    const item = findItem(currentItemId);
+    if (!item) return;
 
-    const addDatalistField = (label, name, value, options, placeholder = "", mandatory = false) => {
-        const listId = `list-${name.replace(/:/g, "-")}`;
-        const optionHtml = options
-            .map((opt) => `<option value="${esc(opt.value)}">${esc(opt.label)}</option>`)
-            .join("");
-        fields.push(`
-            <div class="p-field">
-                <label>${label}${mandatory ? " <span class=\"p-danger-text\">*</span>" : ""}</label>
-                <input type="text" name="${name}" value="${esc(value)}" list="${listId}" placeholder="${placeholder}" autocomplete="off" />
-                <datalist id="${listId}">
-                    ${optionHtml}
-                </datalist>
-            </div>
-        `);
-    };
-
-    addField("Title", "title", item.title || "", "", true);
+    if (!item._isLocal) {
+        updateStatus("Saving blocked: Published items are read-only.");
+        return;
+    }
     
-    if (item.kind === KINDS.ncc) {
-        addField("NCC Number", "d", item.d ? item.d.replace(/^ncc-/, "") : "", "e.g. 00", true);
-        addField("Summary", "tag:summary", item.tags?.summary || "");
-        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
-        addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
-        addField("Version", "tag:version", item.tags?.version || "");
-        addDatalistField("Language", "tag:lang", item.tags?.lang || "", LANGUAGE_OPTIONS, "e.g. en");
-        addDatalistField("License", "tag:license", item.tags?.license || "", LICENSE_OPTIONS, "e.g. MIT");
+    const editor = document.getElementById("p-editor");
+    if (!editor) return;
+    
+    const content = editor.value;
+    updateStatus("Saving...");
+    try {
+        const updatedItem = await actions.saveItem(currentItemId, content, item);
+        updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
         
-        // Strip legacy 'event:' prefix for display
-        const supersedesDisplay = (item.tags?.supersedes || [])
-            .map(s => s.replace(/^event:/i, ""))
-            .join(", ");
-        addField("Supersedes", "tag:supersedes", supersedesDisplay, "ncc-XX or event hex");
+        if (updatedItem) {
+            Object.assign(item, updatedItem);
+        } else {
+            item.content = content;
+        }
+        
+        isEditMode = false; 
+        revisionSourceId = null; 
+        refreshUI();
+    } catch (e) {
+        updateStatus("Save failed");
+        console.error("Save error:", e);
     }
-
-    if (item.kind === KINDS.nsr) {
-        addField("Authoritative ID", "tag:authoritative", (item.tags?.authoritative || "").replace(/^event:/i, ""), "Event hex", true);
-        addField("Reason", "tag:reason", item.tags?.reason || "", "", true);
-        addField("Effective At", "tag:effective_at", item.tags?.effective_at || "");
-    }
-
-    if (item.kind === KINDS.endorsement) {
-        addField("Endorses", "tag:endorses", (item.tags?.endorses || "").replace(/^event:/i, ""), "Event hex", true);
-        addField("Roles", "tag:role", (item.tags?.roles || item.tags?.role || []).join(", "));
-        addField("Implementation", "tag:implementation", item.tags?.implementation || "");
-        addField("Note", "tag:note", item.tags?.note || "");
-        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
-    }
-
-    if (item.kind === KINDS.supporting) {
-        addField("Type", "tag:type", item.tags?.type || "", "e.g. guide", true);
-        addField("For NCC", "tag:for", item.tags?.for || "", "ncc-XX", true);
-        addField("For Event", "tag:for_event", (item.tags?.for_event || "").replace(/^event:/i, ""), "Event hex");
-        addField("Topics", "tag:topics", (item.tags?.topics || []).join(", "));
-        addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
-        addDatalistField("Language", "tag:lang", item.tags?.lang || "", LANGUAGE_OPTIONS, "e.g. en");
-        addDatalistField("License", "tag:license", item.tags?.license || "", LICENSE_OPTIONS, "e.g. MIT");
-    }
-
-    return fields.join("");
 }
-
-
-// Commands & Palette
-const COMMANDS = [
-    { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
-    { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => actions.openNewNcc?.() },
-    { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
-];
 
 function setupKeyboardShortcuts() {
     if (keyboardHooked) return;
@@ -1228,7 +519,7 @@ function setupKeyboardShortcuts() {
 
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
             e.preventDefault();
-            toggleCommandPalette();
+            toggleCommandPalette(undefined, { commands: COMMANDS });
             return;
         }
 
@@ -1241,101 +532,24 @@ function setupKeyboardShortcuts() {
         }
 
         if (paletteActive) {
-            if (e.key === "ArrowDown") {
+            if (handlePaletteNavigation(e.key, COMMANDS, executeCommand)) {
                 e.preventDefault();
-                if (paletteMatches.length) {
-                    paletteIndex = (paletteIndex + 1) % paletteMatches.length;
-                    highlightPaletteSelection();
-                }
-            } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                if (paletteMatches.length) {
-                    paletteIndex = (paletteIndex - 1 + paletteMatches.length) % paletteMatches.length;
-                    highlightPaletteSelection();
-                }
-            } else if (e.key === "Enter") {
-                e.preventDefault();
-                const cmd = paletteMatches[paletteIndex];
-                if (cmd) {
-                    executeCommand(cmd.id);
-                }
-            } else if (e.key === "Escape") {
-                e.preventDefault();
-                toggleCommandPalette(false);
             }
             return;
         }
 
         if (e.key === "Escape" && isEditMode) {
             isEditMode = false;
-            const item = findItem(currentItemId);
-            if (item) {
-                renderContent(item);
-                renderInspector(item);
-            }
+            refreshUI();
         }
     });
 }
 
-function toggleCommandPalette(show) {
-    const overlay = document.getElementById("p-palette-overlay");
-    const input = document.getElementById("p-palette-input");
-    if (!overlay || !input) return;
-    
-    const shouldShow = show !== undefined ? show : overlay.hidden;
-    overlay.hidden = !shouldShow;
-    overlay.style.display = shouldShow ? "flex" : "none";
-    
-    if (shouldShow) {
-        input.value = "";
-        renderCommandList("");
-        input.focus();
-    } else {
-        paletteMatches = [];
-        paletteIndex = 0;
-    }
-}
-
-function renderCommandList(query) {
-    const list = document.getElementById("p-palette-list");
-    if (!list) return;
-    const q = (query || "").toLowerCase();
-    const matches = COMMANDS.filter((c) => c.title.toLowerCase().includes(q));
-    paletteMatches = matches;
-    paletteIndex = 0;
-    list.innerHTML = matches
-        .map(
-            (c, index) => `
-        <div class="p-palette-item${index === paletteIndex ? " selected" : ""}" data-cmd="${c.id}" data-index="${index}">
-            <div class="p-palette-body">
-                <span class="p-palette-title">${esc(c.title)}</span>
-                <span class="p-palette-id">${c.id}</span>
-            </div>
-            <span class="p-palette-kb">${c.kb}</span>
-        </div>
-    `
-        )
-        .join("");
-    highlightPaletteSelection();
-}
-
-function highlightPaletteSelection() {
-    const items = document.querySelectorAll(".p-palette-item");
-    items.forEach((node, index) => {
-        node.classList.toggle("selected", index === paletteIndex);
-    });
-}
-
 function executeCommand(id) {
-    const cmd = COMMANDS.find(c => c.id === id);
-    if (cmd) {
-        cmd.run();
-        toggleCommandPalette(false);
-    }
+    paletteExecuteCommand(id, COMMANDS, () => toggleCommandPalette(false));
 }
 
 function renderContextMenu(x, y, item) {
-    // Remove existing
     const existing = document.getElementById("p-context-menu");
     if (existing) existing.remove();
 
@@ -1427,7 +641,7 @@ function openEndorsementModal(nccItem) {
             content: note,
             tags: {
                 endorses: nccItem.event_id || nccItem.id,
-                roles: roles,
+                role: roles,
                 implementation: impl,
                 note: note
             }
@@ -1436,7 +650,6 @@ function openEndorsementModal(nccItem) {
         await actions.saveItem?.(draft.id, draft.content, draft);
         openItem(draft.id);
         modal.remove();
-        showToast("Endorsement draft created.");
     };
 }
 
@@ -1476,7 +689,7 @@ function openNsrModal(nccItem) {
         const auth = document.getElementById("m-nsr-auth").value.trim();
         const reason = document.getElementById("m-nsr-reason").value.trim();
 
-        if (!auth) { return showToast("Authoritative ID is required", "error"); }
+        if (!auth) return;
 
         const draft = {
             id: crypto.randomUUID(),
@@ -1497,7 +710,6 @@ function openNsrModal(nccItem) {
         await actions.saveItem?.(draft.id, draft.content, draft);
         openItem(draft.id);
         modal.remove();
-        showToast("Succession record created.");
     };
 }
 
@@ -1519,49 +731,8 @@ function openSupportingDocFlow(nccItem) {
     };
 
     actions.saveItem?.(draft.id, draft.content, draft).then(() => {
-        openItem(draft.id);
-        isEditMode = true;
-        renderContent(draft);
-        renderInspector(draft);
-        showToast("Supporting document draft created.");
+        focusItem(draft.id, true);
     });
-}
-
-async function handleSaveShortcut() {
-    if (!currentItemId || !isEditMode) return;
-    const item = findItem(currentItemId);
-    if (!item) return;
-
-    if (!item._isLocal) {
-        updateStatus("Saving blocked: Published items are read-only.");
-        return;
-    }
-    
-    const editor = document.getElementById("p-editor");
-    if (!editor) return;
-    
-    const content = editor.value;
-    updateStatus("Saving...");
-    try {
-        const updatedItem = await actions.saveItem(currentItemId, content, item);
-        updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-        
-        // Refresh local item content and event_id from the returned update
-        if (updatedItem) {
-            Object.assign(item, updatedItem);
-        } else {
-            item.content = content;
-        }
-        
-        isEditMode = false; // Transition out of edit mode on successful save
-        revisionSourceId = null; // Finalize revision
-        renderContent(item);
-        renderInspector(item);
-        renderExplorer();
-    } catch (e) {
-        updateStatus("Save failed");
-        console.error("Save error:", e);
-    }
 }
 
 function renderSettingsModal() {
@@ -1576,9 +747,7 @@ function renderSettingsModal() {
             <div class="p-modal-body p-scroll">
                 <section class="p-modal-section">
                     <h3>Nostr Relays</h3>
-                    <div id="p-settings-relays" class="p-settings-list">
-                        <!-- Relays will be rendered here -->
-                    </div>
+                    <div id="p-settings-relays" class="p-settings-list"></div>
                     <div class="p-settings-input-group">
                         <input type="text" id="p-new-relay" placeholder="wss://relay.example.com" />
                         <button class="p-btn-accent" id="p-add-relay">Add Relay</button>
@@ -1614,7 +783,6 @@ function renderSettingsModal() {
 
     document.body.appendChild(modal);
 
-    // Initial relay render
     const refreshRelays = async () => {
         const container = document.getElementById("p-settings-relays");
         if (!container) return;
@@ -1639,7 +807,6 @@ function renderSettingsModal() {
 
     refreshRelays();
 
-    // Listeners for settings elements
     const addBtn = document.getElementById("p-add-relay");
     const relayInput = document.getElementById("p-new-relay");
     addBtn.onclick = async () => {
