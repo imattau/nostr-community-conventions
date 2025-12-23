@@ -497,7 +497,28 @@ async function saveEditDraft() {
     published_at: form.published_at.value ? Number(form.published_at.value) : null
   };
   await saveDraft(draft);
-  showToast("Draft saved.");
+
+  if (state.signerPubkey) {
+    try {
+      const broadcast = await broadcastDraftToRelays(draft);
+      if (broadcast) {
+        draft.event_id = broadcast.eventId;
+        await saveDraft(draft);
+        showToast("Draft saved and pushed to relays.");
+      } else {
+        showToast("Draft saved locally (relay push failed).", "warning");
+      }
+    } catch (e) {
+      console.warn("Auto-push failed", e);
+      showToast("Draft saved locally. Relay push failed.", "warning");
+    }
+  } else {
+    showToast("Draft saved locally.");
+  }
+
+  const nccDrafts = await listDrafts(KINDS.ncc);
+  updateState({ nccLocalDrafts: nccDrafts });
+
   hideEditMode();
   await refreshDashboard();
   updateState({ currentDraft: { ...state.currentDraft, ncc: draft } });
@@ -510,7 +531,7 @@ async function saveEditDraft() {
       published_at: draft.published_at,
       source: "local"
     },
-    await listDrafts(KINDS.ncc)
+    nccDrafts
   );
 }
 
@@ -801,8 +822,32 @@ async function handleFormSubmit(kind) {
   }
 
   await saveDraft(draft);
+
+  if (state.signerPubkey) {
+    try {
+      const broadcast = await broadcastDraftToRelays(draft);
+      if (broadcast) {
+        draft.event_id = broadcast.eventId;
+        await saveDraft(draft);
+        showToast(`${kind.toUpperCase()} draft saved and pushed to relays.`);
+      } else {
+        showToast(`${kind.toUpperCase()} draft saved locally (relay push failed).`, "warning");
+      }
+    } catch (e) {
+      console.warn("Auto-push failed", e);
+      showToast(`${kind.toUpperCase()} draft saved locally. Relay push failed.`, "warning");
+    }
+  } else {
+    showToast(`${kind.toUpperCase()} draft saved locally.`);
+  }
+
   updateState({ currentDraft: { ...state.currentDraft, [kind]: draft } });
-  showToast(`${kind.toUpperCase()} draft saved.`);
+  
+  if (kind === "ncc") {
+    const nccDrafts = await listDrafts(KINDS.ncc);
+    updateState({ nccLocalDrafts: nccDrafts });
+  }
+
   await renderDrafts(
     kind,
     state,
@@ -1070,37 +1115,45 @@ async function publishDraft(draft, kind) {
   }
 }
 
+// Helper to auto-save drafts to relays
+async function broadcastDraftToRelays(draft) {
+  if (!draft.d) return null;
+  const relays = await getRelays(getConfig);
+  if (!relays.length) return null;
+  if (!state.signerPubkey) return null;
+
+  const signerMode = state.signerMode;
+  const nsec = sessionStorage.getItem("ncc-manager-nsec");
+  const signer = await getSigner(signerMode, nsec);
+
+  const backupD = buildDraftIdentifier(draft.d);
+  const backupDraftPayload = { ...draft, d: backupD, status: "draft" };
+  if (!backupDraftPayload.tags) backupDraftPayload.tags = {};
+  
+  const template = createEventTemplate(backupDraftPayload);
+  template.tags.push(["original_d", draft.d]);
+
+  const event = await signer.signEvent(template);
+  const result = await publishEvent(relays, event);
+  
+  return { eventId: event.id, result };
+}
+
 // Renamed from backupDraft
 async function saveDraftToRelays(draft, kind) {
   try {
     if (!draft.d) throw new Error("Draft must have an identifier (d tag) before saving to relays.");
     
-    // We don't run full validation because drafts can be incomplete.
+    const broadcast = await broadcastDraftToRelays(draft);
+    if (!broadcast) {
+       if (!state.signerPubkey) throw new Error("Signer not connected.");
+       if ((await getRelays(getConfig)).length === 0) throw new Error("No relays configured.");
+       throw new Error("Broadcast failed.");
+    }
     
-    const relays = await getRelays(getConfig);
-    if (!relays.length) throw new Error("No relays configured");
-    const signerMode = state.signerMode;
-    const nsec = sessionStorage.getItem("ncc-manager-nsec");
-    const signer = await getSigner(signerMode, nsec);
+    const { eventId, result } = broadcast;
 
-    // Create a backup clone
-    const backupD = buildDraftIdentifier(draft.d);
-    // Ensure status is "draft"
-    const backupDraftPayload = { ...draft, d: backupD, status: "draft" };
-    
-    // Ensure status tag is present
-    if (!backupDraftPayload.tags) backupDraftPayload.tags = {};
-    
-    // Manually constructing the template to ensure we don't mess up the original draft object
-    const template = createEventTemplate(backupDraftPayload);
-    
-    // And a reference to the original d tag for easier recovery logic if needed
-    template.tags.push(["original_d", draft.d]);
-
-    const event = await signer.signEvent(template);
-    const result = await publishEvent(relays, event);
-
-    const updatedDraft = { ...draft, event_id: event.id };
+    const updatedDraft = { ...draft, event_id: eventId };
     await saveDraft(updatedDraft);
     updateState({ currentDraft: { ...state.currentDraft, [kind]: updatedDraft } });
 
@@ -1119,7 +1172,6 @@ async function saveDraftToRelays(draft, kind) {
       showToast
     );
     
-    // Refresh dashboard to update event ID display
     const nccDrafts = await listDrafts(KINDS.ncc);
     updateState({ nccLocalDrafts: nccDrafts });
     refreshDashboard();

@@ -391,7 +391,7 @@ export function renderDashboard(
          buttons += `<button class="ghost" data-action="edit-dashboard" data-id="${item.id}">Edit</button>`;
       }
 
-      if (isPublished) {
+      if (isPublished && canPublish) {
          buttons += `<button class="ghost" data-action="revise-dashboard" data-id="${item.id}">Revise</button>`;
       }
 
