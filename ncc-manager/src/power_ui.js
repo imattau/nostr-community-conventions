@@ -257,6 +257,11 @@ function setupGlobalListeners() {
             const action = actionBtn.dataset.action;
             log("Handling Global action:", action);
             
+            // Auto-close dropdown if action came from it
+            if (target.closest(".p-dropdown")) {
+                target.closest(".p-dropdown").classList.remove("is-open");
+            }
+
             if (action === "sign-in") {
                 actions.promptSigner?.();
             } else if (action === "sign-out") {

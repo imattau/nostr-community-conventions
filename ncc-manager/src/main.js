@@ -237,8 +237,14 @@ async function promptSignerConnection() {
 async function signOutSigner() {
   sessionStorage.removeItem("ncc-manager-nsec");
   await setConfig("signer_mode", "nip07");
-  updateState({ signerPubkey: null, signerProfile: null, signerMode: "nip07" });
-  await updateSignerStatus();
+  // Explicitly clear signer state and prevent immediate re-probing
+  updateState({ 
+      signerPubkey: null, 
+      signerProfile: null, 
+      signerMode: "nip07" 
+  });
+  
+  await updateAllDrafts();
   showToast("Signer cleared.");
   refreshUI();
 }
