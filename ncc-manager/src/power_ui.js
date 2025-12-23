@@ -1020,7 +1020,12 @@ function renderEditFields(item) {
         addField("Version", "tag:version", item.tags?.version || "");
         addField("Language", "tag:lang", item.tags?.lang || "");
         addField("License", "tag:license", item.tags?.license || "");
-        addField("Supersedes", "tag:supersedes", (item.tags?.supersedes || []).join(", "));
+        
+        // Strip 'event:' prefix for display
+        const supersedesDisplay = (item.tags?.supersedes || [])
+            .map(s => s.replace(/^event:/i, ""))
+            .join(", ");
+        addField("Supersedes", "tag:supersedes", supersedesDisplay, "ncc-XX or event hex");
     }
 
     if (item.kind === KINDS.nsr) {
@@ -1029,6 +1034,7 @@ function renderEditFields(item) {
     }
 
     if (item.kind === KINDS.endorsement) {
+        addField("Endorses", "tag:endorses", (item.tags?.endorses || "").replace(/^event:/i, ""), "Event hex");
         addField("Roles", "tag:roles", (item.tags?.roles || []).join(", "));
         addField("Implementation", "tag:implementation", item.tags?.implementation || "");
         addField("Note", "tag:note", item.tags?.note || "");
@@ -1038,6 +1044,7 @@ function renderEditFields(item) {
     if (item.kind === KINDS.supporting) {
         addField("Type", "tag:type", item.tags?.type || "");
         addField("For NCC", "tag:for", item.tags?.for || "");
+        addField("For Event", "tag:for_event", (item.tags?.for_event || "").replace(/^event:/i, ""), "Event hex");
         addField("Authors", "tag:authors", (item.tags?.authors || []).join(", "));
     }
 

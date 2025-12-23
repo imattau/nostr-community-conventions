@@ -332,9 +332,14 @@ function toDraftFromRelay(item) {
       topics: tagMap.t || [],
       lang: tagMap.lang?.[0] || "",
       version: tagMap.version?.[0] || "",
-      supersedes: item.event_id ? [`event:${item.event_id}`] : [],
+      supersedes: tagMap.supersedes || [],
       license: tagMap.license?.[0] || "",
-      authors: tagMap.authors || []
+      authors: tagMap.authors || [],
+      // For Kind 30052/30053
+      endorses: tagMap.endorses?.[0] || "",
+      for: tagMap.for?.[0] || "",
+      for_event: tagMap.for_event?.[0] || "",
+      type: tagMap.type?.[0] || ""
     }
   };
 }
