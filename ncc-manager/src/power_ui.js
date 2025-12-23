@@ -38,16 +38,27 @@ function formatFullDate(value) {
     return new Date(ts).toLocaleString();
 }
 
+// Debugging
+const DEBUG = true;
+function log(...args) {
+    if (DEBUG) console.log("%c[PowerUI]", "color: #58a6ff; font-weight: bold", ...args);
+}
+
 // Initialization
 export function initPowerShell(state, appActions) {
-  console.log("PowerUI: Initializing with state:", state);
+  log("Initializing PowerShell", { 
+      itemCount: (state.nccDocs?.length || 0) + (state.nccLocalDrafts?.length || 0),
+      currentItemId,
+      isEditMode 
+  });
+  
   _state = state;
   actions = appActions || {};
   const shell = document.getElementById("shell-power");
   if (!shell) return;
 
   if (!shell.innerHTML.includes("p-topbar")) {
-    console.log("PowerUI: Rendering base shell structure");
+    log("Rendering base shell structure");
     shell.innerHTML = `
       <header class="p-topbar">
         <div class="p-brand" role="button">
@@ -116,47 +127,46 @@ function setupGlobalListeners() {
     if (listenersSetup) return;
     listenersSetup = true;
 
-    console.log("PowerUI: Setting up global listeners");
+    log("Setting up global listeners");
 
     document.addEventListener("click", (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
 
-        // Trace the click for debugging
         const target = e.target;
         
+        // Debug: Log all clicks within shell
+        if (shell.contains(target)) {
+            log("Click detected on:", target.tagName, target.className, { 
+                id: target.id,
+                dataset: target.dataset 
+            });
+        }
+
         // 1. Explorer Item Click
         const navItem = target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
-            console.log("PowerUI: Explorer item click:", navItem.dataset.id);
+            log("Handling Explorer item click:", navItem.dataset.id);
             e.preventDefault();
             e.stopPropagation();
-            try {
-                openItem(navItem.dataset.id);
-            } catch (err) {
-                console.error("PowerUI: Failed to open item:", err);
-            }
+            openItem(navItem.dataset.id);
             return;
         }
 
         // 2. Explorer Branch Toggle
         const branchHeader = target.closest(".p-nav-branch-header");
         if (branchHeader && branchHeader.dataset.branch) {
-            console.log("PowerUI: Branch toggle click:", branchHeader.dataset.branch);
+            log("Handling Branch toggle:", branchHeader.dataset.branch);
             e.preventDefault();
             e.stopPropagation();
-            try {
-                toggleBranch(branchHeader.dataset.branch);
-            } catch (err) {
-                console.error("PowerUI: Failed to toggle branch:", err);
-            }
+            toggleBranch(branchHeader.dataset.branch);
             return;
         }
 
         // 3. Brand Click (Reset)
         const brand = target.closest(".p-brand");
         if (brand) {
-            console.log("PowerUI: Brand click, resetting view");
+            log("Handling Brand reset click");
             currentItemId = null;
             isEditMode = false;
             renderEmptyState();
@@ -168,7 +178,7 @@ function setupGlobalListeners() {
         // 4. Command Palette Item Click
         const paletteItem = target.closest(".p-palette-item");
         if (paletteItem && paletteItem.dataset.cmd) {
-            console.log("PowerUI: Palette command click:", paletteItem.dataset.cmd);
+            log("Handling Palette command click:", paletteItem.dataset.cmd);
             executeCommand(paletteItem.dataset.cmd);
             return;
         }
@@ -176,7 +186,7 @@ function setupGlobalListeners() {
         // 5. Command Palette Overlay Click (Close)
         const overlay = document.getElementById("p-palette-overlay");
         if (target === overlay) {
-            console.log("PowerUI: Palette overlay background click");
+            log("Handling Palette overlay close");
             toggleCommandPalette(false);
             return;
         }
@@ -185,11 +195,13 @@ function setupGlobalListeners() {
     const searchInput = document.getElementById("p-search");
     searchInput?.addEventListener("input", (e) => {
         searchQuery = e.target.value.toLowerCase();
+        log("Search query updated:", searchQuery);
         renderExplorer();
     });
 
     const paletteInput = document.getElementById("p-palette-input");
     paletteInput?.addEventListener("input", (e) => {
+        log("Palette input updated:", e.target.value);
         renderCommandList(e.target.value);
     });
 
@@ -209,6 +221,7 @@ function setupGlobalListeners() {
         if (!key) return;
 
         updateStatus("• Unsaved changes");
+        log("Inspector input sync:", key, target.value);
 
         if (key === "title") {
             item.title = target.value;
@@ -608,12 +621,17 @@ function findItem(id) {
 }
 
 function openItem(id) {
+    log("Opening item:", id);
     const item = findItem(id);
-    if (!item) return;
+    if (!item) {
+        log("FAILED to find item for id:", id);
+        return;
+    }
     
     currentItemId = id;
     isEditMode = false; 
     
+    log("Rendering components for item:", item.d || item.id);
     renderExplorer(); 
     renderContent(item);
     renderInspector(item);
