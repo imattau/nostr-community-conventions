@@ -211,6 +211,15 @@ function setupGlobalListeners() {
             } else if (action === "cancel-item") {
                 isEditMode = false;
                 
+                if (_state?.pendingDrafts?.has(currentItemId)) {
+                    _state.pendingDrafts.delete(currentItemId);
+                    currentItemId = null;
+                    renderExplorer();
+                    renderEmptyState();
+                    renderInspector();
+                    return;
+                }
+
                 if (revisionSourceId) {
                     log("Cancelling revision, reverting to:", revisionSourceId);
                     const sourceId = revisionSourceId;
@@ -470,7 +479,11 @@ function renderExplorer() {
             
             if (isDraft) {
                 const cleanD = (item.d || "").replace(/^draft:/, "");
-                identity = `draft-group:${item.kind}:${cleanD}`;
+                if (cleanD) {
+                    identity = `draft-group:${item.kind}:${cleanD}`;
+                } else {
+                    identity = `draft:${item.id}`;
+                }
             }
 
             const existing = conceptualMap.get(identity);
@@ -752,6 +765,11 @@ function normalizeStatus(status) {
 // Item Handling
 function findItem(id) {
     if (!_state || !id) return null;
+    const pending = _state.pendingDrafts?.get(id);
+    if (pending) {
+        pending._isLocal = true;
+        return pending;
+    }
     
     // Pool everything
     const all = [
