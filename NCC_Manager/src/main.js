@@ -89,7 +89,17 @@ async function switchShell(mode) {
   
   updateState({ uiMode: mode });
   
+  let powerCss = document.getElementById("power-css-link");
+  if (!powerCss) {
+      powerCss = document.createElement("link");
+      powerCss.id = "power-css-link";
+      powerCss.rel = "stylesheet";
+      powerCss.href = "/src/power.css";
+      document.head.appendChild(powerCss);
+  }
+  
   if (mode === "power") {
+    powerCss.disabled = false;
     document.body.classList.add("mode-power");
     classic.hidden = true;
     power.hidden = false;
@@ -1171,18 +1181,30 @@ function handleEndorse(item) {
 }
 
 async function refreshDashboard() {
-  await renderDashboard(
-    state,
-    listDrafts,
-    openNccView,
-    publishDraft,
-    setupEndorsementCounterButtons,
-    renderEndorsementDetailsPanel,
-    withdrawDraft,
-    handleEdit,
-    handleRevise,
-    handleEndorse
-  );
+  if (state.uiMode === "power") {
+    // Refresh Power UI
+    initPowerShell(state, {
+        switchShell,
+        saveItem: handlePowerSave,
+        publishDraft,
+        withdrawDraft,
+        openNewNcc
+    });
+  } else {
+    // Refresh Classic UI
+    await renderDashboard(
+      state,
+      listDrafts,
+      openNccView,
+      publishDraft,
+      setupEndorsementCounterButtons,
+      renderEndorsementDetailsPanel,
+      withdrawDraft,
+      handleEdit,
+      handleRevise,
+      handleEndorse
+    );
+  }
 }
 
 async function withdrawDraft(id) {
@@ -1601,6 +1623,11 @@ async function initLists() {
     verifyDraft,
     showToast
   );
+
+  // Fetch NCC drafts for state and Power UI
+  const nccDrafts = await listDrafts(KINDS.ncc);
+  updateState({ nccLocalDrafts: nccDrafts });
+  refreshDashboard();
 
   document
     .getElementById("nsr-list")
