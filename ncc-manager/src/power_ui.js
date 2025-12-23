@@ -207,6 +207,25 @@ function setupGlobalListeners() {
         }
     });
 
+    let longPressTimer;
+    document.addEventListener("touchstart", (e) => {
+        const navItem = e.target.closest(".p-nav-item");
+        if (navItem && navItem.dataset.id) {
+            longPressTimer = setTimeout(() => {
+                const item = findItem(navItem.dataset.id);
+                const isPublished = item && item.event_id && (item.status || "").toLowerCase() === "published";
+                
+                if (item && item.kind === KINDS.ncc && isPublished) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    renderContextMenu(touch.clientX, touch.clientY, item);
+                }
+            }, 500); // 500ms for long press
+        }
+    });
+    document.addEventListener("touchend", () => clearTimeout(longPressTimer));
+    document.addEventListener("touchmove", () => clearTimeout(longPressTimer));
+
     document.addEventListener("click", () => {
         const menu = document.getElementById("p-context-menu");
         if (menu) menu.remove();
