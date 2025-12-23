@@ -345,7 +345,7 @@ export function renderDashboard(
   const grouped = new Map();
   for (const item of combined) {
     if (!item.d) continue;
-    const key = item.event_id || item.id;
+    const key = item.d;
     const existing = grouped.get(key);
     if (!existing || (item.updated_at || 0) > (existing.updated_at || 0)) {
       grouped.set(key, item);
