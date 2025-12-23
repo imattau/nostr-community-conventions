@@ -98,12 +98,21 @@ async function initShell() {
       saveItem: handlePowerSave,
       publishDraft,
       withdrawDraft,
+      deleteItem: handlePowerDelete,
       openNewNcc,
       createRevisionDraft
     });
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
   }
+}
+
+async function handlePowerDelete(id) {
+    if (!confirm("Are you sure you want to delete this local draft?")) return;
+    await deleteDraft(id);
+    await updateAllDrafts();
+    refreshUI();
+    showToast("Draft deleted.");
 }
 
 async function handlePowerSave(id, content, fullDraft = null) {

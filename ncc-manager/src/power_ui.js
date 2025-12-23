@@ -775,6 +775,23 @@ function renderInspector(item) {
                 }
             };
             actionsContainer.appendChild(publishBtn);
+
+            // DELETE or WITHDRAW logic for local
+            if (!item.event_id) {
+                const deleteBtn = document.createElement("button");
+                deleteBtn.className = "p-btn-ghost";
+                deleteBtn.style.color = "var(--danger)";
+                deleteBtn.textContent = "Delete";
+                deleteBtn.onclick = () => actions.deleteItem?.(item.id);
+                actionsContainer.appendChild(deleteBtn);
+            } else if (item.status !== "withdrawn") {
+                const withdrawBtn = document.createElement("button");
+                withdrawBtn.className = "p-btn-ghost";
+                withdrawBtn.style.color = "var(--danger)";
+                withdrawBtn.textContent = "Withdraw";
+                withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
+                actionsContainer.appendChild(withdrawBtn);
+            }
         } else {
             // Published Item
             const reviseBtn = document.createElement("button");
@@ -802,9 +819,10 @@ function renderInspector(item) {
             };
             actionsContainer.appendChild(openBtn);
 
-            if (actions.withdrawDraft) {
+            if (actions.withdrawDraft && item.status !== "withdrawn") {
                 const withdrawBtn = document.createElement("button");
                 withdrawBtn.className = "p-btn-ghost";
+                withdrawBtn.style.color = "var(--danger)";
                 withdrawBtn.textContent = "Withdraw";
                 withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
                 actionsContainer.appendChild(withdrawBtn);
