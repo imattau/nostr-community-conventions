@@ -325,7 +325,6 @@ async function persistRelayEvents(events) {
     if (state.persistedRelayEvents.has(event.id)) continue;
     state.persistedRelayEvents.add(event.id);
     const draft = payloadToDraft(event);
-    draft.status = "published";
     draft.source = "relay";
     draft.event_id = event.id;
     const timestamp = event.created_at || nowSeconds();
