@@ -167,6 +167,10 @@ async function updateSignerStatus() {
     verifyDraft,
     showToast
   );
+  
+  const nccDrafts = await listDrafts(KINDS.ncc);
+  updateState({ nccLocalDrafts: nccDrafts });
+
   await renderDashboard(
     state,
     listDrafts,
@@ -729,6 +733,10 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     });
     renderEndorsementHelpers(state);
     renderNsrHelpers(state);
+
+    const nccDrafts = await listDrafts(KINDS.ncc);
+    updateState({ nccLocalDrafts: nccDrafts });
+
     renderDashboard(
       state,
       listDrafts,
