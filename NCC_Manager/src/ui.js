@@ -293,7 +293,8 @@ export function renderDashboard(
   renderEndorsementDetailsPanel,
   withdrawDraft,
   handleEdit,
-  handleRevise
+  handleRevise,
+  handleEndorse
 ) {
   const listEl = document.getElementById("recent-nccs");
   const localDrafts = state.nccLocalDrafts || [];
@@ -393,6 +394,7 @@ export function renderDashboard(
 
       if (isPublished && canPublish) {
          buttons += `<button class="ghost" data-action="revise-dashboard" data-id="${item.id}">Revise</button>`;
+         buttons += `<button class="ghost" data-action="endorse-dashboard" data-id="${item.id}">Endorse</button>`;
       }
 
       if (showPublish) {
@@ -498,6 +500,14 @@ export function renderDashboard(
     button.addEventListener("click", () => {
       if (!handleRevise) return;
       handleRevise(button.dataset.id);
+    });
+  });
+
+  listEl.querySelectorAll('button[data-action="endorse-dashboard"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = sorted.find((item) => item.id === button.dataset.id);
+      if (!target || !handleEndorse) return;
+      handleEndorse(target);
     });
   });
 }

@@ -329,21 +329,33 @@ function createRevisionDraft(item, localDrafts) {
 function setNccViewActions(item, localDrafts) {
   const editButton = document.getElementById("ncc-view-edit");
   const reviseButton = document.getElementById("ncc-view-revise");
+  const actionsContainer = editButton.parentElement;
+  
+  let endorseButton = document.getElementById("ncc-view-endorse");
+  if (!endorseButton) {
+      endorseButton = document.createElement("button");
+      endorseButton.id = "ncc-view-endorse";
+      endorseButton.className = "ghost";
+      endorseButton.textContent = "Endorse";
+      actionsContainer.appendChild(endorseButton);
+  }
+
   const localDraft = (localDrafts || []).find((draft) => draft.id === item.id);
   const isDraft = item.status !== "published";
   
   const isSignedIn = !!state.signerPubkey;
-  // If draft has no author (legacy?), assume owner if signed in.
   const isOwner = isSignedIn && (item.author === state.signerPubkey || !item.author);
 
   const canEdit = isDraft && isSignedIn && isOwner && !!localDraft;
   const canRevise = !isDraft && isSignedIn;
+  const canEndorse = !isDraft && isSignedIn;
 
   editButton.style.display = canEdit ? "inline-flex" : "none";
   editButton.textContent = "Edit draft";
   editButton.setAttribute("aria-label", "Edit draft");
   
   reviseButton.style.display = canRevise ? "inline-flex" : "none";
+  endorseButton.style.display = canEndorse ? "inline-flex" : "none";
 
   editButton.onclick = async () => {
     if (!canEdit) return;
@@ -355,6 +367,11 @@ function setNccViewActions(item, localDrafts) {
     const draft = createRevisionDraft(item, localDrafts || []);
     if (!draft) return;
     showEditMode(draft);
+  };
+  
+  endorseButton.onclick = () => {
+      if (!canEndorse) return;
+      handleEndorse(item);
   };
 }
 
@@ -1021,6 +1038,51 @@ function handleRevise(id) {
   if (draft) showEditMode(draft);
 }
 
+function handleEndorse(item) {
+  if (!state.signerPubkey) {
+    showToast("Sign in to endorse.", "error");
+    return;
+  }
+  
+  const d = item.d;
+  const eventId = item.event_id;
+  
+  if (!d || !eventId) {
+    showToast("Cannot endorse a draft without an ID. Publish it first.", "error");
+    return;
+  }
+
+  switchView("endorsement");
+  
+  updateState({ 
+      currentDraft: { 
+          ...state.currentDraft, 
+          endorsement: {
+              ...(state.currentDraft.endorsement || {}),
+              d: stripNccNumber(d),
+              tags: {
+                  ...(state.currentDraft.endorsement?.tags || {}),
+                  endorses: eventId
+              }
+          }
+      } 
+  });
+  
+  renderForm("endorsement", state.currentDraft.endorsement, state, KINDS);
+  
+  const nccSelect = document.getElementById("endorse-ncc-select");
+  const eventSelect = document.getElementById("endorse-event-select");
+  if (nccSelect && eventSelect) {
+      nccSelect.value = d;
+      if (typeof nccSelect.onchange === 'function') {
+          nccSelect.onchange();
+          setTimeout(() => {
+              eventSelect.value = eventId;
+          }, 0);
+      }
+  }
+}
+
 async function refreshDashboard() {
   await renderDashboard(
     state,
@@ -1031,7 +1093,8 @@ async function refreshDashboard() {
     renderEndorsementDetailsPanel,
     withdrawDraft,
     handleEdit,
-    handleRevise
+    handleRevise,
+    handleEndorse
   );
 }
 
