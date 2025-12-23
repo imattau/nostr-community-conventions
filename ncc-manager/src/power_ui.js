@@ -755,6 +755,17 @@ function renderSettingsModal() {
                 </section>
 
                 <section class="p-modal-section">
+                    <h3>Display Settings</h3>
+                    <div class="p-field">
+                        <label>Theme</label>
+                        <select id="p-theme-select">
+                            <option value="power" ${_state.theme === "power" ? "selected" : ""}>Power (Default)</option>
+                            <option value="terminal" ${_state.theme === "terminal" ? "selected" : ""}>Terminal</option>
+                        </select>
+                    </div>
+                </section>
+
+                <section class="p-modal-section">
                     <h3>Signer Configuration</h3>
                     <div class="p-field">
                         <label>Signing Mode</label>
@@ -825,6 +836,14 @@ function renderSettingsModal() {
     };
 
     refreshRelays();
+
+    const themeSelect = document.getElementById("p-theme-select");
+    themeSelect.onchange = async () => {
+        const selectedTheme = themeSelect.value;
+        await actions.setConfig("theme", selectedTheme);
+        document.body.className = `mode-${selectedTheme}`;
+        _state.theme = selectedTheme; // Update local state for immediate feedback
+    };
 
     const addBtn = document.getElementById("p-add-relay");
     const relayInput = document.getElementById("p-new-relay");
