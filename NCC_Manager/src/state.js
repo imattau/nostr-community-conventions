@@ -20,11 +20,8 @@ export const KINDS = {
 
 // Centralized state object
 export const state = {
-  defaults: [],
-  signerMode: "nip07",
   nccOptions: [],
   nccDocs: [],
-  remoteBackups: [],
   relayStatus: null,
   endorsementCounts: new Map(),
   signerPubkey: null,
@@ -48,8 +45,19 @@ export const state = {
   selectedEndorsementTarget: "",
   selectedEndorsementLabel: "",
   persistedRelayEvents: new Set(),
+  remoteDrafts: [], // Renamed from remoteBackups
   FALLBACK_RELAYS: FALLBACK_RELAYS // Keep fallback relays here
 };
+
+export async function getRelays(getConfig) {
+  if (typeof getConfig !== "function") return [];
+  const defaultRelays = (await getConfig("default_relays", [])) || [];
+  const userRelays = (await getConfig("user_relays", [])) || [];
+  const normalized = [...userRelays, ...defaultRelays]
+    .map((relay) => (relay || "").trim())
+    .filter(Boolean);
+  return uniq(normalized);
+}
 
 // Function to update state (simple setter for now)
 export function updateState(newState) {

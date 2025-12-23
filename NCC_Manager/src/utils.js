@@ -156,3 +156,8 @@ export function buildNccOptions(events) {
         }))
     }));
 }
+
+export function isOnline() {
+  if (typeof window === "undefined") return true;
+  return navigator.onLine;
+}

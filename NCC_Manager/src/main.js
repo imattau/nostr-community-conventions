@@ -1,5 +1,12 @@
 import "./styles.css";
-import { saveDraft, listDrafts, deleteDraft, getDraft, setConfig, getConfig } from "./store.js";
+import {
+  saveDraft,
+  listDrafts,
+  deleteDraft,
+  getDraft,
+  setConfig,
+  getConfig
+} from "./store.js";
 import {
   createEventTemplate,
   payloadToDraft,
@@ -31,29 +38,31 @@ import {
   formatCacheAge,
   renderMarkdown,
   splitList,
-  uniq,
   nowSeconds,
   stripNccNumber,
   buildNccIdentifier,
   isNccIdentifier,
-  buildDraftIdentifier,
-  isDraftIdentifier,
-  stripDraftPrefix,
   eventTagValue,
   normalizeEventId,
   normalizeHexId,
   isNccDocument,
-  buildNccOptions
+  buildNccOptions,
+  buildDraftIdentifier,
+  isDraftIdentifier,
+  stripDraftPrefix,
+  isOnline
 } from "./utils.js";
 
 import {
   state,
   updateState,
   KINDS,
+  getRelays,
   buildRelayCacheKey,
   readCachedNcc,
   writeCachedNcc
 } from "./state.js";
+
 
 const FALLBACK_RELAYS = [
   "wss://relay.damus.io",
@@ -72,7 +81,7 @@ async function refreshSignerProfile() {
     return;
   }
   try {
-    const relays = await getRelays();
+    const relays = await getRelays(getConfig);
     const targets = relays.length ? relays : FALLBACK_RELAYS;
     if (!targets.length) return;
     updateState({ signerProfile: await fetchProfile(state.signerPubkey, targets) });
@@ -193,11 +202,11 @@ async function fetchDefaults() {
     const data = await res.json();
     updateState({ defaults: data.relays || [] });
     await setConfig("default_relays", state.defaults);
-    renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
+    renderRelays(state.defaults, (await getConfig("user_relays", [])), setConfig);
   } catch (error) {
     updateState({ defaults: FALLBACK_RELAYS });
     await setConfig("default_relays", state.defaults);
-    renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
+    renderRelays(state.defaults, (await getConfig("user_relays", [])), setConfig);
     showToast("Using fallback default relays (server unavailable).", "error");
   }
 }
@@ -210,6 +219,7 @@ async function loadConfig() {
   modeSelect.value = state.signerMode;
   updateSignerStatus();
 }
+
 
 // --- NCC View and Edit Functions ---
 function buildTagsMapFromEvent(tags) {
@@ -258,8 +268,12 @@ function openNccView(item, localDrafts) {
 
   titleEl.textContent = `${item.d.toUpperCase()} · ${item.title}`;
   metaEl.textContent = item.event_id ? `Event ${item.event_id}` : "Draft (not published)";
+  
+  const statusClass = `status-${(item.status || "draft").toLowerCase()}`;
+  const statusLabel = (item.status || "DRAFT").toUpperCase();
+
   statsEl.innerHTML = `
-    <span class="badge status-${esc(item.status).toLowerCase()}">${esc(item.status.toUpperCase())}</span>
+    <span class="badge ${statusClass}">${esc(statusLabel)}</span>
     <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
     <span>Source: ${item.source}</span>
   `;
@@ -649,21 +663,11 @@ function getEndorsementTargets(event) {
   return targets;
 }
 
-function isOnline() {
-  if (typeof window === "undefined") return true;
-  return navigator.onLine;
-}
-
-async function getRelays() {
-  const custom = (await getConfig("user_relays", [])) || [];
-  return uniq([...state.defaults, ...custom]);
-}
-
 async function refreshEndorsementHelpers(forceRefresh = false) {
   const helper = document.getElementById("endorse-helper-text");
   if (helper) helper.textContent = "Loading NCC documents from relays...";
   try {
-    const relays = await getRelays();
+    const relays = await getRelays(getConfig);
     if (!relays.length) {
       if (helper) helper.textContent = "No relays configured. Add relays in Settings.";
       return;
@@ -715,7 +719,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     updateState({
       nccOptions: buildNccOptions(filtered),
       nccDocs: filtered,
-      remoteBackups: backups,
+      remoteDrafts: backups, // Populating the renamed state property
       relayStatus: {
         relays: relays.length,
         events: filtered.length,
@@ -970,7 +974,7 @@ async function publishDraft(draft, kind) {
   try {
     const validationError = validateDraft(draft, kind);
     if (validationError) throw new Error(validationError);
-    const relays = await getRelays();
+    const relays = await getRelays(getConfig);
     if (!relays.length) throw new Error("No relays configured");
     const signerMode = state.signerMode;
     const nsec = sessionStorage.getItem("ncc-manager-nsec");
@@ -1029,9 +1033,10 @@ async function publishDraft(draft, kind) {
   }
 }
 
-async function backupDraft(draft, kind) {
+// Renamed from backupDraft
+async function saveDraftToRelays(draft, kind) {
   try {
-    if (!draft.d) throw new Error("Draft must have an identifier (d tag) before backing up.");
+    if (!draft.d) throw new Error("Draft must have an identifier (d tag) before saving to relays.");
     
     // We don't run full validation because drafts can be incomplete.
     
@@ -1043,11 +1048,11 @@ async function backupDraft(draft, kind) {
 
     // Create a backup clone
     const backupD = buildDraftIdentifier(draft.d);
+    // Ensure status is "draft"
     const backupDraftPayload = { ...draft, d: backupD, status: "draft" };
     
     // Ensure status tag is present
     if (!backupDraftPayload.tags) backupDraftPayload.tags = {};
-    // We treat this as a standard event template creation but with overridden tags in the builder
     
     // Manually constructing the template to ensure we don't mess up the original draft object
     const template = createEventTemplate(backupDraftPayload);
@@ -1059,10 +1064,10 @@ async function backupDraft(draft, kind) {
     const result = await publishEvent(relays, event);
 
     showToast(
-      `Backup saved to ${result.accepted}/${result.total} relays.`
+      `Draft saved to ${result.accepted}/${result.total} relays.`
     );
   } catch (error) {
-    showToast(`Backup failed: ${error.message}`, "error");
+    showToast(`Save to relay failed: ${error.message}`, "error");
   }
 }
 
@@ -1098,23 +1103,11 @@ async function verifyDraft(draft) {
     return;
   }
   try {
-    const relays = await getRelays();
+    const relays = await getRelays(getConfig);
     const found = await verifyEvent(relays, draft.event_id);
     showToast(found ? "Event found on relays." : "Event not found yet.");
   } catch (error) {
     showToast("Verification failed.", "error");
-  }
-}
-
-async function fetchEndorsementCounts() {
-  try {
-    const res = await fetch("/api/endorsements/counts");
-    if (!res.ok) throw new Error("Server storage unavailable");
-    const data = await res.json();
-    return data.counts || {};
-  } catch (error) {
-    console.warn("Failed to fetch endorsement counts from server, returning empty object", error);
-    return {};
   }
 }
 
@@ -1470,33 +1463,22 @@ async function init() {
     if (!(target instanceof HTMLElement)) return;
     const action = target.dataset.action;
 
-    if (action === "backup") {
+    if (action === "save-remote") {
       const kind = target.dataset.kind;
       if (!kind) return;
-      // Get the current form data to ensure we backup what's on screen, not just what's in state
-      // Actually, handleFormSubmit saves to state. But backup button isn't a submit.
-      // We should probably save the draft first? Or just grab form data?
-      // Simpler: The user should save (to local) then backup.
-      // But we can just grab state.currentDraft[kind] which is updated on edits? 
-      // No, state.currentDraft is updated on SAVE.
-      // If user types and hits backup, they might backup stale data.
-      // FORCE SAVE first? Or warn?
-      // Let's assume user has saved or we risk complex form parsing logic duplication.
-      // We'll warn if no draft exists.
-      
       const draft = state.currentDraft[kind];
       if (!draft) {
         showToast("Please save the draft locally first.", "error");
         return;
       }
       target.disabled = true;
-      await backupDraft(draft, kind);
+      await saveDraftToRelays(draft, kind);
       target.disabled = false;
     }
 
-    if (action === "import-backup") {
+    if (action === "import-remote") {
       const id = target.dataset.id;
-      const backup = state.remoteBackups.find((b) => b.id === id);
+      const backup = state.remoteDrafts.find((b) => b.id === id);
       if (backup) {
         const draft = payloadToDraft(backup);
         draft.d = stripDraftPrefix(draft.d);
@@ -1506,7 +1488,7 @@ async function init() {
         draft.event_id = "";
         
         await saveDraft(draft);
-        showToast("Backup imported as local draft.");
+        showToast("Remote draft imported as local draft.");
         
         const kindKey = Object.keys(KINDS).find((k) => KINDS[k] === draft.kind);
         if (kindKey) {
