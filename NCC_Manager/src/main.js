@@ -99,7 +99,7 @@ async function switchShell(mode) {
   }
   
   if (mode === "power") {
-    powerCss.disabled = false;
+    if (powerCss) powerCss.disabled = false;
     document.body.classList.add("mode-power");
     classic.hidden = true;
     power.hidden = false;
@@ -107,27 +107,33 @@ async function switchShell(mode) {
       initPowerShell(state, { 
         switchShell,
         saveItem: handlePowerSave,
-        publishDraft, // for later
-        withdrawDraft, // for later
-        openNewNcc // for later
+        publishDraft,
+        withdrawDraft,
+        openNewNcc,
+        createRevisionDraft
       });
     } catch (e) {
       console.error("Failed to init PowerShell:", e);
     }
   } else {
     document.body.classList.remove("mode-power");
+    if (powerCss) powerCss.disabled = true;
     power.hidden = true;
     classic.hidden = false;
   }
 }
 
-async function handlePowerSave(id, content) {
-  let item = (state.nccLocalDrafts || []).find(d => d.id === id);
+async function handlePowerSave(id, content, fullDraft = null) {
+  let item = fullDraft;
+  
   if (!item) {
-    const relayItem = (state.nccDocs || []).find(d => d.id === id);
-    if (relayItem) {
-      item = toDraftFromRelay(relayItem);
-      item.id = id; 
+    item = (state.nccLocalDrafts || []).find(d => d.id === id);
+    if (!item) {
+      const relayItem = (state.nccDocs || []).find(d => d.id === id);
+      if (relayItem) {
+        item = toDraftFromRelay(relayItem);
+        item.id = id; 
+      }
     }
   }
   
@@ -141,27 +147,21 @@ async function handlePowerSave(id, content) {
   
   await saveDraft(item);
   
-  if (state.signerPubkey) {
+  if (state.signerPubkey && item.status === "draft") {
     try {
       const broadcast = await broadcastDraftToRelays(item);
       if (broadcast) {
         item.event_id = broadcast.eventId;
         await saveDraft(item);
-        showToast("Saved and pushed to relays.");
-      } else {
-        showToast("Saved locally (relay push failed).", "warning");
       }
     } catch (e) {
-      showToast("Saved locally. Relay push failed.", "warning");
+      console.warn("Auto-push failed during power save", e);
     }
-  } else {
-    showToast("Saved locally.");
   }
   
   const nccDrafts = await listDrafts(KINDS.ncc);
   updateState({ nccLocalDrafts: nccDrafts });
   refreshDashboard();
-  initPowerShell(state, { switchShell, saveItem: handlePowerSave });
 }
 
 async function refreshSignerProfile() {
