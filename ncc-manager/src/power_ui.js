@@ -184,11 +184,49 @@ function setupGlobalListeners() {
             return;
         }
 
-        // 5. Command Palette Overlay Click (Close)
-        const overlay = document.getElementById("p-palette-overlay");
-        if (target === overlay) {
-            log("Handling Palette overlay close");
-            toggleCommandPalette(false);
+        // 6. Inspector Actions (Delegated)
+        const inspectorBtn = target.closest("#p-inspector-actions button");
+        if (inspectorBtn && inspectorBtn.dataset.action) {
+            const action = inspectorBtn.dataset.action;
+            const id = inspectorBtn.dataset.id || currentItemId;
+            log("Handling Inspector action:", action, id);
+            
+            if (action === "delete-item") {
+                actions.deleteItem?.(id);
+            } else if (action === "withdraw-item") {
+                actions.withdrawDraft?.(id);
+            } else if (action === "edit-item") {
+                isEditMode = true;
+                const item = findItem(id);
+                if (item) {
+                    renderContent(item);
+                    renderInspector(item);
+                }
+            } else if (action === "publish-item") {
+                const item = findItem(id);
+                if (item && confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
+                    actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+                }
+            } else if (action === "revise-item") {
+                handleReviseAction(id);
+            } else if (action === "open-item") {
+                isEditMode = true;
+                const item = findItem(id);
+                if (item) {
+                    renderContent(item);
+                    renderInspector(item);
+                }
+            } else if (action === "save-item") {
+                handleSaveShortcut();
+            } else if (action === "cancel-item") {
+                isEditMode = false;
+                const found = findItem(currentItemId);
+                if (found) {
+                    renderContent(found);
+                    renderInspector(found);
+                    renderExplorer();
+                }
+            }
             return;
         }
     });
@@ -759,21 +797,15 @@ function renderInspector(item) {
             const editBtn = document.createElement("button");
             editBtn.className = "p-btn-accent";
             editBtn.textContent = "Edit";
-            editBtn.onclick = () => {
-                isEditMode = true;
-                renderContent(item);
-                renderInspector(item);
-            };
+            editBtn.dataset.action = "edit-item";
+            editBtn.dataset.id = item.id;
             actionsContainer.appendChild(editBtn);
 
             const publishBtn = document.createElement("button");
             publishBtn.className = "p-btn-ghost";
             publishBtn.textContent = "Publish";
-            publishBtn.onclick = () => {
-                if (confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
-                    actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
-                }
-            };
+            publishBtn.dataset.action = "publish-item";
+            publishBtn.dataset.id = item.id;
             actionsContainer.appendChild(publishBtn);
 
             // DELETE or WITHDRAW logic for local
@@ -782,14 +814,16 @@ function renderInspector(item) {
                 deleteBtn.className = "p-btn-ghost";
                 deleteBtn.style.color = "var(--danger)";
                 deleteBtn.textContent = "Delete";
-                deleteBtn.onclick = () => actions.deleteItem?.(item.id);
+                deleteBtn.dataset.action = "delete-item";
+                deleteBtn.dataset.id = item.id;
                 actionsContainer.appendChild(deleteBtn);
             } else if (item.status !== "withdrawn") {
                 const withdrawBtn = document.createElement("button");
                 withdrawBtn.className = "p-btn-ghost";
                 withdrawBtn.style.color = "var(--danger)";
                 withdrawBtn.textContent = "Withdraw";
-                withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
+                withdrawBtn.dataset.action = "withdraw-item";
+                withdrawBtn.dataset.id = item.id;
                 actionsContainer.appendChild(withdrawBtn);
             }
         } else {
@@ -797,26 +831,15 @@ function renderInspector(item) {
             const reviseBtn = document.createElement("button");
             reviseBtn.className = "p-btn-accent";
             reviseBtn.textContent = "Revise";
-            reviseBtn.onclick = async () => {
-                const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
-                if (draft) {
-                    await actions.saveItem?.(draft.id, draft.content, draft);
-                    openItem(draft.id);
-                    isEditMode = true;
-                    renderContent(draft);
-                    renderInspector(draft);
-                }
-            };
+            reviseBtn.dataset.action = "revise-item";
+            reviseBtn.dataset.id = item.id;
             actionsContainer.appendChild(reviseBtn);
 
             const openBtn = document.createElement("button");
             openBtn.className = "p-btn-ghost";
             openBtn.textContent = "Open it";
-            openBtn.onclick = () => {
-                isEditMode = true;
-                renderContent(item);
-                renderInspector(item);
-            };
+            openBtn.dataset.action = "open-item";
+            openBtn.dataset.id = item.id;
             actionsContainer.appendChild(openBtn);
 
             if (actions.withdrawDraft && item.status !== "withdrawn") {
@@ -824,7 +847,8 @@ function renderInspector(item) {
                 withdrawBtn.className = "p-btn-ghost";
                 withdrawBtn.style.color = "var(--danger)";
                 withdrawBtn.textContent = "Withdraw";
-                withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
+                withdrawBtn.dataset.action = "withdraw-item";
+                withdrawBtn.dataset.id = item.id;
                 actionsContainer.appendChild(withdrawBtn);
             }
         }
@@ -834,7 +858,7 @@ function renderInspector(item) {
             const saveBtn = document.createElement("button");
             saveBtn.className = "p-btn-accent";
             saveBtn.textContent = "Save (Ctrl+S)";
-            saveBtn.onclick = handleSaveShortcut;
+            saveBtn.dataset.action = "save-item";
             actionsContainer.appendChild(saveBtn);
         } else {
             const saveMsg = document.createElement("span");
@@ -847,16 +871,22 @@ function renderInspector(item) {
         const cancelBtn = document.createElement("button");
         cancelBtn.className = "p-btn-ghost";
         cancelBtn.textContent = "Cancel";
-        cancelBtn.onclick = () => {
-            isEditMode = false;
-            const found = findItem(currentItemId);
-            if (found) {
-                renderContent(found);
-                renderInspector(found);
-                renderExplorer();
-            }
-        };
+        cancelBtn.dataset.action = "cancel-item";
         actionsContainer.appendChild(cancelBtn);
+    }
+}
+
+async function handleReviseAction(id) {
+    log("Handling Revise action for id:", id);
+    const item = findItem(id);
+    if (!item) return;
+    const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
+    if (draft) {
+        await actions.saveItem?.(draft.id, draft.content, draft);
+        openItem(draft.id);
+        isEditMode = true;
+        renderContent(draft);
+        renderInspector(draft);
     }
 }
 
