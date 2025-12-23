@@ -223,6 +223,7 @@ async function handlePowerSave(id, content, fullDraft = null) {
     }
   }
   
+  state.pendingDrafts?.delete(id);
   await updateAllDrafts();
   refreshUI();
   
