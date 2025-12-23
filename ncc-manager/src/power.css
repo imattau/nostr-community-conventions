@@ -584,3 +584,45 @@ body.mode-power {
 .p-palette-title { font-size: 0.95rem; font-weight: 500; }
 .p-palette-id { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
 .p-palette-kb { font-size: 0.7rem; color: var(--muted); background: var(--border); padding: 2px 6px; border-radius: 4px; }
+
+/* 10. Responsive Design */
+.p-mobile-nav {
+    display: none; /* Hidden by default */
+}
+
+@media (max-width: 900px) {
+    .p-main {
+        grid-template-columns: 100%; /* Single column layout */
+    }
+
+    .p-explorer, .p-inspector {
+        position: fixed;
+        top: var(--topbar-h);
+        bottom: var(--status-h);
+        width: 300px;
+        z-index: 200;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+        border-right: 1px solid var(--border);
+        background: var(--bg);
+    }
+
+    .p-inspector {
+        right: 0;
+        left: auto;
+        transform: translateX(100%);
+    }
+
+    .p-explorer.is-open, .p-inspector.is-open {
+        transform: translateX(0);
+    }
+    
+    .p-top-center, .p-top-right .p-signer-wrapper {
+        display: none; /* Hide search and signer on mobile */
+    }
+
+    .p-mobile-nav {
+        display: flex;
+        gap: 8px;
+    }
+}

@@ -55,6 +55,9 @@ export function initPowerShell(appState, appActions, appVersion) {
           <span class="p-accent">></span> NCC Console
           <span class="p-version">${_appVersion}</span>
         </div>
+        <div class="p-mobile-nav">
+            <button class="p-btn-ghost" data-action="toggle-explorer">Explorer</button>
+        </div>
         <div class="p-top-center">
           <div class="p-search-wrapper">
             <span class="p-search-icon">></span>
@@ -63,6 +66,9 @@ export function initPowerShell(appState, appActions, appVersion) {
           </div>
         </div>
           <div class="p-top-right">
+             <div class="p-mobile-nav" style="padding-right: 8px">
+                <button class="p-btn-ghost" data-action="toggle-inspector">Inspector</button>
+             </div>
              <div id="p-top-signer" class="p-signer-status"></div>
           </div>
         </header>
@@ -289,11 +295,29 @@ async function handleInspectorAction(action, id) {
 }
 
 function handleGlobalAction(action, target) {
+    const explorerPane = document.querySelector(".p-explorer");
+    const inspectorPane = document.querySelector(".p-inspector");
+    const contentPane = document.querySelector(".p-content");
+
     if (target.closest(".p-dropdown")) {
         target.closest(".p-dropdown").classList.remove("is-open");
     }
 
-    if (action === "sign-in") {
+    const closePanes = () => {
+        explorerPane?.classList.remove("is-open");
+        inspectorPane?.classList.remove("is-open");
+        document.getElementById("p-content-overlay")?.remove();
+    };
+
+    if (action === "toggle-explorer") {
+        closePanes();
+        explorerPane?.classList.toggle("is-open");
+        createContentOverlay(closePanes);
+    } else if (action === "toggle-inspector") {
+        closePanes();
+        inspectorPane?.classList.toggle("is-open");
+        createContentOverlay(closePanes);
+    } else if (action === "sign-in") {
         actions.promptSigner?.();
     } else if (action === "sign-out") {
         actions.signOut?.();
@@ -303,6 +327,24 @@ function handleGlobalAction(action, target) {
         const modal = target.closest(".p-modal-overlay");
         if (modal) modal.remove();
     }
+}
+
+function createContentOverlay(onClick) {
+    let overlay = document.getElementById("p-content-overlay");
+    if (overlay) return;
+    
+    overlay = document.createElement("div");
+    overlay.id = "p-content-overlay";
+    overlay.style.position = "fixed";
+    overlay.style.top = "var(--topbar-h)";
+    overlay.style.left = "0";
+    overlay.style.right = "0";
+    overlay.style.bottom = "var(--status-h)";
+    overlay.style.background = "rgba(0,0,0,0.5)";
+    overlay.style.zIndex = "199";
+    
+    document.querySelector(".p-main").appendChild(overlay);
+    overlay.addEventListener("click", onClick);
 }
 
 function refreshUI() {
