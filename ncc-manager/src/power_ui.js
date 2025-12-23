@@ -131,7 +131,7 @@ function setupGlobalListeners() {
 
     log("Setting up global listeners");
 
-    document.addEventListener("click", (e) => {
+    document.addEventListener("click", async (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
 
@@ -221,12 +221,12 @@ function setupGlobalListeners() {
                     const tempDraftId = currentItemId;
                     revisionSourceId = null;
                     
-                    // If we actually created a draft in DB, we should probably delete it
-                    // but findItem relies on state. Let's just switch back first.
-                    openItem(sourceId);
+                    // Switch active pointer back first
+                    currentItemId = sourceId;
                     
-                    // Cleanup the temporary draft from storage
-                    actions.deleteItemSilent?.(tempDraftId);
+                    // Cleanup the temporary draft. This triggers global refreshUI.
+                    // Since currentItemId is now sourceId, the re-init will render correctly.
+                    await actions.deleteItemSilent?.(tempDraftId);
                 } else {
                     const found = findItem(currentItemId);
                     if (found) {
@@ -685,6 +685,11 @@ function toggleBranch(id) {
 
 function determineStatus(item, type) {
     if (item && item.status) return item.status.toLowerCase();
+    // Fallback: If we are viewing an item in this branch, use its status
+    if (currentItemId) {
+        const active = findItem(currentItemId);
+        if (active && active.d === item?.d) return active.status.toLowerCase();
+    }
     return type === "published" ? "published" : "draft";
 }
 
@@ -954,18 +959,21 @@ async function handleReviseAction(id) {
         draft.status = "draft";
         draft.source = "local";
         
-        log("Revision draft created:", draft.id, "superseding:", item.event_id);
+        log("Revision draft created:", draft.id, "superseding:", item.event_id || item.id);
         
-        // Save it locally immediately so it exists in state
-        await actions.saveItem?.(draft.id, draft.content, draft);
-        
-        // Transition to the new draft in edit mode
+        // IMPORTANT: Update active pointers BEFORE the save action
+        // This ensures that when saveItem triggers a global refreshUI, 
+        // PowerShell already knows it's looking at the new draft.
         currentItemId = draft.id;
         isEditMode = true;
+
+        // Save it locally. This updates DB/State and triggers global UI refresh.
+        await actions.saveItem?.(draft.id, draft.content, draft);
         
+        // Final local sync to ensure everything is rendered
+        renderExplorer();
         renderContent(draft);
         renderInspector(draft);
-        renderExplorer();
     }
 }
 
