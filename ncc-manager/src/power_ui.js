@@ -40,12 +40,14 @@ function formatFullDate(value) {
 
 // Initialization
 export function initPowerShell(state, appActions) {
+  console.log("PowerUI: Initializing with state:", state);
   _state = state;
   actions = appActions || {};
   const shell = document.getElementById("shell-power");
   if (!shell) return;
 
   if (!shell.innerHTML.includes("p-topbar")) {
+    console.log("PowerUI: Rendering base shell structure");
     shell.innerHTML = `
       <header class="p-topbar">
         <div class="p-brand" role="button">
@@ -111,32 +113,50 @@ export function initPowerShell(state, appActions) {
 }
 
 function setupGlobalListeners() {
-    // Use delegation on the document for maximum stability
+    if (listenersSetup) return;
+    listenersSetup = true;
+
+    console.log("PowerUI: Setting up global listeners");
+
     document.addEventListener("click", (e) => {
         const shell = document.getElementById("shell-power");
-        if (!shell || shell.hidden) return;
+        if (!shell || shell.hidden || shell.style.display === "none") return;
 
+        // Trace the click for debugging
+        const target = e.target;
+        
         // 1. Explorer Item Click
-        const navItem = e.target.closest(".p-nav-item");
+        const navItem = target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
+            console.log("PowerUI: Explorer item click:", navItem.dataset.id);
             e.preventDefault();
             e.stopPropagation();
-            openItem(navItem.dataset.id);
+            try {
+                openItem(navItem.dataset.id);
+            } catch (err) {
+                console.error("PowerUI: Failed to open item:", err);
+            }
             return;
         }
 
         // 2. Explorer Branch Toggle
-        const branch = e.target.closest("[data-branch]");
-        if (branch) {
+        const branchHeader = target.closest(".p-nav-branch-header");
+        if (branchHeader && branchHeader.dataset.branch) {
+            console.log("PowerUI: Branch toggle click:", branchHeader.dataset.branch);
             e.preventDefault();
             e.stopPropagation();
-            toggleBranch(branch.dataset.branch);
+            try {
+                toggleBranch(branchHeader.dataset.branch);
+            } catch (err) {
+                console.error("PowerUI: Failed to toggle branch:", err);
+            }
             return;
         }
 
         // 3. Brand Click (Reset)
-        const brand = e.target.closest(".p-brand");
+        const brand = target.closest(".p-brand");
         if (brand) {
+            console.log("PowerUI: Brand click, resetting view");
             currentItemId = null;
             isEditMode = false;
             renderEmptyState();
@@ -146,15 +166,17 @@ function setupGlobalListeners() {
         }
 
         // 4. Command Palette Item Click
-        const paletteItem = e.target.closest(".p-palette-item");
+        const paletteItem = target.closest(".p-palette-item");
         if (paletteItem && paletteItem.dataset.cmd) {
+            console.log("PowerUI: Palette command click:", paletteItem.dataset.cmd);
             executeCommand(paletteItem.dataset.cmd);
             return;
         }
 
         // 5. Command Palette Overlay Click (Close)
         const overlay = document.getElementById("p-palette-overlay");
-        if (e.target === overlay) {
+        if (target === overlay) {
+            console.log("PowerUI: Palette overlay background click");
             toggleCommandPalette(false);
             return;
         }
@@ -173,6 +195,8 @@ function setupGlobalListeners() {
 
     // Inspector input syncing (Delegation)
     document.addEventListener("input", (e) => {
+        const shell = document.getElementById("shell-power");
+        if (!shell || shell.hidden || shell.style.display === "none") return;
         if (!isEditMode || !currentItemId) return;
         
         const target = e.target;
