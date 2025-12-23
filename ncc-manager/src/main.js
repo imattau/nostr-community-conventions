@@ -40,7 +40,8 @@ import {
   stripDraftPrefix,
   isOnline,
   showToast,
-  incrementVersion
+  incrementVersion,
+  suggestNextNccNumber
 } from "./utils.js";
 
 import {
@@ -422,12 +423,13 @@ function openNewNcc() {
     showToast("You must be signed in to create an NCC.", "error");
     return;
   }
+  const nextNumber = suggestNextNccNumber(state.nccDocs || []);
   const draft = {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
     status: "draft",
     author_pubkey: state.signerPubkey,
-    d: "",
+    d: buildNccIdentifier(nextNumber),
     title: "",
     content: "",
     published_at: nowSeconds(),
