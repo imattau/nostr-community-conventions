@@ -266,10 +266,10 @@ body.mode-power {
 .p-nav-item:hover { background: var(--accent-soft); }
 .p-nav-item.active { background: var(--accent-soft); border-left-color: var(--accent); }
 
-.p-nav-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
-.p-nav-id { font-weight: 600; font-size: 0.8rem; letter-spacing: 0.02em; }
-.p-nav-label { font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.p-nav-date { font-size: 0.7rem; color: var(--muted); opacity: 0.6; margin-top: 2px; }
+.p-nav-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; pointer-events: none; }
+.p-nav-id { font-weight: 600; font-size: 0.8rem; letter-spacing: 0.02em; pointer-events: none; }
+.p-nav-label { font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.p-nav-date { font-size: 0.7rem; color: var(--muted); opacity: 0.6; margin-top: 2px; pointer-events: none; }
 
 /* 6. Content Area Styling */
 .p-empty-state {
@@ -520,6 +520,49 @@ body.mode-power {
   gap: 8px;
 }
 .p-settings-input-group input { flex: 1; }
+
+/* Context Menu */
+.p-context-menu {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  z-index: 20000;
+  min-width: 180px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.p-context-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 8px 12px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.p-context-item:hover { background: var(--accent-soft); color: var(--accent); }
+.p-context-divider { height: 1px; background: var(--border); margin: 4px; }
+
+/* Modal Form Styles */
+.p-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.p-modal-footer {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
 
 /* Command Palette */
 .p-palette-overlay {
