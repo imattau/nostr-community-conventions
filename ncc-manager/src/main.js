@@ -199,9 +199,9 @@ async function handlePowerSave(id, content, fullDraft = null) {
     try {
       const broadcast = await broadcastDraftToRelays(item);
       if (broadcast) {
-        // IMPORTANT: Update the item with the new event_id
-        item.event_id = broadcast.eventId;
-        item.raw_event = broadcast.result; // optionally keep track of result
+        // We broadcast for backup purposes, but we DO NOT update item.event_id here.
+        // The event_id property is reserved for the 'live' published ID.
+        // This prevents the draft from constantly changing its ID in the UI.
         await saveDraft(item);
       }
     } catch (e) {
