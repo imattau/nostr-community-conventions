@@ -795,10 +795,15 @@ function renderContent(item) {
             syncGutter(textarea);
         };
         textarea.onscroll = () => {
-            document.getElementById("p-gutter").scrollTop = textarea.scrollTop;
+            const gutter = document.getElementById("p-gutter");
+            if (gutter) gutter.scrollTop = textarea.scrollTop;
         };
-        syncGutter(textarea);
-        textarea.focus();
+
+        // Defer focus and initial sync to prevent forced reflow violations
+        requestAnimationFrame(() => {
+            syncGutter(textarea);
+            textarea.focus();
+        });
     } else {
         const view = document.createElement("article");
         view.className = "p-read-view";
@@ -820,8 +825,12 @@ function renderContent(item) {
 function syncGutter(textarea) {
     const gutter = document.getElementById("p-gutter");
     if (!gutter) return;
-    const lines = textarea.value.split("\n").length;
-    gutter.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join("<br>");
+    const lineCount = textarea.value.split("\n").length;
+    let gutterHtml = "";
+    for (let i = 1; i <= lineCount; i++) {
+        gutterHtml += i + "<br>";
+    }
+    gutter.innerHTML = gutterHtml;
 }
 
 function renderInspector(item) {
