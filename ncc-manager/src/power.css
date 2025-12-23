@@ -218,6 +218,30 @@ body.mode-power {
   font-size: 0.9rem;
   text-align: left;
 }
+.p-nav-branch-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.p-type-tag {
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.p-muted-type {
+  font-size: 0.65rem;
+  color: var(--muted);
+  font-weight: normal;
+  text-transform: uppercase;
+}
 .p-nav-branch-body { display: none; padding-left: 16px; }
 .p-nav-branch-body.is-open { display: block; }
 
