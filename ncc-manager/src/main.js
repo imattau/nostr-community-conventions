@@ -18,6 +18,7 @@ import {
   fetchAuthorEndorsements,
   fetchProfile
 } from "./nostr.js";
+import pkg from "../package.json";
 
 import {
   esc,
@@ -53,6 +54,10 @@ import {
 
 import { initPowerShell } from "./power_ui.js";
 
+const APP_VERSION = (() => {
+  const version = pkg?.version || "0.0.0";
+  return version.startsWith("v") ? version : `v${version}`;
+})();
 
 const FALLBACK_RELAYS = [
   "wss://relay.damus.io",
@@ -94,21 +99,25 @@ async function initShell() {
   
   await updateAllDrafts();
   try {
-    initPowerShell(state, { 
-      saveItem: handlePowerSave,
-      publishDraft,
-      withdrawDraft,
-      deleteItem: handlePowerDelete,
-      deleteItemSilent: handlePowerDeleteSilent,
-      openNewNcc,
-      createRevisionDraft,
-      promptSigner: promptSignerConnection,
-      signOut: signOutSigner,
-      getConfig,
-      setConfig,
-      updateSignerConfig: handleUpdateSignerConfig,
-      exportAll: handleExportAllDrafts
-    });
+    initPowerShell(
+      state,
+      {
+        saveItem: handlePowerSave,
+        publishDraft,
+        withdrawDraft,
+        deleteItem: handlePowerDelete,
+        deleteItemSilent: handlePowerDeleteSilent,
+        openNewNcc,
+        createRevisionDraft,
+        promptSigner: promptSignerConnection,
+        signOut: signOutSigner,
+        getConfig,
+        setConfig,
+        updateSignerConfig: handleUpdateSignerConfig,
+        exportAll: handleExportAllDrafts
+      },
+      APP_VERSION
+    );
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
   }
@@ -510,7 +519,9 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
 }
 
 function refreshUI() {
-  initPowerShell(state, {
+  initPowerShell(
+    state,
+    {
       saveItem: handlePowerSave,
       publishDraft,
       withdrawDraft,
@@ -524,7 +535,9 @@ function refreshUI() {
       setConfig,
       updateSignerConfig: handleUpdateSignerConfig,
       exportAll: handleExportAllDrafts
-  });
+    },
+    APP_VERSION
+  );
 }
 
 async function withdrawDraft(id) {

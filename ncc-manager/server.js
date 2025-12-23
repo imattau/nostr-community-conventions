@@ -1,17 +1,22 @@
 import express from "express";
-import path from "path";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
+  upsertDraft,
   deleteDraft,
-  getDbPath,
   getDraft,
-  listDraftData,
   listDrafts,
-  upsertDraft
+  listDraftData,
+  getDbPath
 } from "./src/server_store.js";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(__filename);
+
+// Load version from package.json
+const pkg = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8"));
+const APP_VERSION = pkg.version;
 
 const app = express();
 const PORT = Number(process.env.PORT || 5179);
@@ -40,7 +45,7 @@ app.get("/api/defaults", (req, res) => {
     },
     app: {
       name: "NCC Manager",
-      version: "0.2.0"
+      version: APP_VERSION
     }
   });
 });
@@ -98,7 +103,7 @@ app.delete("/api/drafts/:id", async (req, res) => {
   }
 });
 
-const distPath = path.join(__dirname, "dist");
+const distPath = join(__dirname, "dist");
 app.use(express.static(distPath));
 
 function normalizeEventId(value) {
@@ -166,7 +171,7 @@ app.get("/api/endorsements/counts", async (req, res) => {
 });
 
 app.get("*", (req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
+  res.sendFile(join(distPath, "index.html"));
 });
 
 app.listen(PORT, HOST, () => {
