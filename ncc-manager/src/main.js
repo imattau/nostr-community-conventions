@@ -57,6 +57,7 @@ import {
 
 import { initPowerShell, focusItem } from "./power_ui.js";
 import { nsrService } from "./nsr_service.js";
+import { validateDraftForPublish } from "./validation.js";
 
 const APP_VERSION = (() => {
   const version = pkg?.version || "0.0.0";
@@ -618,7 +619,7 @@ async function withdrawDraft(id) {
 
 async function publishDraft(draft, kind) {
   try {
-    const validationError = validateDraft(draft, kind);
+    const validationError = validateDraftForPublish(draft);
     if (validationError) throw new Error(validationError);
     const relays = await getRelays(getConfig);
     if (!relays.length) throw new Error("No relays configured");
@@ -718,15 +719,6 @@ async function broadcastDraftToRelays(draft) {
   const result = await publishEvent(relays, event);
   
   return { eventId: event.id, result };
-}
-
-function validateDraft(draft, kind) {
-  if (!draft.d) return "NCC number is required.";
-  if (kind === "ncc") {
-    if (!draft.title) return "Title is required.";
-    if (!draft.content) return "Content is required.";
-  }
-  return "";
 }
 
 async function init() {
