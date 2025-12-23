@@ -237,19 +237,53 @@ function renderExplorer() {
 
     const query = searchQuery.trim();
     
-    // Pool all items
-    const allItemsMap = new Map();
-    [
-        ...(_state.nccLocalDrafts || []),
-        ...(_state.nsrLocalDrafts || []),
-        ...(_state.endorsementLocalDrafts || []),
-        ...(_state.supportingLocalDrafts || []),
-        ...(_state.nccDocs || [])
-    ].forEach(item => {
-        if (item && item.id) allItemsMap.set(item.id, item);
-    });
+    // Pool all items with conceptual de-duplication
+    // Conceptual Identity = event_id if it exists, otherwise internal id
+    const conceptualMap = new Map();
+    
+    const addToPool = (items, sourceLabel) => {
+        (items || []).forEach(rawItem => {
+            if (!rawItem) return;
+            
+            // Convert raw Nostr events if necessary (e.g. from nccDocs or remoteDrafts)
+            // But main.js usually already converted local drafts.
+            // Let's ensure we have a draft-like object.
+            let item = rawItem;
+            if (!item.d && rawItem.tags) {
+                // It looks like a raw event
+                item = payloadToDraft(rawItem);
+            }
 
-    const allItems = Array.from(allItemsMap.values());
+            const identity = item.event_id || item.id;
+            const existing = conceptualMap.get(identity);
+            
+            if (!existing) {
+                conceptualMap.set(identity, item);
+            } else {
+                // De-duplication logic:
+                // 1. Prefer items with source === "local" (might have unsaved changes)
+                // 2. Prefer items with newer updated_at/created_at
+                const existingTs = ensureTimestamp(existing.updated_at || existing.created_at) || 0;
+                const newTs = ensureTimestamp(item.updated_at || item.created_at) || 0;
+                
+                const isLocalBetter = item.source === "local" && existing.source !== "local";
+                const isNewerBetter = newTs > existingTs;
+                
+                if (isLocalBetter || (isNewerBetter && existing.source === item.source)) {
+                    conceptualMap.set(identity, item);
+                }
+            }
+        });
+    };
+
+    addToPool(_state.nccLocalDrafts, "local");
+    addToPool(_state.nsrLocalDrafts, "local");
+    addToPool(_state.endorsementLocalDrafts, "local");
+    addToPool(_state.supportingLocalDrafts, "local");
+    addToPool(_state.nccDocs, "relay");
+    addToPool(_state.remoteDrafts, "remote");
+
+    const allItems = Array.from(conceptualMap.values());
 
     // Partition based on user rules:
     // Published: items that have an eventid AND are marked status as published
