@@ -264,21 +264,25 @@ export async function fetchEndorsements(relays, eventIds) {
   const uniqueIds = Array.from(new Set(eventIds.filter(Boolean)));
   if (!uniqueIds.length) return [];
   const normalized = uniqueIds.map((id) => id.replace(/^event:/i, "").trim()).filter(Boolean);
-  const filters = [
-    {
+  
+  // Split into separate calls to be safe with all relay implementations
+  const [eventsE, eventsEndorses] = await Promise.all([
+    pool.querySync(relays, {
       kinds: [30052],
       "#e": normalized,
       limit: 1000
-    },
-    {
+    }, { maxWait: 4000 }),
+    pool.querySync(relays, {
       kinds: [30052],
       "#endorses": normalized,
       limit: 1000
-    }
-  ];
-  const events = await pool.querySync(relays, filters, { maxWait: 4000 });
+    }, { maxWait: 4000 })
+  ]);
+
   const dedup = new Map();
-  (events || []).forEach((event) => dedup.set(event.id, event));
+  [...(eventsE || []), ...(eventsEndorses || [])].forEach((event) => {
+      if (event && event.id) dedup.set(event.id, event);
+  });
   return Array.from(dedup.values());
 }
 
