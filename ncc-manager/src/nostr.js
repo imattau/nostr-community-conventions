@@ -102,9 +102,9 @@ export function payloadToDraft(payload) {
     d: tagMap.d?.[0] || "",
     title: tagMap.title?.[0] || "",
     content: payload.content || "",
-    status: tagMap.status?.[0] || (payload.event_id ? "published" : "draft"),
-    event_id: payload.event_id || "",
-    author_pubkey: payload.author_pubkey || "",
+    status: tagMap.status?.[0] || (payload.event_id || payload.id ? "published" : "draft"),
+    event_id: payload.event_id || payload.id || "",
+    author_pubkey: payload.author_pubkey || payload.pubkey || "",
     published_at: tagMap.published_at ? Number(tagMap.published_at[0]) : null,
     tags: {}
   };
