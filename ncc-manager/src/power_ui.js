@@ -868,13 +868,20 @@ async function handleSaveShortcut() {
     const content = editor.value;
     updateStatus("Saving...");
     try {
-        await actions.saveItem(currentItemId, content, item);
+        const updatedItem = await actions.saveItem(currentItemId, content, item);
         updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-        // Refresh local item content in our state if necessary
-        item.content = content;
+        
+        // Refresh local item content and event_id from the returned update
+        if (updatedItem) {
+            Object.assign(item, updatedItem);
+        } else {
+            item.content = content;
+        }
+        
         renderInspector(item);
         renderExplorer();
     } catch (e) {
         updateStatus("Save failed");
+        console.error("Save error:", e);
     }
 }
