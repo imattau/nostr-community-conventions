@@ -720,8 +720,22 @@ body.mode-power {
 
         padding: 8px 14px;
 
-        font-size: 0.9rem;
+                font-size: 0.9rem;
 
-    }
+            }
 
-}
+        }
+
+        
+
+        @media (min-width: 1025px) {
+
+            .p-top-right .p-mobile-nav {
+
+                display: none;
+
+            }
+
+        }
+
+        
