@@ -8,7 +8,8 @@ export function initPowerShell(state, appActions) {
   const shell = document.getElementById("shell-power");
   if (!shell) return;
   
-  if (!shell.innerHTML.trim() || shell.innerHTML.includes("Initializing")) {
+  // Check if already initialized (look for topbar class)
+  if (!shell.innerHTML.includes("p-topbar")) {
       shell.innerHTML = `
         <header class="p-topbar">
           <div style="font-weight: 600;">> NCC Console</div>
