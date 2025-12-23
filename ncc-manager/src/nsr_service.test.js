@@ -38,23 +38,11 @@ const mockNsrService = {
 async function runTests() {
   console.log("Running NSR Automation Tests...");
 
-  // 1. First publish (no supersedes)
-  console.log("Test 1: First publish...");
-  const t1 = await mockNsrService.createRevisionNSR(mockSigner, mockRelays, {
-    d: "ncc-01",
-    fromId: null,
-    toId: "new_doc_id",
-    authoritativeId: "new_doc_id",
-    effectiveAt: 1000
-  });
-  if (t1.tags.authoritative === "new_doc_id" && !t1.tags.from) {
-    console.log("  ✅ Success");
-  } else {
-    console.error("  ❌ Failed", t1);
-  }
-
+  // 1. First publish (no supersedes) - should NOT create NSR based on latest logic
+  // (In the main.js implementation we now check for !supersedes and return early)
+  
   // 2. Publish a revision where supersedes is set
-  console.log("Test 2: Revision publish...");
+  console.log("Test 1: Revision publish...");
   const t2 = await mockNsrService.createRevisionNSR(mockSigner, mockRelays, {
     d: "ncc-01",
     fromId: "prev_doc_id",
@@ -69,7 +57,7 @@ async function runTests() {
   }
 
   // 3. Duplicate prevention
-  console.log("Test 3: Duplicate prevention...");
+  console.log("Test 2: Duplicate prevention...");
   const t3 = await mockNsrService.createRevisionNSR(mockSigner, mockRelays, {
     d: "ncc-01",
     authoritativeId: "already_exists"

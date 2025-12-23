@@ -16,7 +16,8 @@ import {
   fetchNccDocuments,
   fetchEndorsements,
   fetchAuthorEndorsements,
-  fetchProfile
+  fetchProfile,
+  fetchSuccessionRecords
 } from "./nostr.js";
 import pkg from "../package.json";
 
@@ -508,12 +509,21 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     await persistRelayEvents(filtered);
     
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
-    if (eventIds.length && isOnline()) {
+    const dValues = filtered.map((event) => eventTagValue(event.tags, "d")).filter(Boolean);
+    
+    if (isOnline()) {
+      const tasks = [];
+      if (eventIds.length) {
+        tasks.push(fetchEndorsements(relays, eventIds).then(persistRelayEvents));
+      }
+      if (dValues.length) {
+        tasks.push(fetchSuccessionRecords(relays, dValues).then(persistRelayEvents));
+      }
+      
       try {
-        const endorsementEvents = await fetchEndorsements(relays, eventIds);
-        await persistRelayEvents(endorsementEvents);
+        await Promise.allSettled(tasks);
       } catch (error) {
-        console.warn("NCC Manager: failed to fetch endorsement counts", error);
+        console.warn("NCC Manager: failed to fetch related events", error);
       }
     }
     
@@ -643,19 +653,21 @@ async function publishDraft(draft, kind) {
       const newId = event.id;
       const supersedes = draft.tags?.supersedes?.[0]; // Taking the primary/first supersedes reference
       
-      let prevId = null;
-      if (supersedes) {
-        prevId = normalizeEventId(supersedes);
-        
-        // Safety checks
-        if (!prevId || prevId.length !== 64) {
-          showToast("Published revision, but supersedes is invalid. NSR not created.", "warning");
-          return;
-        }
-        if (prevId === newId) {
-          showToast("Published revision, but supersedes matches new ID. NSR not created.", "warning");
-          return;
-        }
+      if (!supersedes) {
+        log("No supersedes found, skipping auto-NSR for initial publish.");
+        return;
+      }
+
+      const prevId = normalizeEventId(supersedes);
+      
+      // Safety checks
+      if (!prevId || prevId.length !== 64) {
+        showToast("Published revision, but supersedes is invalid. NSR not created.", "warning");
+        return;
+      }
+      if (prevId === newId) {
+        showToast("Published revision, but supersedes matches new ID. NSR not created.", "warning");
+        return;
       }
 
       try {
