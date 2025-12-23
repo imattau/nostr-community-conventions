@@ -13,6 +13,7 @@ let keyboardHooked = false;
 let paletteMatches = [];
 let paletteIndex = 0;
 const collapsedBranches = new Set();
+let _appVersion = "v0.0.0";
 
 const TYPE_LABELS = {
     [KINDS.ncc]: "NCC",
@@ -47,27 +48,22 @@ function log(...args) {
 }
 
 // Initialization
-export function initPowerShell(state, appActions) {
-  log("Initializing PowerShell", { 
-      itemCount: (state.nccDocs?.length || 0) + (state.nccLocalDrafts?.length || 0),
-      currentItemId,
-      isEditMode 
-  });
-  
-  _state = state;
-  actions = appActions || {};
-  const shell = document.getElementById("shell-power");
-  if (!shell) return;
+export function initPowerShell(appState, appActions, appVersion) {
+    _state = appState || {};
+    actions = appActions || {};
+    if (appVersion) _appVersion = appVersion;
+    
+    const shell = document.getElementById("shell-power");
+    if (!shell) return;
 
-  if (!shell.innerHTML.includes("p-topbar")) {
-    log("Rendering base shell structure");
-    shell.innerHTML = `
+    if (!shell.innerHTML.includes("p-topbar")) {
+        log("Rendering base shell structure");
+        shell.innerHTML = `
       <header class="p-topbar">
         <div class="p-brand" role="button">
           <span class="p-accent">></span> NCC Console
-          <span class="p-version">v0.2</span>
-        </div>
-        <div class="p-top-center">
+          <span class="p-version">${_appVersion}</span>
+        </div>        <div class="p-top-center">
           <div class="p-search-wrapper">
             <span class="p-search-icon">🔍</span>
             <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
