@@ -55,6 +55,7 @@ import {
 } from "./state.js";
 
 import { initPowerShell, focusItem } from "./power_ui.js";
+import { nsrService } from "./nsr_service.js";
 
 const APP_VERSION = (() => {
   const version = pkg?.version || "0.0.0";
@@ -632,9 +633,50 @@ async function publishDraft(draft, kind) {
     await saveDraft(updated);
     await updateAllDrafts();
     refreshUI();
+    
     showToast(
       `Published to ${result.accepted}/${result.total} relays.`
     );
+
+    // --- NSR AUTOMATION ---
+    if (kind === "ncc" || draft.kind === KINDS.ncc) {
+      const newId = event.id;
+      const supersedes = draft.tags?.supersedes?.[0]; // Taking the primary/first supersedes reference
+      
+      let prevId = null;
+      if (supersedes) {
+        prevId = normalizeEventId(supersedes);
+        
+        // Safety checks
+        if (!prevId || prevId.length !== 64) {
+          showToast("Published revision, but supersedes is invalid. NSR not created.", "warning");
+          return;
+        }
+        if (prevId === newId) {
+          showToast("Published revision, but supersedes matches new ID. NSR not created.", "warning");
+          return;
+        }
+      }
+
+      try {
+        const nsrResult = await nsrService.createRevisionNSR(signer, relays, {
+          d: draft.d,
+          fromId: prevId,
+          toId: newId,
+          authoritativeId: newId,
+          effectiveAt: updated.published_at
+        });
+
+        if (nsrResult.skipped) {
+            console.log("NSR already exists for this revision.");
+        } else {
+            showToast(`NSR created: ${shortenKey(nsrResult.eventId)}`, "info");
+        }
+      } catch (nsrError) {
+        console.error("NSR Auto-creation failed:", nsrError);
+        showToast("Published revision, but NSR failed. You may need to create it manually.", "warning");
+      }
+    }
   } catch (error) {
     showToast(`Publish failed: ${error.message}`, "error");
   }

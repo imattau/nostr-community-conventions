@@ -1,7 +1,7 @@
 import { SimplePool } from "nostr-tools/pool";
 import { finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 
-const pool = new SimplePool();
+export const pool = new SimplePool();
 
 function normalizeSupersedes(value) {
   const trimmed = (value || "").trim();
@@ -48,8 +48,11 @@ export function buildTagsForDraft(draft) {
 
   if (draft.kind === 30051) {
     pushTag(tags, "authoritative", normalizeEventReference(draft.tags?.authoritative || ""));
+    pushTag(tags, "type", draft.tags?.type || "revision");
     pushTag(tags, "steward", draft.tags?.steward || "");
     pushTag(tags, "previous", normalizeEventReference(draft.tags?.previous || ""));
+    pushTag(tags, "from", normalizeEventReference(draft.tags?.from || ""));
+    pushTag(tags, "to", normalizeEventReference(draft.tags?.to || ""));
     pushTag(tags, "reason", draft.tags?.reason || "");
     pushTag(tags, "effective_at", draft.tags?.effective_at || "");
   }
@@ -123,8 +126,11 @@ export function payloadToDraft(payload) {
   if (draft.kind === 30051) {
     draft.tags = {
       authoritative: tagMap.authoritative?.[0] || "",
+      type: tagMap.type?.[0] || "",
       steward: tagMap.steward?.[0] || "",
       previous: tagMap.previous?.[0] || "",
+      from: tagMap.from?.[0] || "",
+      to: tagMap.to?.[0] || "",
       reason: tagMap.reason?.[0] || "",
       effective_at: tagMap.effective_at?.[0] || ""
     };
