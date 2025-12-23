@@ -8,286 +8,305 @@
   </head>
   <body>
     <div id="app">
-      <header class="topbar">
-        <div class="brand">
-          <div>
-            <h1>NCC Manager</h1>
-            <p>Draft, publish, and verify NCC, NSR, and endorsement events.</p>
+      <div id="shell-classic">
+        <header class="topbar">
+          <div class="brand">
+            <div>
+              <h1>NCC Manager</h1>
+              <p>Draft, publish, and verify NCC, NSR, and endorsement events.</p>
+            </div>
           </div>
-        </div>
-        <div class="top-actions">
-          <div class="signer-wrapper">
-            <button
-              class="pill signer-button"
-              id="signer-status"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded="false"
-            >
-              Signer: Not connected
-            </button>
-            <div class="signer-menu" id="signer-menu">
-              <div class="menu-profile">
-                <div class="menu-avatar" id="signer-menu-avatar"></div>
-                <div>
-                  <strong id="signer-menu-name">Not connected</strong>
-                  <p id="signer-menu-pubkey"></p>
-                </div>
-              </div>
-              <button class="ghost" id="signer-menu-signout" type="button" disabled>
-                Sign out
+          <div class="top-actions">
+            <div class="signer-wrapper">
+              <button
+                class="pill signer-button"
+                id="signer-status"
+                type="button"
+                aria-haspopup="true"
+                aria-expanded="false"
+              >
+                Signer: Not connected
               </button>
+              <div class="signer-menu" id="signer-menu">
+                <div class="menu-profile">
+                  <div class="menu-avatar" id="signer-menu-avatar"></div>
+                  <div>
+                    <strong id="signer-menu-name">Not connected</strong>
+                    <p id="signer-menu-pubkey"></p>
+                  </div>
+                </div>
+                <button class="ghost" id="signer-menu-signout" type="button" disabled>
+                  Sign out
+                </button>
+              </div>
             </div>
+            <button class="ghost" id="refresh-defaults" type="button">Refresh defaults</button>
           </div>
-          <button class="ghost" id="refresh-defaults" type="button">Refresh defaults</button>
-        </div>
-      </header>
+        </header>
 
-      <div class="layout">
-        <aside class="sidebar">
-          <button class="nav-item active" data-view="dashboard">Overview</button>
-          <button class="nav-item" id="nav-new-ncc" type="button">New NCC</button>
-          <button class="nav-item" data-view="nsr">NSR Drafts</button>
-          <button class="nav-item" data-view="endorsement">Endorsements</button>
-          <button class="nav-item" data-view="supporting">Supporting Docs</button>
-          <button class="nav-item" data-view="settings">Settings</button>
-        </aside>
+        <div class="layout">
+          <aside class="sidebar">
+            <button class="nav-item active" data-view="dashboard">Overview</button>
+            <button class="nav-item" id="nav-new-ncc" type="button">New NCC</button>
+            <button class="nav-item" data-view="nsr">NSR Drafts</button>
+            <button class="nav-item" data-view="endorsement">Endorsements</button>
+            <button class="nav-item" data-view="supporting">Supporting Docs</button>
+            <button class="nav-item" data-view="settings">Settings</button>
+          </aside>
 
-        <main class="content">
-          <section class="view active" data-view="dashboard">
-            <div class="panel">
-              <h2>Recent NCCs</h2>
-              <div class="list" id="recent-nccs"></div>
-              <div id="endorsement-details-panel" class="endorsement-details" hidden></div>
-            </div>
-          </section>
-
-          <section class="view" data-view="ncc">
-            <div class="panel">
-              <h2 id="ncc-form-title">Create NCC</h2>
-              <form id="ncc-form" class="form"></form>
-            </div>
-          </section>
-
-          <section class="view" data-view="nsr">
-            <div class="grid two">
+          <main class="content">
+            <section class="view active" data-view="dashboard">
               <div class="panel">
-                <div class="panel-header">
-                  <h2>Succession records</h2>
-                  <button class="primary" id="new-nsr" type="button">New NSR</button>
-                </div>
-                <div class="list" id="nsr-list"></div>
+                <h2>Recent NCCs</h2>
+                <div class="list" id="recent-nccs"></div>
+                <div id="endorsement-details-panel" class="endorsement-details" hidden></div>
               </div>
-              <div class="panel">
-                <h2 id="nsr-form-title">Create NSR</h2>
-                <div class="form helper">
-                  <label class="field">
-                    <span>Your NCC</span>
-                    <select id="nsr-ncc-select"></select>
-                  </label>
-                  <label class="field">
-                    <span>Select NCC event</span>
-                    <select id="nsr-event-select"></select>
-                  </label>
-                  <p class="muted small" id="nsr-helper-text"></p>
-                </div>
-                <form id="nsr-form" class="form"></form>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="view" data-view="endorsement">
-            <div class="grid two">
+            <section class="view" data-view="ncc">
               <div class="panel">
-                <div class="panel-header">
-                  <h2>Endorsements</h2>
-                  <button class="primary" id="new-endorsement" type="button">
-                    New Endorsement
-                  </button>
-                </div>
-                <div class="list" id="endorsement-list"></div>
+                <h2 id="ncc-form-title">Create NCC</h2>
+                <form id="ncc-form" class="form"></form>
               </div>
-              <div class="panel">
-                <div class="panel-header">
-                  <h2 id="endorsement-form-title">Create Endorsement</h2>
-                  <button class="ghost" id="refresh-endorsement-data" type="button">
-                    Refresh from relays
-                  </button>
-                </div>
-                <div class="form helper">
-                  <label class="field">
-                    <span>Pick NCC to endorse</span>
-                    <select id="endorse-ncc-select"></select>
-                  </label>
-                  <label class="field">
-                    <span>Pick NCC event</span>
-                    <select id="endorse-event-select"></select>
-                  </label>
-                  <p class="muted small" id="endorse-helper-text"></p>
-                </div>
-                <form id="endorsement-form" class="form"></form>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="view" data-view="settings">
-            <div class="grid two">
-              <div class="panel">
-                <h2>Relays</h2>
-                <div class="relay-section">
-                  <div>
-                    <p class="muted">Default relays</p>
-                    <ul class="relay-list" id="default-relays"></ul>
+            <section class="view" data-view="nsr">
+              <div class="grid two">
+                <div class="panel">
+                  <div class="panel-header">
+                    <h2>Succession records</h2>
+                    <button class="primary" id="new-nsr" type="button">New NSR</button>
                   </div>
-                  <div>
-                    <p class="muted">Your relays</p>
-                    <ul class="relay-list" id="user-relays"></ul>
-                    <div class="inline">
-                      <input id="relay-input" type="text" placeholder="wss://relay.example" />
-                      <button class="primary" id="add-relay" type="button">Add</button>
+                  <div class="list" id="nsr-list"></div>
+                </div>
+                <div class="panel">
+                  <h2 id="nsr-form-title">Create NSR</h2>
+                  <div class="form helper">
+                    <label class="field">
+                      <span>Your NCC</span>
+                      <select id="nsr-ncc-select"></select>
+                    </label>
+                    <label class="field">
+                      <span>Select NCC event</span>
+                      <select id="nsr-event-select"></select>
+                    </label>
+                    <p class="muted small" id="nsr-helper-text"></p>
+                  </div>
+                  <form id="nsr-form" class="form"></form>
+                </div>
+              </div>
+            </section>
+
+            <section class="view" data-view="endorsement">
+              <div class="grid two">
+                <div class="panel">
+                  <div class="panel-header">
+                    <h2>Endorsements</h2>
+                    <button class="primary" id="new-endorsement" type="button">
+                      New Endorsement
+                    </button>
+                  </div>
+                  <div class="list" id="endorsement-list"></div>
+                </div>
+                <div class="panel">
+                  <div class="panel-header">
+                    <h2 id="endorsement-form-title">Create Endorsement</h2>
+                    <button class="ghost" id="refresh-endorsement-data" type="button">
+                      Refresh from relays
+                    </button>
+                  </div>
+                  <div class="form helper">
+                    <label class="field">
+                      <span>Pick NCC to endorse</span>
+                      <select id="endorse-ncc-select"></select>
+                    </label>
+                    <label class="field">
+                      <span>Pick NCC event</span>
+                      <select id="endorse-event-select"></select>
+                    </label>
+                    <p class="muted small" id="endorse-helper-text"></p>
+                  </div>
+                  <form id="endorsement-form" class="form"></form>
+                </div>
+              </div>
+            </section>
+
+            <section class="view" data-view="settings">
+              <div class="grid two">
+                <div class="panel">
+                  <h2>Relays</h2>
+                  <div class="relay-section">
+                    <div>
+                      <p class="muted">Default relays</p>
+                      <ul class="relay-list" id="default-relays"></ul>
                     </div>
-                    <button class="ghost" id="clear-relays" type="button">
-                      Clear custom relays
-                    </button>
+                    <div>
+                      <p class="muted">Your relays</p>
+                      <ul class="relay-list" id="user-relays"></ul>
+                      <div class="inline">
+                        <input id="relay-input" type="text" placeholder="wss://relay.example" />
+                        <button class="primary" id="add-relay" type="button">Add</button>
+                      </div>
+                      <button class="ghost" id="clear-relays" type="button">
+                        Clear custom relays
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="panel">
-                <h2>Signer</h2>
-                <div class="form">
-                  <label class="field">
-                    <span>Signing mode</span>
-                    <select id="signer-mode">
-                      <option value="nip07">NIP-07 browser signer</option>
-                      <option value="nsec">Local nsec (session only)</option>
-                    </select>
-                  </label>
-                  <label class="field" id="nsec-field">
-                    <span>nsec (stored in session only)</span>
-                    <input id="nsec-input" type="password" placeholder="nsec1..." />
-                  </label>
-                  <div class="inline">
-                    <button class="primary" id="save-signer" type="button">Save signer</button>
-                    <button class="ghost" id="clear-signer" type="button">Clear</button>
-                  </div>
-                  <p class="muted" id="signer-help"></p>
-                </div>
-              </div>
-            </div>
-            <div class="panel">
-              <h2>Import / Export</h2>
-              <div class="import-export">
-                <div>
-                  <p class="muted">Import draft JSON</p>
-                  <input id="import-file" type="file" accept="application/json" />
-                  <button class="ghost" id="import-button" type="button">Import</button>
-                </div>
-                <div>
-                  <p class="muted">Export all drafts</p>
-                  <button class="ghost" id="export-all" type="button">Download JSON</button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="view" data-view="ncc-view">
-            <div class="grid two" id="ncc-view-grid">
-              <div class="panel" id="ncc-edit-panel" hidden>
-                <div class="panel-header">
-                  <h2>Edit fields</h2>
-                  <div class="header-actions">
-                    <button class="primary" id="ncc-edit-save" type="button">Save draft</button>
-                    <button class="ghost" id="ncc-edit-cancel" type="button">Cancel</button>
-                    <button
-                      class="ghost"
-                      id="ncc-edit-toggle"
-                      type="button"
-                      aria-label="Collapse edit fields"
-                    >
-                      ▴
-                    </button>
-                  </div>
-                </div>
-                <form class="form" id="ncc-edit-form">
-                  <label class="field"
-                    ><span>NCC number</span
-                    ><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00"
-                  /></label>
-                  <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
-                  <label class="field"><span>Summary</span><input name="summary" /></label>
-                  <label class="field"><span>Topics (comma)</span><input name="topics" /></label>
-                  <label class="field"><span>Language (BCP-47)</span><input name="lang" /></label>
-                  <label class="field"><span>Version</span><input name="version" /></label>
-                  <label class="field"
-                    ><span>Supersedes (comma)</span><input name="supersedes"
-                  /></label>
-                  <label class="field"><span>License</span><input name="license" /></label>
-                  <label class="field"><span>Authors (comma)</span><input name="authors" /></label>
-                  <label class="field"
-                    ><span>Published at (unix seconds)</span><input name="published_at"
-                  /></label>
-                </form>
-              </div>
-              <div class="panel">
-                <div class="panel-header">
+                              <div class="panel">
+                                <h2>Signer</h2>
+                                <div class="form">
+                                  <label class="field">
+                                    <span>Signing mode</span>
+                                    <select id="signer-mode">
+                                      <option value="nip07">NIP-07 browser signer</option>
+                                      <option value="nsec">Local nsec (session only)</option>
+                                    </select>
+                                  </label>
+                                  <label class="field" id="nsec-field">
+                                    <span>nsec (stored in session only)</span>
+                                    <input id="nsec-input" type="password" placeholder="nsec1..." />
+                                  </label>
+                                  <div class="inline">
+                                    <button class="primary" id="save-signer" type="button">Save signer</button>
+                                    <button class="ghost" id="clear-signer" type="button">Clear</button>
+                                  </div>
+                                  <p class="muted" id="signer-help"></p>
+                                </div>
+                              </div>
+                              <div class="panel">
+                                <h2>Interface</h2>
+                                <div class="form">
+                                  <label class="field">
+                                    <span>UI Mode</span>
+                                    <select id="ui-mode-select">
+                                      <option value="classic">Classic (Standard Web)</option>
+                                      <option value="power">Power User (Console/IDE)</option>
+                                    </select>
+                                  </label>
+                                  <p class="muted small">Switch between the standard interface and the keyboard-centric console view.</p>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="panel">
+                              <h2>Import / Export</h2>
+                
+                <div class="import-export">
                   <div>
-                    <h2 id="ncc-view-title">NCC</h2>
-                    <p class="muted" id="ncc-view-meta"></p>
+                    <p class="muted">Import draft JSON</p>
+                    <input id="import-file" type="file" accept="application/json" />
+                    <button class="ghost" id="import-button" type="button">Import</button>
                   </div>
-                  <div class="actions">
-                    <button class="ghost" id="ncc-view-back" type="button">Back</button>
-                    <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
-                    <button class="ghost" id="ncc-view-revise" type="button">
-                      Create revision
-                    </button>
+                  <div>
+                    <p class="muted">Export all drafts</p>
+                    <button class="ghost" id="export-all" type="button">Download JSON</button>
                   </div>
-                </div>
-                <div class="meta" id="ncc-view-stats"></div>
-                <div class="divider"></div>
-                <div id="ncc-view-title-edit" hidden>
-                  <label class="field"><span>Title</span><input id="ncc-title-input" /></label>
-                </div>
-                <article class="read-only" id="ncc-view-content"></article>
-                <div id="ncc-view-content-edit" hidden>
-                  <label class="field"
-                    ><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea>
-                  </label>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="view" data-view="supporting">
-            <div class="grid two">
-              <div class="panel">
-                <div class="panel-header">
-                  <h2>Supporting documents</h2>
-                  <button class="primary" id="new-supporting" type="button">
-                    New Supporting Doc
-                  </button>
+            <section class="view" data-view="ncc-view">
+              <div class="grid two" id="ncc-view-grid">
+                <div class="panel" id="ncc-edit-panel" hidden>
+                  <div class="panel-header">
+                    <h2>Edit fields</h2>
+                    <div class="header-actions">
+                      <button class="primary" id="ncc-edit-save" type="button">Save draft</button>
+                      <button class="ghost" id="ncc-edit-cancel" type="button">Cancel</button>
+                      <button
+                        class="ghost"
+                        id="ncc-edit-toggle"
+                        type="button"
+                        aria-label="Collapse edit fields"
+                      >
+                        ▴
+                      </button>
+                    </div>
+                  </div>
+                  <form class="form" id="ncc-edit-form">
+                    <label class="field"
+                      ><span>NCC number</span
+                      ><input name="d" required inputmode="numeric" pattern="\\d+" placeholder="00"
+                    /></label>
+                    <p class="muted small">The <code>ncc-</code> prefix is added automatically.</p>
+                    <label class="field"><span>Summary</span><input name="summary" /></label>
+                    <label class="field"><span>Topics (comma)</span><input name="topics" /></label>
+                    <label class="field"><span>Language (BCP-47)</span><input name="lang" /></label>
+                    <label class="field"><span>Version</span><input name="version" /></label>
+                    <label class="field"
+                      ><span>Supersedes (comma)</span><input name="supersedes"
+                    /></label>
+                    <label class="field"><span>License</span><input name="license" /></label>
+                    <label class="field"><span>Authors (comma)</span><input name="authors" /></label>
+                    <label class="field"
+                      ><span>Published at (unix seconds)</span><input name="published_at"
+                    /></label>
+                  </form>
                 </div>
-                <div class="list" id="supporting-list"></div>
-              </div>
-              <div class="panel" id="supporting-panel">
-                <div class="panel-header">
-                  <h2 id="supporting-form-title">Create Supporting Document</h2>
-                  <div class="header-actions">
-                    <button class="primary" id="supporting-save" type="button">Save draft</button>
-                    <button
-                      class="ghost"
-                      id="supporting-toggle"
-                      type="button"
-                      aria-label="Collapse supporting document fields"
-                    >
-                      ▴
-                    </button>
+                <div class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <h2 id="ncc-view-title">NCC</h2>
+                      <p class="muted" id="ncc-view-meta"></p>
+                    </div>
+                    <div class="actions">
+                      <button class="ghost" id="ncc-view-back" type="button">Back</button>
+                      <button class="primary" id="ncc-view-edit" type="button">Edit draft</button>
+                      <button class="ghost" id="ncc-view-revise" type="button">
+                        Create revision
+                      </button>
+                    </div>
+                  </div>
+                  <div class="meta" id="ncc-view-stats"></div>
+                  <div class="divider"></div>
+                  <div id="ncc-view-title-edit" hidden>
+                    <label class="field"><span>Title</span><input id="ncc-title-input" /></label>
+                  </div>
+                  <article class="read-only" id="ncc-view-content"></article>
+                  <div id="ncc-view-content-edit" hidden>
+                    <label class="field"
+                      ><span>Content (Markdown)</span><textarea id="ncc-content-input"></textarea>
+                    </label>
                   </div>
                 </div>
-                <form id="supporting-form" class="form"></form>
               </div>
-            </div>
-          </section>
-        </main>
+            </section>
+
+            <section class="view" data-view="supporting">
+              <div class="grid two">
+                <div class="panel">
+                  <div class="panel-header">
+                    <h2>Supporting documents</h2>
+                    <button class="primary" id="new-supporting" type="button">
+                      New Supporting Doc
+                    </button>
+                  </div>
+                  <div class="list" id="supporting-list"></div>
+                </div>
+                <div class="panel" id="supporting-panel">
+                  <div class="panel-header">
+                    <h2 id="supporting-form-title">Create Supporting Document</h2>
+                    <div class="header-actions">
+                      <button class="primary" id="supporting-save" type="button">Save draft</button>
+                      <button
+                        class="ghost"
+                        id="supporting-toggle"
+                        type="button"
+                        aria-label="Collapse supporting document fields"
+                      >
+                        ▴
+                      </button>
+                    </div>
+                  </div>
+                  <form id="supporting-form" class="form"></form>
+                </div>
+              </div>
+            </section>
+          </main>
+        </div>
+      </div>
+      <div id="shell-power" hidden>
+        <!-- Power User Console UI will be rendered here -->
       </div>
     </div>
 

@@ -619,3 +619,236 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Power User Console UI --- */
+
+body.mode-power {
+  overflow: hidden;
+}
+
+body.mode-power #app {
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  display: grid;
+}
+
+#shell-power {
+  display: grid;
+  grid-template-rows: 42px 1fr 28px;
+  grid-template-columns: 240px 1fr;
+  grid-template-areas:
+    "top top"
+    "nav work"
+    "stat stat";
+  height: 100%;
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace; /* Console vibes */
+}
+
+.p-topbar {
+  grid-area: top;
+  border-bottom: 1px solid var(--stroke);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-2);
+}
+
+.p-nav {
+  grid-area: nav;
+  border-right: 1px solid var(--stroke);
+  background: var(--panel-solid);
+  overflow-y: auto;
+  padding-bottom: 20px;
+}
+
+.p-workspace {
+  grid-area: work;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+  position: relative;
+}
+
+.p-status {
+  grid-area: stat;
+  border-top: 1px solid var(--stroke);
+  background: var(--bg-2);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+/* Workspace Split */
+.p-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.p-editor {
+  border-right: 1px solid var(--stroke);
+  padding: 16px;
+  overflow-y: auto;
+  outline: none;
+  background: rgba(0,0,0,0.2);
+  color: var(--text);
+  resize: none;
+  border: none;
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.p-preview {
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* Bottom Panel */
+.p-bottom {
+  height: 200px;
+  border-top: 1px solid var(--stroke);
+  background: var(--bg-2);
+  display: none;
+  flex-direction: column;
+}
+
+.p-bottom.open {
+  display: flex;
+}
+
+.p-bottom-header {
+  display: flex;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.p-tab {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  border-right: 1px solid var(--stroke);
+  background: transparent;
+  color: var(--muted);
+}
+
+.p-tab.active {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.p-bottom-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  font-size: 0.85rem;
+}
+
+/* Nav Items */
+.p-nav-group { margin-bottom: 8px; }
+.p-nav-header {
+  padding: 8px 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.p-nav-list { display: flex; flex-direction: column; }
+.p-nav-item {
+  padding: 4px 12px 4px 24px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-left: 2px solid transparent;
+}
+.p-nav-item:hover {
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+}
+.p-nav-item.active {
+  background: rgba(110, 231, 183, 0.05);
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+/* Status Badges in Tree */
+.p-badge {
+  font-size: 0.65rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* Command Palette */
+.p-palette-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  padding-top: 10vh;
+}
+
+.p-palette {
+  width: 600px;
+  background: var(--panel-solid);
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 50vh;
+}
+
+.p-palette-input {
+  padding: 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--stroke);
+  color: var(--text);
+  font-size: 1.1rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.p-palette-list {
+  overflow-y: auto;
+}
+
+.p-palette-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.p-palette-item.selected {
+  background: var(--accent);
+  color: #000;
+}
+
+.p-palette-item .shortcut {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}

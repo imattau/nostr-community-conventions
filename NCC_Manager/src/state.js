@@ -46,7 +46,8 @@ export const state = {
   selectedEndorsementLabel: "",
   persistedRelayEvents: new Set(),
   remoteDrafts: [], // Renamed from remoteBackups
-  FALLBACK_RELAYS: FALLBACK_RELAYS // Keep fallback relays here
+  FALLBACK_RELAYS: FALLBACK_RELAYS, // Keep fallback relays here
+  uiMode: "classic"
 };
 
 export async function getRelays(getConfig) {
