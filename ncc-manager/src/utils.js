@@ -110,7 +110,7 @@ export function suggestNextNccNumber(nccDocs) {
 
 export function incrementVersion(version) {
   if (!version) return "1";
-  const match = version.match(/^([^0-9]*)([0-9]+)([^0-9]*)$/);
+  const match = version.match(/(.*?)(\d+)([^\d]*)$/);
   if (!match) return version;
   const [_, prefix, num, suffix] = match;
   return `${prefix}${parseInt(num, 10) + 1}${suffix}`;
