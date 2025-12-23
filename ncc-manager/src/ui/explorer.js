@@ -245,7 +245,7 @@ function renderExplorerBranch(group, sectionType, context) {
             bodyHtml += `
                 <div class="p-nav-tree p-nav-subtree">
                     <button class="p-nav-branch-header" data-branch="${subKey}">
-                        <span class="p-nav-branch-icon">${subClosed ? "▸" : "▾"}</span>
+                        <span class="p-nav-branch-icon">${subClosed ? ">" : "V"}</span>
                         <span class="p-nav-branch-title">
                             <span class="p-type-tag">${sub.label}</span>
                             <small class="p-muted-text">(${itemsToShow.length})</small>
@@ -262,7 +262,7 @@ function renderExplorerBranch(group, sectionType, context) {
     return `
         <div class="p-nav-tree">
             <button class="p-nav-branch-header" data-branch="${branchKey}">
-                <span class="p-nav-branch-icon">${isClosed ? "▸" : "▾"}</span>
+                <span class="p-nav-branch-icon">${isClosed ? ">" : "V"}</span>
                 <span class="p-nav-branch-title">${esc(group.label)} <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small></span>
                 <span class="p-badge-mini status-${status}">${badgeLabel}</span>
             </button>
