@@ -769,7 +769,7 @@ export function renderDrafts(
 
     const aggregateByEvent = new Map();
     const addEntry = (entry) => {
-      const key = normalizeHexId(entry.event_id) || entry.id;
+      const key = entry.d || normalizeHexId(entry.event_id) || entry.id;
       const existing = aggregateByEvent.get(key);
       if (!existing) {
         aggregateByEvent.set(key, entry);
@@ -787,29 +787,38 @@ export function renderDrafts(
       const authorKey = (item.author || "").toLowerCase();
       const ownerKey = state.signerPubkey?.toLowerCase() || "";
       const ownsRelay = ownerKey && authorKey && ownerKey === authorKey;
+      const isSignedIn = !!ownerKey;
+
       if (isRelay && !ownsRelay) {
         const hint = ownerKey ? "" : " — sign in to manage your endorsements";
         return `<span class="muted">Published on relays${hint}</span>`;
       }
-      const publishButton = 
-        item.status !== "published"
-          ? `<button class="primary" data-action="publish" data-id="${item.id}" ${ownerKey ? "" : 'disabled title="Sign in to publish"'}>Publish</button>`
-          : "";
+
       const actions = [];
-      if (isLocal) {
+      
+      if (isLocal && isSignedIn) {
         actions.push(`<button class="ghost" data-action="edit" data-id="${item.id}">Edit</button>`);
       }
-      actions.push(
-        `<button class="ghost" data-action="duplicate" data-id="${item.id}">Duplicate</button>`
-      );
+      
+      if (isSignedIn) {
+        actions.push(`<button class="ghost" data-action="duplicate" data-id="${item.id}">Duplicate</button>`);
+      }
+      
       actions.push(
         `<button class="ghost" data-action="export" data-id="${item.id}">Export JSON</button>`
       );
-      if (publishButton) actions.push(publishButton);
-      actions.push(
-        `<button class="ghost" data-action="verify" data-id="${item.id}">Verify</button>`
-      );
-      if (isLocal) {
+      
+      if (item.status !== "published" && isSignedIn) {
+         actions.push(`<button class="primary" data-action="publish" data-id="${item.id}" data-kind="ncc">Publish</button>`);
+      }
+      
+      if (item.event_id) {
+        actions.push(
+          `<button class="ghost" data-action="verify" data-id="${item.id}">Verify</button>`
+        );
+      }
+      
+      if (isLocal && isSignedIn) {
         actions.push(
           `<button class="danger" data-action="delete" data-id="${item.id}">Delete</button>`
         );
