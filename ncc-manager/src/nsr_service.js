@@ -67,6 +67,7 @@ export const nsrService = {
     const result = await publishEvent(relays, event);
     
     return { 
+      event,
       eventId: event.id, 
       accepted: result.accepted, 
       total: result.total 

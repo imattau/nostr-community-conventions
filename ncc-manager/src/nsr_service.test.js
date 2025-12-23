@@ -31,7 +31,7 @@ const mockNsrService = {
       nsrDraft.tags.to = toId;
     }
     const event = await signer.signEvent(nsrDraft);
-    return { eventId: event.id, tags: event.tags };
+    return { event, eventId: event.id, tags: event.tags };
   }
 };
 
