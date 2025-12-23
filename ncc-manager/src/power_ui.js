@@ -1,5 +1,6 @@
 import { esc, renderMarkdown, eventTagValue, shortenKey, normalizeEventId } from "./utils.js";
 import { KINDS } from "./state.js";
+import { payloadToDraft } from "./nostr.js";
 
 let actions = {};
 let currentItemId = null;
