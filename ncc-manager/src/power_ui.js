@@ -236,26 +236,43 @@ function renderExplorer() {
     if (!el || !_state) return;
 
     const query = searchQuery.trim();
-    const local = [
+    
+    // Pool all items
+    const allItemsMap = new Map();
+    [
         ...(_state.nccLocalDrafts || []),
         ...(_state.nsrLocalDrafts || []),
         ...(_state.endorsementLocalDrafts || []),
-        ...(_state.supportingLocalDrafts || [])
-    ];
-    const published = _state.nccDocs || [];
+        ...(_state.supportingLocalDrafts || []),
+        ...(_state.nccDocs || [])
+    ].forEach(item => {
+        if (item && item.id) allItemsMap.set(item.id, item);
+    });
 
-    const filteredLocal = filterExplorerItems(local, query, true);
-    const filteredPublished = filterExplorerItems(published, query, false);
+    const allItems = Array.from(allItemsMap.values());
+
+    // Partition based on user rules:
+    // Published: items that have an eventid AND are marked status as published
+    // Drafts: all other items (drafts with or without eventid)
+    const publishedPool = allItems.filter(i => 
+        i.event_id && (i.status || "").toLowerCase() === "published"
+    );
+    const draftsPool = allItems.filter(i => 
+        (i.status || "").toLowerCase() !== "published" || !i.event_id
+    );
+
+    const filteredDrafts = filterExplorerItems(draftsPool, query);
+    const filteredPublished = filterExplorerItems(publishedPool, query);
 
     const sections = [
-        { title: "Local Drafts", items: filteredLocal, type: "local" },
-        { title: "Published Network", items: filteredPublished, type: "published" }
+        { title: "Drafts", items: filteredDrafts, type: "drafts" },
+        { title: "Published", items: filteredPublished, type: "published" }
     ];
 
     el.innerHTML = sections.map(renderExplorerSection).join("");
 }
 
-function filterExplorerItems(items, query, isDraft) {
+function filterExplorerItems(items, query) {
     if (!items.length) return [];
     return items
         .filter((item) => {
@@ -270,6 +287,7 @@ function filterExplorerItems(items, query, isDraft) {
             return (bTs || 0) - (aTs || 0);
         });
 }
+
 
 function renderExplorerSection(section) {
     const { title, items, type } = section;
@@ -406,9 +424,8 @@ function toggleBranch(id) {
 }
 
 function determineStatus(item, type) {
-    if (!item) return type === "local" ? "draft" : "published";
-    if (item.status) return item.status.toLowerCase();
-    return type === "local" ? "draft" : "published";
+    if (item && item.status) return item.status.toLowerCase();
+    return type === "published" ? "published" : "draft";
 }
 
 function normalizeStatus(status) {
