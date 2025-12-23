@@ -94,7 +94,13 @@ async function switchShell(mode) {
     classic.hidden = true;
     power.hidden = false;
     try {
-      initPowerShell(state, { switchShell });
+      initPowerShell(state, { 
+        switchShell,
+        saveItem: handlePowerSave,
+        publishDraft, // for later
+        withdrawDraft, // for later
+        openNewNcc // for later
+      });
     } catch (e) {
       console.error("Failed to init PowerShell:", e);
     }
@@ -103,6 +109,49 @@ async function switchShell(mode) {
     power.hidden = true;
     classic.hidden = false;
   }
+}
+
+async function handlePowerSave(id, content) {
+  let item = (state.nccLocalDrafts || []).find(d => d.id === id);
+  if (!item) {
+    const relayItem = (state.nccDocs || []).find(d => d.id === id);
+    if (relayItem) {
+      item = toDraftFromRelay(relayItem);
+      item.id = id; 
+    }
+  }
+  
+  if (!item) {
+    showToast("Item not found to save.", "error");
+    return;
+  }
+  
+  item.content = content;
+  item.updated_at = Date.now();
+  
+  await saveDraft(item);
+  
+  if (state.signerPubkey) {
+    try {
+      const broadcast = await broadcastDraftToRelays(item);
+      if (broadcast) {
+        item.event_id = broadcast.eventId;
+        await saveDraft(item);
+        showToast("Saved and pushed to relays.");
+      } else {
+        showToast("Saved locally (relay push failed).", "warning");
+      }
+    } catch (e) {
+      showToast("Saved locally. Relay push failed.", "warning");
+    }
+  } else {
+    showToast("Saved locally.");
+  }
+  
+  const nccDrafts = await listDrafts(KINDS.ncc);
+  updateState({ nccLocalDrafts: nccDrafts });
+  refreshDashboard();
+  initPowerShell(state, { switchShell, saveItem: handlePowerSave });
 }
 
 async function refreshSignerProfile() {
