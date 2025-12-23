@@ -65,7 +65,7 @@ export function initPowerShell(state, appActions) {
       <header class="p-topbar">
         <div class="p-brand" role="button">
           <span class="p-accent">></span> NCC Console
-          <span class="p-version">v0.1</span>
+          <span class="p-version">v0.2</span>
         </div>
         <div class="p-top-center">
           <div class="p-search-wrapper">
