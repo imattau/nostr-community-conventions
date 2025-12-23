@@ -26,31 +26,14 @@ export const state = {
   endorsementCounts: new Map(),
   signerPubkey: null,
   signerProfile: null,
-  selectedNcc: null,
   nccLocalDrafts: [],
   nsrLocalDrafts: [],
   endorsementLocalDrafts: [],
   supportingLocalDrafts: [],
-  editDraft: null,
-  currentDraft: {
-    ncc: null,
-    nsr: null,
-    endorsement: null,
-    supporting: null
-  },
-  renderedDrafts: {
-    ncc: [],
-    nsr: [],
-    endorsement: [],
-    supporting: []
-  },
   endorsementDetails: new Map(),
-  selectedEndorsementTarget: "",
-  selectedEndorsementLabel: "",
   persistedRelayEvents: new Set(),
-  remoteDrafts: [], // Renamed from remoteBackups
-  FALLBACK_RELAYS: FALLBACK_RELAYS, // Keep fallback relays here
-  uiMode: "classic"
+  remoteDrafts: [],
+  FALLBACK_RELAYS: FALLBACK_RELAYS
 };
 
 export async function getRelays(getConfig) {
@@ -66,12 +49,10 @@ export async function getRelays(getConfig) {
 // Function to update state (simple setter for now)
 export function updateState(newState) {
   Object.assign(state, newState);
-  // In a more complex app, you might trigger re-renders here
 }
 
 // Caching mechanism
 const NCC_CACHE_KEY_BASE = "ncc-manager-ncc-cache";
-const NCC_CACHE_TTL_MS = 5 * 60 * 1000;
 const hasLocalStorage = typeof window !== "undefined" && !!window.localStorage;
 
 export function buildRelayCacheKey(relays) {

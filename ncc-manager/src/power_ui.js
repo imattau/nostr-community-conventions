@@ -1,4 +1,4 @@
-import { esc, stripNccNumber, renderMarkdown, eventTagValue, shortenKey } from "./utils.js";
+import { esc, renderMarkdown, eventTagValue, shortenKey, normalizeEventId } from "./utils.js";
 import { KINDS } from "./state.js";
 
 let actions = {};
@@ -6,6 +6,11 @@ let currentItemId = null;
 let isEditMode = false;
 let searchQuery = "";
 let _state = null;
+let listenersSetup = false;
+let keyboardHooked = false;
+let paletteMatches = [];
+let paletteIndex = 0;
+const collapsedBranches = new Set();
 
 const TYPE_LABELS = {
     [KINDS.ncc]: "NCC",
@@ -14,147 +19,151 @@ const TYPE_LABELS = {
     [KINDS.supporting]: "Supporting"
 };
 
+const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
+
+function ensureTimestamp(value) {
+    if (!value) return null;
+    return value > 1e12 ? value : value * 1000;
+}
+
+function formatShortDate(value) {
+    const ts = ensureTimestamp(value);
+    if (!ts) return "—";
+    return new Date(ts).toLocaleDateString();
+}
+
+function formatFullDate(value) {
+    const ts = ensureTimestamp(value);
+    if (!ts) return "-";
+    return new Date(ts).toLocaleString();
+}
+
 // Initialization
 export function initPowerShell(state, appActions) {
   _state = state;
   actions = appActions || {};
   const shell = document.getElementById("shell-power");
   if (!shell) return;
-  
+
   if (!shell.innerHTML.includes("p-topbar")) {
-      shell.innerHTML = `
-        <header class="p-topbar">
-          <div class="p-brand" style="cursor: pointer;">
-            <span class="p-accent">></span> NCC Console
-            <span class="p-version">v0.1</span>
+    shell.innerHTML = `
+      <header class="p-topbar">
+        <div class="p-brand" role="button">
+          <span class="p-accent">></span> NCC Console
+          <span class="p-version">v0.1</span>
+        </div>
+        <div class="p-top-center">
+          <div class="p-search-wrapper">
+            <span class="p-search-icon">🔍</span>
+            <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
+            <span class="p-search-kb">Ctrl+K</span>
           </div>
-          
-          <div class="p-top-center">
-            <div class="p-search-wrapper">
-                <span class="p-search-icon">🔍</span>
-                <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
-                <span class="p-search-kb">Ctrl+K</span>
-            </div>
-          </div>
-          
-          <div class="p-top-right">
-             <div id="p-top-signer" class="p-signer-status"></div>
-             <button class="p-ghost-btn" id="p-btn-classic" title="Switch to Classic UI">
-                🪟
-             </button>
-          </div>
-        </header>
-        
-        <div class="p-workspace">
-          <aside class="p-pane p-explorer" id="p-explorer">
-            <!-- Explorer content -->
-          </aside>
-          
-          <main class="p-pane p-content" id="p-content-column">
-            <!-- Content column (Read or Edit) -->
+        </div>
+        <div class="p-top-right">
+          <div id="p-top-signer" class="p-signer-status"></div>
+          <button class="p-ghost-btn" id="p-btn-classic" type="button" aria-label="Switch to Classic UI">
+            🪟
+          </button>
+        </div>
+      </header>
+
+      <div class="p-main">
+        <aside class="p-pane p-explorer">
+          <div id="p-explorer-body" class="p-scroll"></div>
+        </aside>
+        <section class="p-pane p-content">
+          <div id="p-content-column" class="p-content-inner">
             <div class="p-empty-state">
               <div class="p-empty-icon">📂</div>
               <div class="p-empty-text">Select an item from the Explorer to begin</div>
               <div class="p-empty-hint">Press <code>Ctrl+K</code> for commands</div>
             </div>
-          </main>
-          
-          <aside class="p-pane p-inspector" id="p-inspector">
-            <!-- Inspector content -->
-          </aside>
+          </div>
+        </section>
+        <aside class="p-pane p-inspector">
+          <div id="p-inspector-body" class="p-inspector-inner"></div>
+        </aside>
+      </div>
+
+      <footer class="p-status">
+        <div class="p-status-left">
+          <div id="p-status-relays">Relays: 0</div>
         </div>
-        
-        <footer class="p-status">
-           <div class="p-status-left">
-              <div id="p-status-relays">Relays: 0</div>
-           </div>
-           <div class="p-status-right">
-              <div id="p-status-msg">Ready</div>
-           </div>
-        </footer>
-        
-        <div id="p-palette-overlay" class="p-palette-overlay" hidden style="display: none;">
-           <div class="p-palette">
-              <input class="p-palette-input" id="p-palette-input" placeholder="Type a command or search..." />
-              <div class="p-palette-list" id="p-palette-list"></div>
-           </div>
+        <div class="p-status-right">
+          <div id="p-status-msg">Ready</div>
+          <div id="p-status-online" class="offline">Offline</div>
         </div>
-      `;
-      
-      setupKeyboardShortcuts();
-      setupGlobalListeners();
+      </footer>
+
+      <div id="p-palette-overlay" class="p-palette-overlay" hidden style="display: none;">
+        <div class="p-palette">
+          <input class="p-palette-input" id="p-palette-input" placeholder="Type a command or search..." autocomplete="off" />
+          <div class="p-palette-list" id="p-palette-list"></div>
+        </div>
+      </div>
+    `;
   }
-  
+
+  if (!listenersSetup) {
+    setupGlobalListeners();
+    setupKeyboardShortcuts();
+    listenersSetup = true;
+  }
+
   refreshUI();
 }
 
 function setupGlobalListeners() {
-    // Search filter
-    document.getElementById("p-search").addEventListener("input", (e) => {
+    const searchInput = document.getElementById("p-search");
+    searchInput?.addEventListener("input", (e) => {
         searchQuery = e.target.value.toLowerCase();
         renderExplorer();
     });
 
-    // Explorer delegation
-    document.getElementById("p-explorer").addEventListener("click", (e) => {
+    const explorerBody = document.getElementById("p-explorer-body");
+    explorerBody?.addEventListener("click", (e) => {
+        const branch = e.target.closest("[data-branch]");
+        if (branch) {
+            toggleBranch(branch.dataset.branch);
+            return;
+        }
+
         const item = e.target.closest(".p-nav-item");
         if (item && item.dataset.id) {
             openItem(item.dataset.id);
         }
-        
-        const createBtn = e.target.closest(".p-create-btn");
-        if (createBtn && createBtn.dataset.kind) {
-            handleCreate(createBtn.dataset.kind);
-        }
     });
 
-    // Top bar listeners
-    document.getElementById("p-btn-classic").onclick = () => actions.switchShell?.("classic");
-    document.querySelector(".p-brand").onclick = () => {
+    const classicBtn = document.getElementById("p-btn-classic");
+    classicBtn && (classicBtn.onclick = () => actions.switchShell?.("classic"));
+
+    const brand = document.querySelector(".p-brand");
+    brand && (brand.onclick = () => {
         currentItemId = null;
         isEditMode = false;
-        refreshUI();
         renderEmptyState();
-    };
+        renderExplorer();
+        renderInspector();
+    });
 
-    // Command palette delegation
-    document.getElementById("p-palette-list").addEventListener("click", (e) => {
+    const paletteList = document.getElementById("p-palette-list");
+    paletteList?.addEventListener("click", (e) => {
         const item = e.target.closest(".p-palette-item");
         if (item && item.dataset.cmd) {
             executeCommand(item.dataset.cmd);
         }
     });
 
-    // Palette overlay close
     const overlay = document.getElementById("p-palette-overlay");
-    overlay.addEventListener("click", (e) => {
+    overlay?.addEventListener("click", (e) => {
         if (e.target === overlay) toggleCommandPalette(false);
     });
 
-    // Palette input listeners
     const paletteInput = document.getElementById("p-palette-input");
-    paletteInput.addEventListener("input", (e) => {
+    paletteInput?.addEventListener("input", (e) => {
         renderCommandList(e.target.value);
     });
-    paletteInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            const firstItem = document.querySelector(".p-palette-item");
-            if (firstItem && firstItem.dataset.cmd) {
-                executeCommand(firstItem.dataset.cmd);
-            }
-        }
-    });
 }
-
-function handleCreate(kindStr) {
-    const kind = parseInt(kindStr);
-    if (kind === KINDS.ncc) actions.openNewNcc?.();
-    else {
-        // For others, we might need more specific actions, but let's assume classic shell handles it
-        updateStatus(`New ${TYPE_LABELS[kind]} creation not yet fully implemented in Power UI.`);
-    }
-}
-
 // UI Refreshers
 function refreshUI() {
     renderExplorer();
@@ -198,6 +207,13 @@ function renderTopBar() {
 function renderStatusBar() {
     const r = document.getElementById("p-status-relays");
     if (r && _state) r.textContent = `Relays: ${_state.relayStatus?.relays || 0}`;
+    const onlineEl = document.getElementById("p-status-online");
+    if (onlineEl) {
+        const online = typeof navigator !== "undefined" ? navigator.onLine : true;
+        onlineEl.textContent = online ? "Online" : "Offline";
+        onlineEl.classList.toggle("online", online);
+        onlineEl.classList.toggle("offline", !online);
+    }
 }
 
 function updateStatus(msg) {
@@ -215,80 +231,185 @@ function renderEmptyState() {
           <div class="p-empty-hint">Press <code>Ctrl+K</code> for commands</div>
         </div>
     `;
-    const inspector = document.getElementById("p-inspector");
+    const inspector = document.getElementById("p-inspector-body");
     if (inspector) inspector.innerHTML = "";
 }
 
 
 // Explorer
 function renderExplorer() {
-    const el = document.getElementById("p-explorer");
+    const el = document.getElementById("p-explorer-body");
     if (!el || !_state) return;
-    
-    // Group all drafts by kind
-    const drafts = [
+
+    const query = searchQuery.trim();
+    const local = [
         ...(_state.nccLocalDrafts || []),
         ...(_state.nsrLocalDrafts || []),
         ...(_state.endorsementLocalDrafts || []),
         ...(_state.supportingLocalDrafts || [])
-    ].filter(d => 
-        !searchQuery || (d.d || "").toLowerCase().includes(searchQuery) || (d.title || "").toLowerCase().includes(searchQuery)
-    ).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    ];
+    const published = _state.nccDocs || [];
 
-    const published = (_state.nccDocs || []).filter(d => 
-        !searchQuery || (d.d || "").toLowerCase().includes(searchQuery) || eventTagValue(d.tags, "title").toLowerCase().includes(searchQuery)
-    ).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const filteredLocal = filterExplorerItems(local, query, true);
+    const filteredPublished = filterExplorerItems(published, query, false);
 
-    let html = "";
-    
-    // Drafts Section
-    html += renderGroup("LOCAL DRAFTS", drafts, true);
-    
-    // Published Section
-    html += renderGroup("PUBLISHED NETWORK", published, false);
+    const sections = [
+        { title: "Local Drafts", items: filteredLocal, type: "local" },
+        { title: "Published Network", items: filteredPublished, type: "published" }
+    ];
 
-    el.innerHTML = html;
+    el.innerHTML = sections.map(renderExplorerSection).join("");
 }
 
-function renderGroup(title, items, isDraft) {
-    if (items.length === 0 && searchQuery) return "";
-    
-    let html = `<div class="p-nav-group">
-        <div class="p-nav-header">
-            <span>${title} (${items.length})</span>
-            ${isDraft ? `<button class="p-create-btn" data-kind="${KINDS.ncc}" title="New NCC">+</button>` : ""}
-        </div>
-        <div class="p-nav-list">`;
-    
-    if (!items.length) {
-        html += `<div class="p-nav-empty">No items found</div>`;
-    } else {
-        items.forEach(item => {
-            const active = item.id === currentItemId ? " active" : "";
-            const id = (item.d || "NCC-XX").toUpperCase();
-            const label = item.title || eventTagValue(item.tags, "title") || "Untitled";
-            const status = (item.status || (isDraft ? "draft" : "published")).toLowerCase();
-            const statusLabel = status === "published" ? "PUB" : "DRAFT";
-            
-            const timestamp = item.updated_at ? item.updated_at : (item.created_at ? item.created_at * 1000 : null);
-            const dateStr = timestamp ? new Date(timestamp).toLocaleDateString() : "";
-            
-            html += `
-                <div class="p-nav-item${active}" data-id="${item.id}" title="${esc(label)}">
-                    <div class="p-nav-body">
-                        <div class="p-nav-row-top">
-                           <span class="p-nav-id">${esc(id)}</span>
-                           <span class="p-badge-mini status-${status}">${statusLabel}</span>
-                        </div>
-                        <div class="p-nav-label-muted">${esc(label)}</div>
-                        <div class="p-nav-date">${dateStr}</div>
-                    </div>
-                </div>`;
+function filterExplorerItems(items, query, isDraft) {
+    if (!items.length) return [];
+    return items
+        .filter((item) => {
+            if (!query) return true;
+            const label = (item.d || "").toLowerCase();
+            const title = (item.title || eventTagValue(item.tags, "title") || "").toLowerCase();
+            return label.includes(query) || title.includes(query);
+        })
+        .sort((a, b) => {
+            const aTs = ensureTimestamp(a.updated_at || a.created_at);
+            const bTs = ensureTimestamp(b.updated_at || b.created_at);
+            return (bTs || 0) - (aTs || 0);
         });
+}
+
+function renderExplorerSection(section) {
+    const { title, items, type } = section;
+    const groups = buildRevisionGroups(items);
+    return `
+        <div class="p-nav-group">
+            <div class="p-nav-header">
+                <span>${title} (${items.length})</span>
+            </div>
+            ${groups.length ? groups.map((group) => renderExplorerBranch(group, type)).join("") : `<div class="p-nav-empty">No items found</div>`}
+        </div>
+    `;
+}
+
+function buildRevisionGroups(items) {
+    const map = new Map();
+    items.forEach((item) => {
+        const key = (item.d || "").toUpperCase().trim() || "Untitled";
+        const bucket = map.get(key) || [];
+        bucket.push(item);
+        map.set(key, bucket);
+    });
+
+    return Array.from(map.entries())
+        .map(([key, list]) => {
+            return {
+                label: key,
+                rawKey: key,
+                entries: list
+                    .map((item) => ({ item, depth: computeRevisionDepth(item, list) }))
+                    .sort((a, b) => {
+                        if (b.depth !== a.depth) return b.depth - a.depth;
+                        const aTs = ensureTimestamp(a.item.updated_at || a.item.created_at);
+                        const bTs = ensureTimestamp(b.item.updated_at || b.item.created_at);
+                        return (bTs || 0) - (aTs || 0);
+                    })
+            };
+        })
+        .sort((a, b) => {
+            const aTs = ensureTimestamp(a.entries[0]?.item.updated_at || a.entries[0]?.item.created_at);
+            const bTs = ensureTimestamp(b.entries[0]?.item.updated_at || b.entries[0]?.item.created_at);
+            return (bTs || 0) - (aTs || 0);
+        });
+}
+
+function computeRevisionDepth(item, peers) {
+    const visited = new Set();
+    function depth(current) {
+        const key = normalizeEventId(current.event_id || current.id || current.d);
+        if (!key || visited.has(key)) return 0;
+        visited.add(key);
+        let depthValue = 0;
+        const supersedes = (current.tags?.supersedes || [])
+            .map((val) => normalizeEventId(val))
+            .filter(Boolean);
+        supersedes.forEach((targetId) => {
+            const target = peers.find((entry) => {
+                const candidateKey = normalizeEventId(entry.event_id || entry.id || entry.d);
+                return candidateKey === targetId;
+            });
+            if (target) {
+                depthValue = Math.max(depthValue, 1 + depth(target));
+            }
+        });
+        visited.delete(key);
+        return depthValue;
     }
-    
-    html += `</div></div>`;
-    return html;
+    return depth(item);
+}
+
+function renderExplorerBranch(group, type) {
+    const branchKey = `${type}:${group.rawKey}`;
+    const isClosed = collapsedBranches.has(branchKey);
+    const firstEntry = group.entries[0];
+    const status = determineStatus(firstEntry?.item, type);
+    const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
+    return `
+        <div class="p-nav-tree">
+            <button class="p-nav-branch-header" data-branch="${branchKey}">
+                <span class="p-nav-branch-icon">${isClosed ? "▸" : "▾"}</span>
+                <span>${esc(group.label)}</span>
+                <span class="p-badge-mini status-${status}">${badgeLabel}</span>
+            </button>
+            <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
+                ${group.entries.map((entry, idx) => renderExplorerItem(entry, idx, status)).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function renderExplorerItem(entry, idx, inheritedStatus) {
+    const { item } = entry;
+    const isActive = item.id === currentItemId ? " active" : "";
+    const status = normalizeStatus(item.status || inheritedStatus);
+    const statusLabel =
+        status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
+    const baseId = (item.d || "").toUpperCase() || "UNTITLED";
+    const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
+    const dateStr = formatShortDate(item.updated_at || item.created_at);
+    const suffix =
+        idx === 0
+            ? ""
+            : ` (${REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)]})`;
+    return `
+        <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
+            <div class="p-nav-meta">
+                <span class="p-nav-id">${esc(baseId)}</span>
+                <span class="p-badge-mini status-${status}">${statusLabel}</span>
+            </div>
+            <div class="p-nav-label">${esc(title)}${suffix}</div>
+            <div class="p-nav-date">${dateStr}</div>
+        </div>
+    `;
+}
+
+function toggleBranch(id) {
+    if (!id) return;
+    if (collapsedBranches.has(id)) collapsedBranches.delete(id);
+    else collapsedBranches.add(id);
+    renderExplorer();
+}
+
+function determineStatus(item, type) {
+    if (!item) return type === "local" ? "draft" : "published";
+    if (item.status) return item.status.toLowerCase();
+    return type === "local" ? "draft" : "published";
+}
+
+function normalizeStatus(status) {
+    if (!status) return "draft";
+    const val = status.toLowerCase();
+    if (val === "published") return "published";
+    if (val === "withdrawn") return "withdrawn";
+    return "draft";
 }
 
 
@@ -381,75 +502,104 @@ function syncGutter(textarea) {
 }
 
 function renderInspector(item) {
-    const el = document.getElementById("p-inspector");
+    const el = document.getElementById("p-inspector-body");
     if (!el) return;
-    
+    if (!item) {
+        el.innerHTML = `
+            <div class="p-section">
+                <span class="p-section-title">Inspector</span>
+                <p class="p-nav-label">Select an NCC to view metadata and actions.</p>
+            </div>
+        `;
+        return;
+    }
+
     const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
-    const status = (item.status || "published").toUpperCase();
+    const status = normalizeStatus(item.status || "published");
     const author = item.author || item.pubkey || "Unknown";
-    
-    const timestamp = item.updated_at ? item.updated_at : (item.created_at ? item.created_at * 1000 : null);
-    const dateStr = timestamp ? new Date(timestamp).toLocaleString() : "-";
-    
+    const updatedAt = formatFullDate(item.updated_at || item.created_at);
+    const supersedes = Array.isArray(item.tags?.supersedes) ? item.tags.supersedes : [];
+    const badgeLabel = status.toUpperCase();
+    const relayStatus = _state?.relayStatus || {};
+    const lastSync = relayStatus.at ? new Date(relayStatus.at).toLocaleTimeString() : "-";
+    const networkDetails = `
+        <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
+        <div class="p-prop-row"><span class="p-prop-key">Event</span><span class="p-prop-val">${esc(item.event_id || "Draft")}</span></div>
+        <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${esc(author)}">${shortenKey(author)}</span></div>
+        <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${updatedAt}</span></div>
+        ${supersedes.length ? `<div class="p-prop-row"><span class="p-prop-key">Supersedes</span><span class="p-prop-val">${esc(supersedes.join(", "))}</span></div>` : ""}
+    `;
+
     el.innerHTML = `
-        <div class="p-inspector-header">Inspector</div>
-        
         <div class="p-section">
             <span class="p-section-title">Item Metadata</span>
-            <div class="p-prop-list">
-                <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge status-${status.toLowerCase()}">${status}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${dateStr}</span></div>
-            </div>
+            <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge-mini status-${status}">${badgeLabel}</span></div>
+            ${networkDetails}
         </div>
-        
         <div class="p-section">
             <span class="p-section-title">Actions</span>
             <div class="p-inspector-actions" id="p-inspector-actions"></div>
         </div>
-        
         <div class="p-section">
-            <span class="p-section-title">Network Summary</span>
-            <div class="p-network-info">
-                <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${author}">${shortenKey(author)}</span></div>
-                ${item.event_id 
-                    ? `<div class="p-event-id" style="margin-top:8px;"><code>${item.event_id}</code></div>` 
-                    : `<div class="p-muted-text" style="margin-top:8px;">Not published</div>`}
-            </div>
+            <span class="p-section-title">Relay Status</span>
+            <div class="p-prop-row"><span class="p-prop-key">Relays</span><span class="p-prop-val">${relayStatus.relays || 0}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Events</span><span class="p-prop-val">${relayStatus.events || 0}</span></div>
+            <div class="p-prop-row"><span class="p-prop-key">Last sync</span><span class="p-prop-val">${lastSync}</span></div>
         </div>
     `;
-    
+
     const actionsContainer = document.getElementById("p-inspector-actions");
-    
+    if (!actionsContainer) return;
+    actionsContainer.innerHTML = "";
+
     if (item._isLocal) {
-        // LOCAL DRAFT ACTIONS
         const editBtn = document.createElement("button");
         editBtn.className = isEditMode ? "p-btn-primary" : "p-btn-accent";
-        editBtn.textContent = isEditMode ? "Read Mode" : "Edit";
+        editBtn.textContent = isEditMode ? "View" : "Edit";
         editBtn.onclick = () => {
             isEditMode = !isEditMode;
             renderContent(item);
             renderInspector(item);
         };
         actionsContainer.appendChild(editBtn);
-        
+
+        if (isEditMode) {
+            const saveBtn = document.createElement("button");
+            saveBtn.className = "p-btn-accent";
+            saveBtn.textContent = "Save (Ctrl+S)";
+            saveBtn.onclick = handleSaveShortcut;
+            actionsContainer.appendChild(saveBtn);
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "p-btn-ghost";
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.onclick = () => {
+                isEditMode = false;
+                const found = findItem(currentItemId);
+                if (found) {
+                    renderContent(found);
+                    renderInspector(found);
+                }
+            };
+            actionsContainer.appendChild(cancelBtn);
+        }
+
         const publishBtn = document.createElement("button");
         publishBtn.className = "p-btn-ghost";
         publishBtn.textContent = "Publish";
-        publishBtn.onclick = () => { 
-            if(confirm("Publish this " + TYPE_LABELS[item.kind] + "?")) {
+        publishBtn.onclick = () => {
+            if (confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
                 actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
             }
         };
         actionsContainer.appendChild(publishBtn);
     } else {
-        // PUBLISHED ITEM ACTIONS
         const reviseBtn = document.createElement("button");
         reviseBtn.className = "p-btn-accent";
         reviseBtn.textContent = "Revise";
         reviseBtn.onclick = async () => {
-            const draft = actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
+            const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
             if (draft) {
                 await actions.saveItem?.(draft.id, draft.content, draft);
                 openItem(draft.id);
@@ -459,16 +609,14 @@ function renderInspector(item) {
             }
         };
         actionsContainer.appendChild(reviseBtn);
-        
-        const openBtn = document.createElement("button");
-        openBtn.className = "p-btn-ghost";
-        openBtn.textContent = "Open it";
-        openBtn.onclick = () => {
-            isEditMode = true;
-            renderContent(item);
-            renderInspector(item);
-        };
-        actionsContainer.appendChild(openBtn);
+
+        if (actions.withdrawDraft) {
+            const withdrawBtn = document.createElement("button");
+            withdrawBtn.className = "p-btn-ghost";
+            withdrawBtn.textContent = "Withdraw";
+            withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
+            actionsContainer.appendChild(withdrawBtn);
+        }
     }
 }
 
@@ -482,25 +630,59 @@ const COMMANDS = [
 ];
 
 function setupKeyboardShortcuts() {
+    if (keyboardHooked) return;
+    keyboardHooked = true;
+
     document.addEventListener("keydown", (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        const paletteOverlay = document.getElementById("p-palette-overlay");
+        const paletteActive = paletteOverlay && !paletteOverlay.hidden;
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
             e.preventDefault();
             toggleCommandPalette();
+            return;
         }
-        if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-            e.preventDefault();
-            handleSaveShortcut();
+
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+            if (isEditMode) {
+                e.preventDefault();
+                handleSaveShortcut();
+            }
+            return;
         }
-        if (e.key === "Escape") {
-            if (document.getElementById("p-palette-overlay").style.display !== "none") {
-                toggleCommandPalette(false);
-            } else if (isEditMode) {
-                isEditMode = false;
-                const item = findItem(currentItemId);
-                if (item) {
-                    renderContent(item);
-                    renderInspector(item);
+
+        if (paletteActive) {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                if (paletteMatches.length) {
+                    paletteIndex = (paletteIndex + 1) % paletteMatches.length;
+                    highlightPaletteSelection();
                 }
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                if (paletteMatches.length) {
+                    paletteIndex = (paletteIndex - 1 + paletteMatches.length) % paletteMatches.length;
+                    highlightPaletteSelection();
+                }
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                const cmd = paletteMatches[paletteIndex];
+                if (cmd) {
+                    executeCommand(cmd.id);
+                }
+            } else if (e.key === "Escape") {
+                e.preventDefault();
+                toggleCommandPalette(false);
+            }
+            return;
+        }
+
+        if (e.key === "Escape" && isEditMode) {
+            isEditMode = false;
+            const item = findItem(currentItemId);
+            if (item) {
+                renderContent(item);
+                renderInspector(item);
             }
         }
     });
@@ -509,7 +691,7 @@ function setupKeyboardShortcuts() {
 function toggleCommandPalette(show) {
     const overlay = document.getElementById("p-palette-overlay");
     const input = document.getElementById("p-palette-input");
-    if (!overlay) return;
+    if (!overlay || !input) return;
     
     const shouldShow = show !== undefined ? show : overlay.hidden;
     overlay.hidden = !shouldShow;
@@ -519,24 +701,40 @@ function toggleCommandPalette(show) {
         input.value = "";
         renderCommandList("");
         input.focus();
+    } else {
+        paletteMatches = [];
+        paletteIndex = 0;
     }
 }
 
 function renderCommandList(query) {
     const list = document.getElementById("p-palette-list");
     if (!list) return;
-    const q = query.toLowerCase();
-    const matches = COMMANDS.filter(c => c.title.toLowerCase().includes(q));
-    
-    list.innerHTML = matches.map(c => `
-        <div class="p-palette-item" data-cmd="${c.id}">
+    const q = (query || "").toLowerCase();
+    const matches = COMMANDS.filter((c) => c.title.toLowerCase().includes(q));
+    paletteMatches = matches;
+    paletteIndex = 0;
+    list.innerHTML = matches
+        .map(
+            (c, index) => `
+        <div class="p-palette-item${index === paletteIndex ? " selected" : ""}" data-cmd="${c.id}" data-index="${index}">
             <div class="p-palette-body">
                 <span class="p-palette-title">${esc(c.title)}</span>
                 <span class="p-palette-id">${c.id}</span>
             </div>
             <span class="p-palette-kb">${c.kb}</span>
         </div>
-    `).join("");
+    `
+        )
+        .join("");
+    highlightPaletteSelection();
+}
+
+function highlightPaletteSelection() {
+    const items = document.querySelectorAll(".p-palette-item");
+    items.forEach((node, index) => {
+        node.classList.toggle("selected", index === paletteIndex);
+    });
 }
 
 function executeCommand(id) {
@@ -567,6 +765,8 @@ async function handleSaveShortcut() {
         updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
         // Refresh local item content in our state if necessary
         item.content = content;
+        renderInspector(item);
+        renderExplorer();
     } catch (e) {
         updateStatus("Save failed");
     }
