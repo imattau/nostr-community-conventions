@@ -331,20 +331,27 @@ function setNccViewActions(item, localDrafts) {
   const reviseButton = document.getElementById("ncc-view-revise");
   const localDraft = (localDrafts || []).find((draft) => draft.id === item.id);
   const isDraft = item.status !== "published";
-  editButton.style.display = isDraft ? "inline-flex" : "none";
+  
+  const isSignedIn = !!state.signerPubkey;
+  // If draft has no author (legacy?), assume owner if signed in.
+  const isOwner = isSignedIn && (item.author === state.signerPubkey || !item.author);
+
+  const canEdit = isDraft && isSignedIn && isOwner && !!localDraft;
+  const canRevise = !isDraft && isSignedIn;
+
+  editButton.style.display = canEdit ? "inline-flex" : "none";
   editButton.textContent = "Edit draft";
   editButton.setAttribute("aria-label", "Edit draft");
-  reviseButton.style.display = isDraft ? "none" : "inline-flex";
+  
+  reviseButton.style.display = canRevise ? "inline-flex" : "none";
 
-  editButton.disabled = !localDraft || localDraft.status === "published";
   editButton.onclick = async () => {
-    if (!localDraft || localDraft.status === "published") return;
+    if (!canEdit) return;
     showEditMode(localDraft);
   };
 
-  reviseButton.disabled = item.status !== "published";
   reviseButton.onclick = async () => {
-    if (item.status !== "published") return;
+    if (!canRevise) return;
     const draft = createRevisionDraft(item, localDrafts || []);
     if (!draft) return;
     showEditMode(draft);
@@ -352,6 +359,10 @@ function setNccViewActions(item, localDrafts) {
 }
 
 function showEditMode(draft) {
+  if (!state.signerPubkey) {
+    showToast("You must be signed in to edit.", "error");
+    return;
+  }
   updateState({ editDraft: draft });
   const editPanel = document.getElementById("ncc-edit-panel");
   const toggle = document.getElementById("ncc-edit-toggle");
@@ -423,6 +434,10 @@ function toggleEditPanel() {
 }
 
 function openNewNcc() {
+  if (!state.signerPubkey) {
+    showToast("You must be signed in to create an NCC.", "error");
+    return;
+  }
   const draft = {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
