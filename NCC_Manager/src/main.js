@@ -78,10 +78,14 @@ const FALLBACK_RELAYS = [
 const NCC_CACHE_TTL_MS = 5 * 60 * 1000;
 
 async function switchShell(mode) {
+  console.log("Switching shell to:", mode);
   const classic = document.getElementById("shell-classic");
   const power = document.getElementById("shell-power");
   
-  if (!classic || !power) return;
+  if (!classic || !power) {
+      console.error("Shell containers not found");
+      return;
+  }
   
   updateState({ uiMode: mode });
   
@@ -89,7 +93,11 @@ async function switchShell(mode) {
     document.body.classList.add("mode-power");
     classic.hidden = true;
     power.hidden = false;
-    initPowerShell(state, { switchShell });
+    try {
+      initPowerShell(state, { switchShell });
+    } catch (e) {
+      console.error("Failed to init PowerShell:", e);
+    }
   } else {
     document.body.classList.remove("mode-power");
     power.hidden = true;
@@ -237,7 +245,7 @@ async function loadConfig() {
   if (uiSelect) uiSelect.value = uiMode;
   
   await switchShell(uiMode);
-  updateSignerStatus();
+  await updateSignerStatus();
 }
 
 
