@@ -28,6 +28,9 @@ export const state = {
   signerProfile: null,
   selectedNcc: null,
   nccLocalDrafts: [],
+  nsrLocalDrafts: [],
+  endorsementLocalDrafts: [],
+  supportingLocalDrafts: [],
   editDraft: null,
   currentDraft: {
     ncc: null,
