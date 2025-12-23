@@ -1071,6 +1071,37 @@ async function saveDraftToRelays(draft, kind) {
     const event = await signer.signEvent(template);
     const result = await publishEvent(relays, event);
 
+    const updatedDraft = { ...draft, event_id: event.id };
+    await saveDraft(updatedDraft);
+    updateState({ currentDraft: { ...state.currentDraft, [kind]: updatedDraft } });
+
+    await renderDrafts(
+      kind,
+      state,
+      listDrafts,
+      KINDS,
+      fetchAuthorEndorsements,
+      persistRelayEvents,
+      payloadToDraft,
+      createEventTemplate,
+      downloadJson,
+      publishDraft,
+      verifyDraft,
+      showToast
+    );
+    
+    // Refresh dashboard to update event ID display
+    const nccDrafts = await listDrafts(KINDS.ncc);
+    updateState({ nccLocalDrafts: nccDrafts });
+    renderDashboard(
+      state,
+      listDrafts,
+      openNccView,
+      publishDraft,
+      setupEndorsementCounterButtons,
+      renderEndorsementDetailsPanel
+    );
+
     showToast(
       `Draft saved to ${result.accepted}/${result.total} relays.`
     );
