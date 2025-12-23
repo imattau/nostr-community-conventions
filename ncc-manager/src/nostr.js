@@ -191,28 +191,44 @@ export async function getSigner(mode, nsec) {
   };
 }
 
+const profileCache = new Map();
+const PROFILE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 export async function fetchProfile(pubkey, relays = []) {
   if (!pubkey || !relays.length) return null;
+
+  const cached = profileCache.get(pubkey);
+  if (cached && (Date.now() - cached.at < PROFILE_CACHE_TTL)) {
+    return cached.profile;
+  }
+
   const events = await pool.querySync(
     relays,
     {
       kinds: [0],
       authors: [pubkey],
-      limit: 5
+      limit: 1
     },
-    { maxWait: 4000 }
+    { maxWait: 2500 }
   );
+  
   if (!events.length) return null;
   const latest = events.reduce((best, current) => {
     if (!best) return current;
     return (current.created_at || 0) > (best.created_at || 0) ? current : best;
   }, events[0]);
-  if (!latest?.content) return null;
-  try {
-    return JSON.parse(latest.content);
-  } catch (error) {
-    return null;
+  
+  let profile = null;
+  if (latest?.content) {
+    try {
+      profile = JSON.parse(latest.content);
+    } catch (error) {
+      // ignore
+    }
   }
+
+  profileCache.set(pubkey, { profile, at: Date.now() });
+  return profile;
 }
 
 const DEFAULT_PUBLISH_ATTEMPTS = 3;

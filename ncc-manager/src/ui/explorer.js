@@ -4,6 +4,8 @@ import { payloadToDraft } from "../nostr.js";
 
 const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
 
+let lastRenderedState = null;
+
 export function renderExplorer(container, state, options = {}) {
     const { 
         searchQuery = "", 
@@ -18,6 +20,20 @@ export function renderExplorer(container, state, options = {}) {
 
     const query = searchQuery.trim().toLowerCase();
     
+    // Performance optimization: Quick state comparison to skip redundant renders
+    const currentState = JSON.stringify({
+        query,
+        currentItemId,
+        collapsedCount: collapsedBranches.size,
+        localNcc: state.nccLocalDrafts?.length,
+        relayNcc: state.nccDocs?.length,
+        // Using lengths as a proxy for 'data changed' for performance, 
+        // though deep comparison would be more accurate but slower.
+    });
+
+    if (currentState === lastRenderedState) return;
+    lastRenderedState = currentState;
+
     // Pool all items with conceptual de-duplication
     const conceptualMap = new Map();
     
