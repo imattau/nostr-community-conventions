@@ -111,46 +111,55 @@ export function initPowerShell(state, appActions) {
 }
 
 function setupGlobalListeners() {
-    const searchInput = document.getElementById("p-search");
-    searchInput?.addEventListener("input", (e) => {
-        searchQuery = e.target.value.toLowerCase();
-        renderExplorer();
-    });
+    const shell = document.getElementById("shell-power");
+    if (!shell) return;
 
-    const explorerBody = document.getElementById("p-explorer-body");
-    explorerBody?.addEventListener("click", (e) => {
+    // Use delegation on the root shell for dynamic parts
+    shell.addEventListener("click", (e) => {
+        // Explorer Item Click
+        const navItem = e.target.closest(".p-nav-item");
+        if (navItem && navItem.dataset.id) {
+            openItem(navItem.dataset.id);
+            return;
+        }
+
+        // Explorer Branch Toggle
         const branch = e.target.closest("[data-branch]");
         if (branch) {
             toggleBranch(branch.dataset.branch);
             return;
         }
 
-        const item = e.target.closest(".p-nav-item");
-        if (item && item.dataset.id) {
-            openItem(item.dataset.id);
+        // Brand Click (Reset)
+        const brand = e.target.closest(".p-brand");
+        if (brand) {
+            currentItemId = null;
+            isEditMode = false;
+            renderEmptyState();
+            renderExplorer();
+            renderInspector();
+            return;
+        }
+
+        // Command Palette Item Click
+        const paletteItem = e.target.closest(".p-palette-item");
+        if (paletteItem && paletteItem.dataset.cmd) {
+            executeCommand(paletteItem.dataset.cmd);
+            return;
+        }
+
+        // Command Palette Overlay Click (Close)
+        const overlay = document.getElementById("p-palette-overlay");
+        if (e.target === overlay) {
+            toggleCommandPalette(false);
+            return;
         }
     });
 
-    const brand = document.querySelector(".p-brand");
-    brand && (brand.onclick = () => {
-        currentItemId = null;
-        isEditMode = false;
-        renderEmptyState();
+    const searchInput = document.getElementById("p-search");
+    searchInput?.addEventListener("input", (e) => {
+        searchQuery = e.target.value.toLowerCase();
         renderExplorer();
-        renderInspector();
-    });
-
-    const paletteList = document.getElementById("p-palette-list");
-    paletteList?.addEventListener("click", (e) => {
-        const item = e.target.closest(".p-palette-item");
-        if (item && item.dataset.cmd) {
-            executeCommand(item.dataset.cmd);
-        }
-    });
-
-    const overlay = document.getElementById("p-palette-overlay");
-    overlay?.addEventListener("click", (e) => {
-        if (e.target === overlay) toggleCommandPalette(false);
     });
 
     const paletteInput = document.getElementById("p-palette-input");
@@ -158,14 +167,17 @@ function setupGlobalListeners() {
         renderCommandList(e.target.value);
     });
 
-    // Inspector input syncing
-    const inspectorBody = document.getElementById("p-inspector-body");
-    inspectorBody?.addEventListener("input", (e) => {
+    // Inspector input syncing (Delegation)
+    const inspector = document.getElementById("p-inspector-body");
+    shell.addEventListener("input", (e) => {
         if (!isEditMode || !currentItemId) return;
+        
+        const target = e.target;
+        if (!target.closest("#p-inspector-body")) return;
+        
         const item = findItem(currentItemId);
         if (!item) return;
 
-        const target = e.target;
         const key = target.name;
         if (!key) return;
 
@@ -179,7 +191,6 @@ function setupGlobalListeners() {
             const tagName = key.split(":")[1];
             item.tags = item.tags || {};
             
-            // Handle array tags (comma separated)
             const arrayTags = ["topics", "authors", "supersedes", "roles", "t"];
             if (arrayTags.includes(tagName)) {
                 item.tags[tagName] = target.value.split(",").map(s => s.trim()).filter(Boolean);
@@ -555,21 +566,28 @@ function normalizeStatus(status) {
 // Item Handling
 function findItem(id) {
     if (!_state) return null;
+    
+    // Pool everything together to find the item by its identity (event_id or local id)
     const all = [
         ...(_state.nccLocalDrafts || []), 
         ...(_state.nsrLocalDrafts || []),
         ...(_state.endorsementLocalDrafts || []),
         ...(_state.supportingLocalDrafts || []),
-        ...(_state.nccDocs || [])
+        ...(_state.nccDocs || []),
+        ...(_state.remoteDrafts || [])
     ];
-    const found = all.find(i => i && i.id === id);
+    
+    const found = all.find(i => i && (i.id === id || i.event_id === id));
     if (found) {
-        found._isLocal = [
+        // Mark as local if it's in any of our local draft arrays
+        const isLocal = [
             ...(_state.nccLocalDrafts || []), 
             ...(_state.nsrLocalDrafts || []),
             ...(_state.endorsementLocalDrafts || []),
             ...(_state.supportingLocalDrafts || [])
-        ].some(d => d.id === id) || (found.status === "draft");
+        ].some(d => d.id === found.id);
+        
+        found._isLocal = isLocal || (found.status && found.status !== "published");
     }
     return found;
 }
