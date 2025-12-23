@@ -26,7 +26,7 @@ body.mode-power {
   font-family: var(--ui);
   margin: 0;
   padding: 0;
-  overflow: hidden;
+  overflow: hidden; /* Body must not scroll */
   height: 100vh;
   width: 100vw;
 }
@@ -34,8 +34,8 @@ body.mode-power {
 body.mode-power #app {
   padding: 0 !important;
   margin: 0 !important;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   display: block;
 }
 
@@ -59,15 +59,15 @@ body.mode-power button:hover {
 }
 
 /* =========================
-   Main layout (3-row grid)
+   Main layout (Single Height Authority)
    ========================= */
 
 #shell-power {
-  height: 100vh;
-  width: 100vw;
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr) 28px;
   grid-template-columns: 100%;
+  height: 100vh;
+  width: 100vw;
   overflow: hidden;
 }
 
@@ -79,14 +79,16 @@ body.mode-power button:hover {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   gap: 20px;
-  min-width: 0;
+}
+
+.p-topbar > * {
+  min-width: 0; /* Allow children to shrink */
 }
 
 .p-workspace {
   grid-row: 2;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  height: 100%;
   min-height: 0; 
   overflow: hidden;
 }
@@ -100,22 +102,26 @@ body.mode-power button:hover {
   align-items: center;
   padding: 0 10px;
   font-size: 0.7rem;
-  height: 28px;
 }
 
 .p-nav {
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100%;
 }
 
 .p-split {
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.p-split > * {
+  min-width: 0; /* Allow children to shrink */
 }
 
 /* =========================
@@ -123,7 +129,8 @@ body.mode-power button:hover {
    ========================= */
 
 .p-top-search {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 420px;
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -146,7 +153,6 @@ body.mode-power button:hover {
   text-transform: uppercase;
   padding: 6px 12px;
   color: var(--muted);
-  letter-spacing: 0.05em;
 }
 
 .p-nav-item {
@@ -178,12 +184,6 @@ body.mode-power button:hover {
 .p-nav-item.active {
   background: rgba(106, 169, 255, 0.1);
   border-left: 3px solid var(--accent);
-  padding-left: 9px;
-}
-
-.meta {
-  font-size: 0.7rem;
-  color: var(--muted);
 }
 
 /* =========================
@@ -195,7 +195,7 @@ body.mode-power button:hover {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -230,6 +230,7 @@ body.mode-power button:hover {
   user-select: none;
   line-height: 1.5;
   min-width: 32px;
+  box-sizing: border-box;
 }
 
 .p-editor-textarea {
@@ -247,6 +248,7 @@ body.mode-power button:hover {
   width: 100%;
   overflow: auto;
   tab-size: 4;
+  box-sizing: border-box;
 }
 
 /* =========================
@@ -257,7 +259,7 @@ body.mode-power button:hover {
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -274,8 +276,8 @@ body.mode-power button:hover {
 .p-details-header h2, 
 .p-details-header h3, 
 .p-details-header p {
-  margin: 0;
-  padding: 0;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .p-details-title {
@@ -284,7 +286,6 @@ body.mode-power button:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 280px;
 }
 
 .p-tabs-bar {
@@ -323,9 +324,28 @@ body.mode-power button:hover {
   display: block;
 }
 
-/* Reset markdown margins in preview */
-.p-tab-content > *:first-child { margin-top: 0; }
-.p-tab-content > *:last-child { margin-bottom: 0; }
+.p-tab-content h1, 
+.p-tab-content h2, 
+.p-tab-content h3, 
+.p-tab-content p {
+  margin-top: 0;
+}
+
+/* Prevent markdown from breaking layout */
+#p-tab-preview pre {
+  max-width: 100%;
+  overflow-x: auto;
+  background: var(--panel-2);
+  padding: 12px;
+  border-radius: 4px;
+}
+
+#p-tab-preview code {
+  word-break: break-word;
+  background: var(--panel-2);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
 
 /* =========================
    Badges
