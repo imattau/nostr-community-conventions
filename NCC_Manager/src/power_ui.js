@@ -1,7 +1,7 @@
-
-import { esc, stripNccNumber } from "./utils.js";
+import { esc, stripNccNumber, renderMarkdown } from "./utils.js";
 
 let actions = {};
+let currentItemId = null;
 
 export function initPowerShell(state, appActions) {
   actions = appActions || {};
@@ -59,6 +59,22 @@ export function initPowerShell(state, appActions) {
       // Palette input listener
       document.getElementById("p-palette-input").addEventListener("input", (e) => {
           renderCommandList(e.target.value);
+      });
+
+      // Nav Tree click listener
+      document.getElementById("p-nav").addEventListener("click", (e) => {
+          const item = e.target.closest(".p-nav-item");
+          if (item && item.dataset.id) {
+              openItem(item.dataset.id, state);
+          }
+      });
+
+      // Editor input listener for live preview
+      document.getElementById("p-editor").addEventListener("input", (e) => {
+          const preview = document.getElementById("p-preview");
+          if (preview) {
+              preview.innerHTML = renderMarkdown(e.target.value);
+          }
       });
   }
   
@@ -145,7 +161,8 @@ function renderNavTree(state) {
   
   html += `<div class="p-nav-group"><div class="p-nav-header">Local Drafts (${drafts.length})</div><div class="p-nav-list">`;
   drafts.forEach(draft => {
-      html += `<div class="p-nav-item" data-id="${draft.id}">
+      const active = draft.id === currentItemId ? " active" : "";
+      html += `<div class="p-nav-item${active}" data-id="${draft.id}">
         <span>${esc(draft.d)}</span>
         <span class="p-badge status-draft">DRAFT</span>
       </div>`;
@@ -154,7 +171,8 @@ function renderNavTree(state) {
   
   html += `<div class="p-nav-group"><div class="p-nav-header">Published Network (${published.length})</div><div class="p-nav-list">`;
   published.forEach(doc => {
-      html += `<div class="p-nav-item" data-id="${doc.id}">
+      const active = doc.id === currentItemId ? " active" : "";
+      html += `<div class="p-nav-item${active}" data-id="${doc.id}">
         <span>${esc(doc.d || "unknown")}</span>
         <span class="p-badge status-published">PUB</span>
       </div>`;
@@ -162,4 +180,34 @@ function renderNavTree(state) {
   html += `</div></div>`;
   
   nav.innerHTML = html;
+}
+
+function openItem(id, state) {
+    const drafts = state.nccLocalDrafts || [];
+    const published = state.nccDocs || [];
+    
+    let item = drafts.find(d => d.id === id);
+    if (!item) {
+        item = published.find(d => d.id === id);
+    }
+    
+    if (!item) return;
+    
+    currentItemId = id;
+    
+    // Update active state in nav
+    document.querySelectorAll(".p-nav-item").forEach(el => {
+        el.classList.toggle("active", el.dataset.id === id);
+    });
+    
+    const editor = document.getElementById("p-editor");
+    const preview = document.getElementById("p-preview");
+    
+    if (editor && preview) {
+        editor.value = item.content || "";
+        preview.innerHTML = renderMarkdown(item.content || "");
+    }
+    
+    const msg = document.getElementById("p-status-msg");
+    if (msg) msg.textContent = `Opened: ${item.d || item.id}`;
 }
