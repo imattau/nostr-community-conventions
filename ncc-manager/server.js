@@ -40,7 +40,7 @@ app.get("/api/defaults", (req, res) => {
     },
     app: {
       name: "NCC Manager",
-      version: "0.1.0"
+      version: "0.2.0"
     }
   });
 });
