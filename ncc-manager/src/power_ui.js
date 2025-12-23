@@ -209,13 +209,6 @@ function setupGlobalListeners() {
                 }
             } else if (action === "revise-item") {
                 handleReviseAction(id);
-            } else if (action === "open-item") {
-                isEditMode = true;
-                const item = findItem(id);
-                if (item) {
-                    renderContent(item);
-                    renderInspector(item);
-                }
             } else if (action === "save-item") {
                 handleSaveShortcut();
             } else if (action === "cancel-item") {
@@ -893,13 +886,6 @@ function renderInspector(item) {
             reviseBtn.dataset.action = "revise-item";
             reviseBtn.dataset.id = item.id;
             actionsContainer.appendChild(reviseBtn);
-
-            const openBtn = document.createElement("button");
-            openBtn.className = "p-btn-ghost";
-            openBtn.textContent = "Open it";
-            openBtn.dataset.action = "open-item";
-            openBtn.dataset.id = item.id;
-            actionsContainer.appendChild(openBtn);
 
             if (actions.withdrawDraft && item.status !== "withdrawn") {
                 const withdrawBtn = document.createElement("button");
