@@ -926,13 +926,27 @@ async function handleReviseAction(id) {
     log("Handling Revise action for id:", id);
     const item = findItem(id);
     if (!item) return;
+    
     const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
     if (draft) {
+        // Ensure the draft is truly a fresh local item
+        draft.id = crypto.randomUUID();
+        draft.event_id = "";
+        draft.status = "draft";
+        draft.source = "local";
+        
+        log("Revision draft created:", draft.id, "superseding:", item.event_id);
+        
+        // Save it locally immediately so it exists in state
         await actions.saveItem?.(draft.id, draft.content, draft);
-        openItem(draft.id);
+        
+        // Transition to the new draft in edit mode
+        currentItemId = draft.id;
         isEditMode = true;
+        
         renderContent(draft);
         renderInspector(draft);
+        renderExplorer();
     }
 }
 
