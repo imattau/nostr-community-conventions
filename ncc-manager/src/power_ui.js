@@ -752,71 +752,93 @@ function renderInspector(item) {
     if (!actionsContainer) return;
     actionsContainer.innerHTML = "";
 
-    if (isLocalDraft) {
-        const editBtn = document.createElement("button");
-        editBtn.className = isEditMode ? "p-btn-primary" : "p-btn-accent";
-        editBtn.textContent = isEditMode ? "View Mode" : "Edit";
-        editBtn.onclick = () => {
-            isEditMode = !isEditMode;
-            renderContent(item);
-            renderInspector(item);
-        };
-        actionsContainer.appendChild(editBtn);
+    if (!isEditMode) {
+        // VIEW MODE ACTIONS
+        if (item._isLocal) {
+            // Local Draft
+            const editBtn = document.createElement("button");
+            editBtn.className = "p-btn-accent";
+            editBtn.textContent = "Edit";
+            editBtn.onclick = () => {
+                isEditMode = true;
+                renderContent(item);
+                renderInspector(item);
+            };
+            actionsContainer.appendChild(editBtn);
 
-        if (isEditMode) {
+            const publishBtn = document.createElement("button");
+            publishBtn.className = "p-btn-ghost";
+            publishBtn.textContent = "Publish";
+            publishBtn.onclick = () => {
+                if (confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
+                    actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+                }
+            };
+            actionsContainer.appendChild(publishBtn);
+        } else {
+            // Published Item
+            const reviseBtn = document.createElement("button");
+            reviseBtn.className = "p-btn-accent";
+            reviseBtn.textContent = "Revise";
+            reviseBtn.onclick = async () => {
+                const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
+                if (draft) {
+                    await actions.saveItem?.(draft.id, draft.content, draft);
+                    openItem(draft.id);
+                    isEditMode = true;
+                    renderContent(draft);
+                    renderInspector(draft);
+                }
+            };
+            actionsContainer.appendChild(reviseBtn);
+
+            const openBtn = document.createElement("button");
+            openBtn.className = "p-btn-ghost";
+            openBtn.textContent = "Open it";
+            openBtn.onclick = () => {
+                isEditMode = true;
+                renderContent(item);
+                renderInspector(item);
+            };
+            actionsContainer.appendChild(openBtn);
+
+            if (actions.withdrawDraft) {
+                const withdrawBtn = document.createElement("button");
+                withdrawBtn.className = "p-btn-ghost";
+                withdrawBtn.textContent = "Withdraw";
+                withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
+                actionsContainer.appendChild(withdrawBtn);
+            }
+        }
+    } else {
+        // EDIT MODE ACTIONS
+        if (item._isLocal) {
             const saveBtn = document.createElement("button");
             saveBtn.className = "p-btn-accent";
             saveBtn.textContent = "Save (Ctrl+S)";
             saveBtn.onclick = handleSaveShortcut;
             actionsContainer.appendChild(saveBtn);
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.className = "p-btn-ghost";
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.onclick = () => {
-                isEditMode = false;
-                const found = findItem(currentItemId);
-                if (found) {
-                    renderContent(found);
-                    renderInspector(found);
-                    renderExplorer();
-                }
-            };
-            actionsContainer.appendChild(cancelBtn);
+        } else {
+            const saveMsg = document.createElement("span");
+            saveMsg.className = "p-muted-text small";
+            saveMsg.style.padding = "6px 0";
+            saveMsg.textContent = "Published items are read-only";
+            actionsContainer.appendChild(saveMsg);
         }
 
-        const publishBtn = document.createElement("button");
-        publishBtn.className = "p-btn-ghost";
-        publishBtn.textContent = "Publish";
-        publishBtn.onclick = () => {
-            if (confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
-                actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "p-btn-ghost";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.onclick = () => {
+            isEditMode = false;
+            const found = findItem(currentItemId);
+            if (found) {
+                renderContent(found);
+                renderInspector(found);
+                renderExplorer();
             }
         };
-        actionsContainer.appendChild(publishBtn);
-    } else {
-        const reviseBtn = document.createElement("button");
-        reviseBtn.className = "p-btn-accent";
-        reviseBtn.textContent = "Revise";
-        reviseBtn.onclick = async () => {
-            const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
-            if (draft) {
-                await actions.saveItem?.(draft.id, draft.content, draft);
-                openItem(draft.id);
-                isEditMode = true;
-                renderContent(draft);
-                renderInspector(draft);
-            }
-        };
-        actionsContainer.appendChild(reviseBtn);
-
-        if (actions.withdrawDraft) {
-            const withdrawBtn = document.createElement("button");
-            withdrawBtn.className = "p-btn-ghost";
-            withdrawBtn.textContent = "Withdraw";
-            withdrawBtn.onclick = () => actions.withdrawDraft?.(item.id);
-            actionsContainer.appendChild(withdrawBtn);
-        }
+        actionsContainer.appendChild(cancelBtn);
     }
 }
 
