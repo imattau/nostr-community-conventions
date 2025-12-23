@@ -1,0 +1,47 @@
+.theme-terminal {
+    /* Backgrounds */
+    --bg: #000000;
+    --panel: #0a0a0a;
+    --panel-2: #1a1a1a; /* Slightly lighter for input fields */
+
+    /* Text & Colors */
+    --text: #00ff00; /* Classic green */
+    --muted: #008800; /* Darker green for muted elements */
+    --accent: #00ff00;
+    --accent-soft: rgba(0, 255, 0, 0.1);
+
+    /* Borders & Separators */
+    --border: #008800; /* Green borders */
+
+    /* Status Colors */
+    --danger: #ff0000;
+    --warning: #ffff00;
+    --success: #00ff00;
+
+    /* Fonts */
+    --mono: 'Fira Code', 'JetBrains Mono', 'monospace'; /* Prioritize common monospaced fonts */
+    --ui: var(--mono); /* Use monospace for all UI */
+
+    /* Specific overrides */
+    .p-top-search, .p-field input, .p-field select, .p-field textarea {
+        border-color: var(--border);
+    }
+
+    .p-top-search:focus, .p-field input:focus, .p-field select:focus {
+        border-color: var(--text); /* Highlight focus with bright green */
+    }
+
+    .p-btn-accent {
+        background: var(--accent);
+        color: var(--bg); /* Black text on green button */
+    }
+    .p-btn-accent:hover {
+        background: var(--text);
+        color: var(--bg);
+    }
+    
+    .p-badge-mini.status-published {
+        color: var(--text);
+        border-color: var(--muted);
+    }
+}

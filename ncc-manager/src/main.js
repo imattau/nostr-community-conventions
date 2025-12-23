@@ -326,8 +326,10 @@ async function fetchDefaults() {
 async function loadConfig() {
   const defaultRelays = (await getConfig("default_relays", [])) || [];
   const signerMode = (await getConfig("signer_mode", "nip07")) || "nip07";
+  const savedTheme = (await getConfig("theme", "power")) || "power";
   
-  updateState({ defaults: defaultRelays, signerMode: signerMode });
+  updateState({ defaults: defaultRelays, signerMode: signerMode, theme: savedTheme });
+  document.body.className = `mode-${savedTheme}`;
   
   await initShell();
   await updateSignerStatus();
