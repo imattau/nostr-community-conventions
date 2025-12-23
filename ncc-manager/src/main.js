@@ -209,6 +209,40 @@ async function handlePowerSave(id, content, fullDraft = null) {
   return item;
 }
 
+async function promptSignerConnection() {
+  if (state.signerMode === "nip07") {
+    if (!window.nostr) {
+      showToast("Install a NIP-07 signer to sign in.", "error");
+      return;
+    }
+    try {
+      await window.nostr.getPublicKey();
+    } catch (error) {
+      showToast("Signer denied access.", "error");
+      return;
+    }
+  } else {
+    // If in nsec mode but no nsec provided yet, open settings
+    const nsec = sessionStorage.getItem("ncc-manager-nsec");
+    if (!nsec) {
+        showToast("Enter your nsec in Settings to sign in.", "info");
+        // We could trigger settings modal here if we had a clean way, 
+        // but for now just inform the user.
+        return;
+    }
+  }
+  await updateSignerStatus();
+}
+
+async function signOutSigner() {
+  sessionStorage.removeItem("ncc-manager-nsec");
+  await setConfig("signer_mode", "nip07");
+  updateState({ signerPubkey: null, signerProfile: null, signerMode: "nip07" });
+  await updateSignerStatus();
+  showToast("Signer cleared.");
+  refreshUI();
+}
+
 async function refreshSignerProfile() {
   if (!state.signerPubkey) {
     updateState({ signerProfile: null });
