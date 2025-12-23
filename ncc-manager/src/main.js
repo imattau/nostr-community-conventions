@@ -135,13 +135,17 @@ async function handlePowerSave(id, content, fullDraft = null) {
   item.content = content;
   item.updated_at = Date.now();
   
+  // Save local draft
   await saveDraft(item);
   
+  // Auto-broadcast if signed in
   if (state.signerPubkey && item.status === "draft") {
     try {
       const broadcast = await broadcastDraftToRelays(item);
       if (broadcast) {
+        // IMPORTANT: Update the item with the new event_id
         item.event_id = broadcast.eventId;
+        item.raw_event = broadcast.result; // optionally keep track of result
         await saveDraft(item);
       }
     } catch (e) {
@@ -151,6 +155,9 @@ async function handlePowerSave(id, content, fullDraft = null) {
   
   await updateAllDrafts();
   refreshUI();
+  
+  // Return the updated item so caller can update their reference
+  return item;
 }
 
 async function refreshSignerProfile() {
