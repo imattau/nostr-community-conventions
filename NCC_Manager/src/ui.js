@@ -326,11 +326,12 @@ export function renderDashboard(
     const publishedAtRaw = eventTagValue(event.tags, "published_at");
     const publishedAt =
       publishedAtRaw && String(publishedAtRaw).match(/^\\d+$/) ? Number(publishedAtRaw) : null;
+    const statusTag = eventTagValue(event.tags, "status");
     combined.push({
       id: event.id,
       d: eventTagValue(event.tags, "d"),
       title: eventTagValue(event.tags, "title") || "Untitled",
-      status: publishedAt ? "published" : "proposal",
+      status: statusTag || "published",
       published_at: publishedAt,
       event_id: event.id,
       source: "relay",
