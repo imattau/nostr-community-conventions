@@ -98,13 +98,15 @@ export function payloadToDraft(payload) {
     return acc;
   }, {});
 
+  const status = tagMap.status?.[0] || (payload.event_id || payload.id ? "published" : "draft");
+
   const draft = {
     id: payload.id || payload.event_id || crypto.randomUUID(),
     kind: payload.kind,
     d: tagMap.d?.[0] || "",
     title: tagMap.title?.[0] || "",
     content: payload.content || "",
-    status: tagMap.status?.[0] || (payload.event_id || payload.id ? "published" : "draft"),
+    status: status,
     event_id: payload.event_id || payload.id || "",
     author_pubkey: payload.author_pubkey || payload.pubkey || "",
     published_at: tagMap.published_at ? Number(tagMap.published_at[0]) : null,
@@ -289,6 +291,18 @@ export async function fetchEndorsements(relays, eventIds) {
       if (event && event.id) dedup.set(event.id, event);
   });
   return Array.from(dedup.values());
+}
+
+export async function fetchSuccessionRecords(relays, dValues) {
+  if (!relays.length || !dValues.length) return [];
+  const uniqueDs = Array.from(new Set(dValues.filter(Boolean)));
+  if (!uniqueDs.length) return [];
+  
+  return pool.querySync(relays, {
+    kinds: [30051],
+    "#d": uniqueDs,
+    limit: 1000
+  }, { maxWait: 4000 });
 }
 
 export async function fetchAuthorEndorsements(relays, pubkey) {

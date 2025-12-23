@@ -682,6 +682,9 @@ async function publishDraft(draft, kind) {
         if (nsrResult.skipped) {
             console.log("NSR already exists for this revision.");
         } else {
+            if (nsrResult.event) {
+                await persistRelayEvents([nsrResult.event]);
+            }
             showToast(`NSR created: ${shortenKey(nsrResult.eventId)}`, "info");
         }
       } catch (nsrError) {
