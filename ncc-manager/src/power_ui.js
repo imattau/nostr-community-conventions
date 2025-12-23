@@ -287,19 +287,23 @@ function renderExplorerSection(section) {
 function buildRevisionGroups(items) {
     const map = new Map();
     items.forEach((item) => {
-        const key = (item.d || "").toUpperCase().trim() || "Untitled";
-        const bucket = map.get(key) || [];
-        bucket.push(item);
+        const kindLabel = TYPE_LABELS[item.kind] || "DOC";
+        const d = (item.d || "").toUpperCase().trim() || "Untitled";
+        const key = `${item.kind}:${d}`;
+        const bucket = map.get(key) || { kind: item.kind, kindLabel, d, entries: [] };
+        bucket.entries.push(item);
         map.set(key, bucket);
     });
 
-    return Array.from(map.entries())
-        .map(([key, list]) => {
+    return Array.from(map.values())
+        .map((group) => {
             return {
-                label: key,
-                rawKey: key,
-                entries: list
-                    .map((item) => ({ item, depth: computeRevisionDepth(item, list) }))
+                label: group.d,
+                kind: group.kind,
+                kindLabel: group.kindLabel,
+                rawKey: `${group.kind}:${group.d}`,
+                entries: group.entries
+                    .map((item) => ({ item, depth: computeRevisionDepth(item, group.entries) }))
                     .sort((a, b) => {
                         if (b.depth !== a.depth) return b.depth - a.depth;
                         const aTs = ensureTimestamp(a.item.updated_at || a.item.created_at);
@@ -346,11 +350,15 @@ function renderExplorerBranch(group, type) {
     const firstEntry = group.entries[0];
     const status = determineStatus(firstEntry?.item, type);
     const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
+    
+    // Short type label for the branch
+    const typeIndicator = group.kind === KINDS.ncc ? "" : `<span class="p-type-tag">${group.kindLabel}</span>`;
+
     return `
         <div class="p-nav-tree">
             <button class="p-nav-branch-header" data-branch="${branchKey}">
                 <span class="p-nav-branch-icon">${isClosed ? "▸" : "▾"}</span>
-                <span>${esc(group.label)}</span>
+                <span class="p-nav-branch-title">${typeIndicator}${esc(group.label)}</span>
                 <span class="p-badge-mini status-${status}">${badgeLabel}</span>
             </button>
             <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
@@ -373,10 +381,14 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
         idx === 0
             ? ""
             : ` (${REVISION_DESCRIPTORS[Math.min(idx, REVISION_DESCRIPTORS.length - 1)]})`;
+    
+    const typeLabel = TYPE_LABELS[item.kind] || "DOC";
+    const showType = item.kind !== KINDS.ncc;
+
     return `
         <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
             <div class="p-nav-meta">
-                <span class="p-nav-id">${esc(baseId)}</span>
+                <span class="p-nav-id">${showType ? `<small class="p-muted-type">${typeLabel}:</small> ` : ""}${esc(baseId)}</span>
                 <span class="p-badge-mini status-${status}">${statusLabel}</span>
             </div>
             <div class="p-nav-label">${esc(title)}${suffix}</div>
@@ -384,6 +396,7 @@ function renderExplorerItem(entry, idx, inheritedStatus) {
         </div>
     `;
 }
+
 
 function toggleBranch(id) {
     if (!id) return;
