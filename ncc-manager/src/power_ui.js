@@ -305,10 +305,12 @@ function setupGlobalListeners() {
         const target = e.target;
         const navItem = target.closest(".p-nav-item");
         
-        // We only care about NCC items for these shortcuts
+        // We only care about published NCC items for these shortcuts
         if (navItem && navItem.dataset.id) {
             const item = findItem(navItem.dataset.id);
-            if (item && item.kind === KINDS.ncc) {
+            const isPublished = item && item.event_id && (item.status || "").toLowerCase() === "published";
+            
+            if (item && item.kind === KINDS.ncc && isPublished) {
                 e.preventDefault();
                 renderContextMenu(e.clientX, e.clientY, item);
             }
