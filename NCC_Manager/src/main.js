@@ -929,6 +929,26 @@ async function handleListAction(kind, event) {
   }
 }
 
+function handleEdit(id) {
+  const draft = (state.nccLocalDrafts || []).find((d) => d.id === id);
+  if (!draft) return;
+  openNccView(draft, state.nccLocalDrafts);
+  showEditMode(draft);
+}
+
+function handleRevise(id) {
+  const localDrafts = state.nccLocalDrafts || [];
+  let item = localDrafts.find((d) => d.id === id);
+  if (!item) {
+     item = (state.nccDocs || []).find((d) => d.id === id);
+  }
+  if (!item) return;
+  
+  openNccView(item, localDrafts);
+  const draft = createRevisionDraft(item, localDrafts);
+  if (draft) showEditMode(draft);
+}
+
 async function refreshDashboard() {
   await renderDashboard(
     state,
@@ -937,7 +957,9 @@ async function refreshDashboard() {
     publishDraft,
     setupEndorsementCounterButtons,
     renderEndorsementDetailsPanel,
-    withdrawDraft
+    withdrawDraft,
+    handleEdit,
+    handleRevise
   );
 }
 
