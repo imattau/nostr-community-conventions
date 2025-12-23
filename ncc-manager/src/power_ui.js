@@ -810,10 +810,10 @@ function renderInspector(item) {
     const relayStatus = _state?.relayStatus || {};
     const lastSync = relayStatus.at ? new Date(relayStatus.at).toLocaleTimeString() : "-";
 
-    const isLocalDraft = item._isLocal;
+    const isPublished = item.event_id && (item.status || "").toLowerCase() === "published";
 
     let metadataContent = "";
-    if (isEditMode && isLocalDraft) {
+    if (isEditMode && !isPublished) {
         metadataContent = renderEditFields(item);
     } else {
         const supersedes = Array.isArray(item.tags?.supersedes) ? item.tags.supersedes : [];
@@ -851,8 +851,8 @@ function renderInspector(item) {
 
     if (!isEditMode) {
         // VIEW MODE ACTIONS
-        if (item._isLocal) {
-            // Local Draft
+        if (!isPublished) {
+            // It's a DRAFT (local or remote)
             const editBtn = document.createElement("button");
             editBtn.className = "p-btn-accent";
             editBtn.textContent = "Edit";
@@ -867,7 +867,7 @@ function renderInspector(item) {
             publishBtn.dataset.id = item.id;
             actionsContainer.appendChild(publishBtn);
 
-            // DELETE or WITHDRAW logic for local
+            // DELETE or WITHDRAW logic for draft
             if (!item.event_id) {
                 const deleteBtn = document.createElement("button");
                 deleteBtn.className = "p-btn-ghost";
@@ -913,7 +913,7 @@ function renderInspector(item) {
         }
     } else {
         // EDIT MODE ACTIONS
-        if (item._isLocal) {
+        if (!isPublished) {
             const saveBtn = document.createElement("button");
             saveBtn.className = "p-btn-accent";
             saveBtn.textContent = "Save (Ctrl+S)";
@@ -934,6 +934,7 @@ function renderInspector(item) {
         actionsContainer.appendChild(cancelBtn);
     }
 }
+
 
 async function handleReviseAction(id) {
     log("Handling Revise action for id:", id);
