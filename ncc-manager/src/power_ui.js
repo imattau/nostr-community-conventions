@@ -14,13 +14,6 @@ const TYPE_LABELS = {
     [KINDS.supporting]: "Supporting"
 };
 
-const TYPE_ICONS = {
-    [KINDS.ncc]: "📄",
-    [KINDS.nsr]: "🔄",
-    [KINDS.endorsement]: "✅",
-    [KINDS.supporting]: "📚"
-};
-
 // Initialization
 export function initPowerShell(state, appActions) {
   _state = state;
@@ -33,12 +26,13 @@ export function initPowerShell(state, appActions) {
         <header class="p-topbar">
           <div class="p-brand" style="cursor: pointer;">
             <span class="p-accent">></span> NCC Console
+            <span class="p-version">v0.1</span>
           </div>
           
           <div class="p-top-center">
             <div class="p-search-wrapper">
                 <span class="p-search-icon">🔍</span>
-                <input class="p-top-search" id="p-search" placeholder="Search docs, drafts, and commands..." />
+                <input class="p-top-search" id="p-search" placeholder="Search NCCs..." />
                 <span class="p-search-kb">Ctrl+K</span>
             </div>
           </div>
@@ -72,12 +66,10 @@ export function initPowerShell(state, appActions) {
         
         <footer class="p-status">
            <div class="p-status-left">
-              <div id="p-status-relays" title="Connected Relays">🌐 0</div>
-              <div id="p-status-item-info"></div>
+              <div id="p-status-relays">Relays: 0</div>
            </div>
            <div class="p-status-right">
               <div id="p-status-msg">Ready</div>
-              <div class="p-status-clock" id="p-status-clock"></div>
            </div>
         </footer>
         
@@ -91,12 +83,6 @@ export function initPowerShell(state, appActions) {
       
       setupKeyboardShortcuts();
       setupGlobalListeners();
-      
-      // Clock update
-      setInterval(() => {
-          const el = document.getElementById("p-status-clock");
-          if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }, 1000);
   }
   
   refreshUI();
@@ -165,7 +151,6 @@ function refreshUI() {
         const item = findItem(currentItemId);
         if (item) {
             renderInspector(item);
-            updateStatusItemInfo(item);
         } else {
             currentItemId = null;
             renderEmptyState();
@@ -183,14 +168,14 @@ function renderTopBar() {
         el.innerHTML = `
             <div class="p-signer-pill">
                 <span class="p-signer-dot active"></span>
-                <span>${esc(name)}</span>
+                <span>Signer: ${esc(name)}</span>
             </div>
         `;
     } else {
         el.innerHTML = `
             <div class="p-signer-pill">
                 <span class="p-signer-dot"></span>
-                <span>Not Connected</span>
+                <span>Signer: Not connected</span>
             </div>
         `;
     }
@@ -198,14 +183,7 @@ function renderTopBar() {
 
 function renderStatusBar() {
     const r = document.getElementById("p-status-relays");
-    if (r && _state) r.textContent = `🌐 ${_state.relayStatus?.relays || 0}`;
-}
-
-function updateStatusItemInfo(item) {
-    const el = document.getElementById("p-status-item-info");
-    if (!el) return;
-    const type = TYPE_LABELS[item.kind] || "DOC";
-    el.textContent = `${type}: ${item.d || "Untitled"}`;
+    if (r && _state) r.textContent = `Relays: ${_state.relayStatus?.relays || 0}`;
 }
 
 function updateStatus(msg) {
@@ -225,9 +203,8 @@ function renderEmptyState() {
     `;
     const inspector = document.getElementById("p-inspector");
     if (inspector) inspector.innerHTML = "";
-    const info = document.getElementById("p-status-item-info");
-    if (info) info.textContent = "";
 }
+
 
 // Explorer
 function renderExplorer() {
@@ -242,11 +219,11 @@ function renderExplorer() {
         ...(_state.supportingLocalDrafts || [])
     ].filter(d => 
         !searchQuery || (d.d || "").toLowerCase().includes(searchQuery) || (d.title || "").toLowerCase().includes(searchQuery)
-    );
+    ).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
 
     const published = (_state.nccDocs || []).filter(d => 
         !searchQuery || (d.d || "").toLowerCase().includes(searchQuery) || eventTagValue(d.tags, "title").toLowerCase().includes(searchQuery)
-    );
+    ).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
     let html = "";
     
@@ -274,19 +251,24 @@ function renderGroup(title, items, isDraft) {
     } else {
         items.forEach(item => {
             const active = item.id === currentItemId ? " active" : "";
-            const typeIcon = TYPE_ICONS[item.kind] || "📄";
-            const id = item.d || "NCC-XX";
+            const id = (item.d || "NCC-XX").toUpperCase();
             const label = item.title || eventTagValue(item.tags, "title") || "Untitled";
             const status = (item.status || (isDraft ? "draft" : "published")).toLowerCase();
+            const statusLabel = status === "published" ? "PUB" : "DRAFT";
+            
+            const timestamp = item.updated_at ? item.updated_at : (item.created_at ? item.created_at * 1000 : null);
+            const dateStr = timestamp ? new Date(timestamp).toLocaleDateString() : "";
             
             html += `
                 <div class="p-nav-item${active}" data-id="${item.id}" title="${esc(label)}">
-                    <span class="p-nav-icon">${typeIcon}</span>
                     <div class="p-nav-body">
-                        <div class="p-nav-id">${esc(id)}</div>
-                        <div class="p-nav-label">${esc(label)}</div>
+                        <div class="p-nav-row-top">
+                           <span class="p-nav-id">${esc(id)}</span>
+                           <span class="p-badge-mini status-${status}">${statusLabel}</span>
+                        </div>
+                        <div class="p-nav-label-muted">${esc(label)}</div>
+                        <div class="p-nav-date">${dateStr}</div>
                     </div>
-                    <div class="p-mini-status status-${status}"></div>
                 </div>`;
         });
     }
@@ -294,6 +276,7 @@ function renderGroup(title, items, isDraft) {
     html += `</div></div>`;
     return html;
 }
+
 
 // Item Handling
 function findItem(id) {
@@ -327,7 +310,6 @@ function openItem(id) {
     renderExplorer(); 
     renderContent(item);
     renderInspector(item);
-    updateStatusItemInfo(item);
     updateStatus(`Opened ${item.d || "item"}`);
 }
 
@@ -391,19 +373,19 @@ function renderInspector(item) {
     const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
     const status = (item.status || "published").toUpperCase();
     const author = item.author || item.pubkey || "Unknown";
-    const publishedAt = item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "Not published";
+    
+    const timestamp = item.updated_at ? item.updated_at : (item.created_at ? item.created_at * 1000 : null);
+    const dateStr = timestamp ? new Date(timestamp).toLocaleString() : "-";
     
     el.innerHTML = `
         <div class="p-inspector-header">Inspector</div>
         
         <div class="p-section">
-            <span class="p-section-title">Properties</span>
+            <span class="p-section-title">Item Metadata</span>
             <div class="p-prop-list">
-                <div class="p-prop-row"><span class="p-prop-key">Type</span><span class="p-prop-val">${TYPE_LABELS[item.kind] || "Unknown"}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Title</span><span class="p-prop-val">${esc(title)}</span></div>
                 <div class="p-prop-row"><span class="p-prop-key">Status</span><span class="p-badge status-${status.toLowerCase()}">${status}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${author}">${shortenKey(author)}</span></div>
-                <div class="p-prop-row"><span class="p-prop-key">Published</span><span class="p-prop-val">${publishedAt}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Updated</span><span class="p-prop-val">${dateStr}</span></div>
             </div>
         </div>
         
@@ -412,20 +394,14 @@ function renderInspector(item) {
             <div class="p-inspector-actions" id="p-inspector-actions"></div>
         </div>
         
-        ${item.tags ? `
         <div class="p-section">
-            <span class="p-section-title">Tags</span>
-            <div class="p-tag-cloud">
-                ${renderTags(item)}
-            </div>
-        </div>` : ""}
-        
-        <div class="p-section">
-            <span class="p-section-title">Nostr Network</span>
+            <span class="p-section-title">Network Summary</span>
             <div class="p-network-info">
+                <div class="p-prop-row"><span class="p-prop-key">Identifier</span><span class="p-prop-val">${esc(item.d || "-")}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Author</span><span class="p-prop-val" title="${author}">${shortenKey(author)}</span></div>
                 ${item.event_id 
-                    ? `<div class="p-event-id"><code>${item.event_id}</code></div>` 
-                    : `<div class="p-muted-text">Not indexed on relays</div>`}
+                    ? `<div class="p-event-id" style="margin-top:8px;"><code>${item.event_id}</code></div>` 
+                    : `<div class="p-muted-text" style="margin-top:8px;">Not published</div>`}
             </div>
         </div>
     `;
@@ -435,36 +411,29 @@ function renderInspector(item) {
     if (item._isLocal) {
         // LOCAL DRAFT ACTIONS
         const editBtn = document.createElement("button");
-        editBtn.className = isEditMode ? "p-btn-primary" : "p-btn-ghost";
-        editBtn.innerHTML = isEditMode ? "💾 Save Changes (Ctrl+S)" : "✎ Edit Draft";
+        editBtn.className = isEditMode ? "p-btn-primary" : "p-btn-accent";
+        editBtn.textContent = isEditMode ? "Read Mode" : "Edit";
         editBtn.onclick = () => {
-            if (isEditMode) handleSaveShortcut();
-            else {
-                isEditMode = true;
-                renderContent(item);
-                renderInspector(item);
-            }
+            isEditMode = !isEditMode;
+            renderContent(item);
+            renderInspector(item);
         };
         actionsContainer.appendChild(editBtn);
         
-        if (isEditMode) {
-            const cancelBtn = document.createElement("button");
-            cancelBtn.className = "p-btn-ghost";
-            cancelBtn.textContent = "Cancel Edit";
-            cancelBtn.onclick = () => { isEditMode = false; renderContent(item); renderInspector(item); };
-            actionsContainer.appendChild(cancelBtn);
-        }
-
         const publishBtn = document.createElement("button");
-        publishBtn.className = "p-btn-accent";
-        publishBtn.textContent = "🚀 Publish to Relays";
-        publishBtn.onclick = () => { if(confirm("Publish this " + TYPE_LABELS[item.kind] + "?")) actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase()); };
+        publishBtn.className = "p-btn-ghost";
+        publishBtn.textContent = "Publish";
+        publishBtn.onclick = () => { 
+            if(confirm("Publish this " + TYPE_LABELS[item.kind] + "?")) {
+                actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+            }
+        };
         actionsContainer.appendChild(publishBtn);
     } else {
         // PUBLISHED ITEM ACTIONS
         const reviseBtn = document.createElement("button");
         reviseBtn.className = "p-btn-accent";
-        reviseBtn.textContent = "🔄 Create Revision";
+        reviseBtn.textContent = "Revise";
         reviseBtn.onclick = async () => {
             const draft = actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
             if (draft) {
@@ -477,35 +446,25 @@ function renderInspector(item) {
         };
         actionsContainer.appendChild(reviseBtn);
         
-        const endorseBtn = document.createElement("button");
-        endorseBtn.className = "p-btn-ghost";
-        endorseBtn.textContent = "✅ Endorse this NCC";
-        endorseBtn.onclick = () => {
-            // Logic to switch to endorsement creation
-            updateStatus("Switching to endorsement mode...");
+        const openBtn = document.createElement("button");
+        openBtn.className = "p-btn-ghost";
+        openBtn.textContent = "Open it";
+        openBtn.onclick = () => {
+            isEditMode = true;
+            renderContent(item);
+            renderInspector(item);
         };
-        actionsContainer.appendChild(endorseBtn);
+        actionsContainer.appendChild(openBtn);
     }
 }
 
-function renderTags(item) {
-    if (!item.tags) return "";
-    if (Array.isArray(item.tags)) {
-        return item.tags.map(t => `<span class="p-tag-pill"><b>${t[0]}</b>: ${t[1]}</span>`).join("");
-    }
-    return Object.entries(item.tags).map(([k, v]) => {
-        const val = Array.isArray(v) ? v.join(", ") : v;
-        return val ? `<span class="p-tag-pill"><b>${k}</b>: ${esc(val)}</span>` : "";
-    }).join("");
-}
 
 // Commands & Palette
 const COMMANDS = [
-    { id: "save", title: "Save Current Draft", kb: "Ctrl+S", run: () => handleSaveShortcut() },
+    { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
     { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => actions.openNewNcc?.() },
-    { id: "classic", title: "Switch to Classic UI", kb: "", run: () => actions.switchShell?.("classic") },
-    { id: "refresh", title: "Refresh Data", kb: "Ctrl+R", run: () => window.location.reload() },
-    { id: "clear", title: "Clear Console", kb: "Esc", run: () => renderEmptyState() }
+    { id: "classic", title: "Switch to Classic Mode", kb: "", run: () => actions.switchShell?.("classic") },
+    { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
 function setupKeyboardShortcuts() {
@@ -577,8 +536,10 @@ function executeCommand(id) {
 async function handleSaveShortcut() {
     if (!currentItemId || !isEditMode) return;
     const item = findItem(currentItemId);
-    if (!item || !item._isLocal) {
-        updateStatus("Cannot save: Published items are read-only.");
+    if (!item) return;
+
+    if (!item._isLocal) {
+        updateStatus("Saving blocked: Published items are read-only.");
         return;
     }
     
@@ -587,9 +548,12 @@ async function handleSaveShortcut() {
     
     const content = editor.value;
     updateStatus("Saving...");
-    await actions.saveItem(currentItemId, content, item);
-    updateStatus(`Saved at ${new Date().toLocaleTimeString()}`);
-    
-    // Refresh inspector to show it's saved/not editing status if needed
-    // Actually, keep editing mode but clear unsaved mark
+    try {
+        await actions.saveItem(currentItemId, content, item);
+        updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+        // Refresh local item content in our state if necessary
+        item.content = content;
+    } catch (e) {
+        updateStatus("Save failed");
+    }
 }
