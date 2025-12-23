@@ -6,9 +6,8 @@ const pool = new SimplePool();
 function normalizeSupersedes(value) {
   const trimmed = (value || "").trim();
   if (!trimmed) return "";
-  if (trimmed.startsWith("event:") || trimmed.startsWith("ncc-")) return trimmed;
-  if (/^[a-f0-9]{64}$/i.test(trimmed)) return `event:${trimmed}`;
-  return trimmed;
+  // Return as is (supports ncc-XX or raw hex)
+  return trimmed.replace(/^event:/i, "");
 }
 
 function normalizeEventReference(value) {

@@ -1021,7 +1021,7 @@ function renderEditFields(item) {
         addField("Language", "tag:lang", item.tags?.lang || "");
         addField("License", "tag:license", item.tags?.license || "");
         
-        // Strip 'event:' prefix for display
+        // Strip legacy 'event:' prefix for display
         const supersedesDisplay = (item.tags?.supersedes || [])
             .map(s => s.replace(/^event:/i, ""))
             .join(", ");
