@@ -20,19 +20,6 @@ import {
 } from "./nostr.js";
 
 import {
-  showToast,
-  hideSignerMenu,
-  renderSignerStatus,
-  renderRelays,
-  renderForm,
-  renderDashboard,
-  renderEndorsementDetailsPanel,
-  renderEndorsementHelpers,
-  renderNsrHelpers,
-  renderDrafts
-} from "./ui.js";
-
-import {
   esc,
   shortenKey,
   formatCacheAge,
@@ -50,7 +37,8 @@ import {
   buildDraftIdentifier,
   isDraftIdentifier,
   stripDraftPrefix,
-  isOnline
+  isOnline,
+  showToast
 } from "./utils.js";
 
 import {
@@ -93,17 +81,15 @@ async function updateAllDrafts() {
   });
 }
 
-async function switchShell(mode) {
-  console.log("Switching shell to:", mode);
-  const classic = document.getElementById("shell-classic");
+async function initShell() {
   const power = document.getElementById("shell-power");
   
-  if (!classic || !power) {
-      console.error("Shell containers not found");
+  if (!power) {
+      console.error("Power shell container not found");
       return;
   }
   
-  updateState({ uiMode: mode });
+  updateState({ uiMode: "power" });
   
   let powerCss = document.getElementById("power-css-link");
   if (!powerCss) {
@@ -114,29 +100,21 @@ async function switchShell(mode) {
       document.head.appendChild(powerCss);
   }
   
-  if (mode === "power") {
-    if (powerCss) powerCss.disabled = false;
-    document.body.classList.add("mode-power");
-    classic.hidden = true;
-    power.hidden = false;
-    await updateAllDrafts();
-    try {
-      initPowerShell(state, { 
-        switchShell,
-        saveItem: handlePowerSave,
-        publishDraft,
-        withdrawDraft,
-        openNewNcc,
-        createRevisionDraft
-      });
-    } catch (e) {
-      console.error("Failed to init PowerShell:", e);
-    }
-  } else {
-    document.body.classList.remove("mode-power");
-    if (powerCss) powerCss.disabled = true;
-    power.hidden = true;
-    classic.hidden = false;
+  if (powerCss) powerCss.disabled = false;
+  document.body.classList.add("mode-power");
+  power.hidden = false;
+  
+  await updateAllDrafts();
+  try {
+    initPowerShell(state, { 
+      saveItem: handlePowerSave,
+      publishDraft,
+      withdrawDraft,
+      openNewNcc,
+      createRevisionDraft
+    });
+  } catch (e) {
+    console.error("Failed to init PowerShell:", e);
   }
 }
 
@@ -184,7 +162,7 @@ async function handlePowerSave(id, content, fullDraft = null) {
   }
   
   await updateAllDrafts();
-  refreshDashboard();
+  refreshUI();
 }
 
 async function refreshSignerProfile() {
@@ -203,97 +181,18 @@ async function refreshSignerProfile() {
   }
 }
 
-async function promptSignerConnection() {
-  if (state.signerMode === "nip07") {
-    if (!window.nostr) {
-      showToast("Install a NIP-07 signer to sign in.", "error");
-      return;
-    }
-    try {
-      await window.nostr.getPublicKey();
-    } catch (error) {
-      showToast("Signer denied access.", "error");
-      return;
-    }
-  } else {
-    const nsecField = document.getElementById("nsec-input");
-    const provided = nsecField?.value.trim();
-    if (!provided) {
-      showToast("Enter your local nsec before signing in.", "error");
-      return;
-    }
-    sessionStorage.setItem("ncc-manager-nsec", provided);
-  }
-  await updateSignerStatus();
-}
-
-async function signOutSigner() {
-  sessionStorage.removeItem("ncc-manager-nsec");
-  await setConfig("signer_mode", "nip07");
-  updateState({ signerMode: "nip07" });
-  const modeSelect = document.getElementById("signer-mode");
-  if (modeSelect) modeSelect.value = "nip07";
-  const nsecField = document.getElementById("nsec-input");
-  if (nsecField) nsecField.value = "";
-  await updateSignerStatus();
-  showToast("Signer cleared.");
-  hideSignerMenu();
-}
-
 async function updateSignerStatus() {
-  const helpEl = document.getElementById("signer-help");
-  const mode = state.signerMode;
   const nsec = sessionStorage.getItem("ncc-manager-nsec");
   try {
-    const signer = await getSigner(mode, nsec);
+    const signer = await getSigner(state.signerMode, nsec);
     updateState({ signerPubkey: signer.pubkey });
-    if (helpEl) {
-      helpEl.textContent =
-        mode === "nip07"
-          ? "Using your browser signer. Keys stay in your extension."
-          : "Using a session-only nsec. It is never saved to disk.";
-    }
     await refreshSignerProfile();
   } catch (error) {
     updateState({ signerPubkey: null, signerProfile: null });
-    if (helpEl) {
-      helpEl.textContent =
-        mode === "nip07"
-          ? "Install a NIP-07 signer (e.g. Alby) to sign events."
-          : "Enter a valid nsec to enable local signing.";
-    }
   }
-  renderSignerStatus(state);
-  renderNsrHelpers(state);
-  await renderDrafts(
-    "endorsement",
-    state,
-    listDrafts,
-    KINDS,
-    fetchAuthorEndorsements,
-    persistRelayEvents,
-    payloadToDraft,
-    createEventTemplate,
-    downloadJson,
-    publishDraft,
-    verifyDraft,
-    showToast
-  );
   
   await updateAllDrafts();
-  await refreshDashboard();
-}
-
-function switchView(view) {
-  document.querySelectorAll(".view").forEach((section) => {
-    section.classList.toggle("active", section.dataset.view === view);
-  });
-  document.querySelectorAll(".nav-item").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.view === view);
-  });
-  if (view === "dashboard") {
-    refreshDashboard();
-  }
+  refreshUI();
 }
 
 async function fetchDefaults() {
@@ -302,11 +201,9 @@ async function fetchDefaults() {
     const data = await res.json();
     updateState({ defaults: data.relays || [] });
     await setConfig("default_relays", state.defaults);
-    renderRelays(state.defaults, (await getConfig("user_relays", [])), setConfig);
   } catch (error) {
     updateState({ defaults: FALLBACK_RELAYS });
     await setConfig("default_relays", state.defaults);
-    renderRelays(state.defaults, (await getConfig("user_relays", [])), setConfig);
     showToast("Using fallback default relays (server unavailable).", "error");
   }
 }
@@ -314,35 +211,22 @@ async function fetchDefaults() {
 async function loadConfig() {
   const defaultRelays = (await getConfig("default_relays", [])) || [];
   const signerMode = (await getConfig("signer_mode", "nip07")) || "nip07";
-  const uiMode = (await getConfig("ui_mode", "classic")) || "classic";
   
   updateState({ defaults: defaultRelays, signerMode: signerMode });
   
-  const modeSelect = document.getElementById("signer-mode");
-  if (modeSelect) modeSelect.value = state.signerMode;
-  
-  const uiSelect = document.getElementById("ui-mode-select");
-  if (uiSelect) uiSelect.value = uiMode;
-  
-  await switchShell(uiMode);
+  await initShell();
   await updateSignerStatus();
 }
 
-
-// --- NCC View and Edit Functions ---
-function buildTagsMapFromEvent(tags) {
-  const map = {};
-  (tags || []).forEach((tag) => {
+function toDraftFromRelay(item) {
+  const tagMap = {};
+  (item.tags || []).forEach((tag) => {
     const key = tag[0];
     if (!key) return;
-    map[key] = map[key] || [];
-    map[key].push(tag[1]);
+    tagMap[key] = tagMap[key] || [];
+    tagMap[key].push(tag[1]);
   });
-  return map;
-}
 
-function toDraftFromRelay(item) {
-  const tagMap = buildTagsMapFromEvent(item.tags || []);
   return {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
@@ -362,38 +246,6 @@ function toDraftFromRelay(item) {
       authors: tagMap.authors || []
     }
   };
-}
-
-function openNccView(item, localDrafts) {
-  updateState({ selectedNcc: item, nccLocalDrafts: localDrafts || [], editDraft: null });
-  const titleEl = document.getElementById("ncc-view-title");
-  const metaEl = document.getElementById("ncc-view-meta");
-  const statsEl = document.getElementById("ncc-view-stats");
-  const contentEl = document.getElementById("ncc-view-content");
-  const titleEditWrap = document.getElementById("ncc-view-title-edit");
-  const contentEditWrap = document.getElementById("ncc-view-content-edit");
-  const editPanel = document.getElementById("ncc-edit-panel");
-
-  titleEl.textContent = `${item.d.toUpperCase()} · ${item.title}`;
-  metaEl.textContent = item.event_id ? `Event ${item.event_id}` : "Draft (not published)";
-  
-  const statusClass = `status-${(item.status || "draft").toLowerCase()}`;
-  const statusLabel = (item.status || "DRAFT").toUpperCase();
-
-  statsEl.innerHTML = `
-    <span class="badge ${statusClass}">${esc(statusLabel)}</span>
-    <span>Published: ${item.published_at ? new Date(item.published_at * 1000).toLocaleString() : "-"}</span>
-    <span>Source: ${item.source}</span>
-  `;
-  contentEl.innerHTML = renderMarkdown(item.content || "No content available.");
-  contentEl.hidden = false;
-  titleEditWrap.hidden = true;
-  contentEditWrap.hidden = true;
-  editPanel.hidden = true;
-  editPanel.classList.remove("collapsed");
-  setNccViewActions(item, localDrafts);
-
-  switchView("ncc-view");
 }
 
 function buildRevisionSupersedes(tags, eventId) {
@@ -444,130 +296,6 @@ function createRevisionDraft(item, localDrafts) {
   };
 }
 
-function setNccViewActions(item, localDrafts) {
-  const editButton = document.getElementById("ncc-view-edit");
-  const reviseButton = document.getElementById("ncc-view-revise");
-  const actionsContainer = editButton.parentElement;
-  
-  let endorseButton = document.getElementById("ncc-view-endorse");
-  if (!endorseButton) {
-      endorseButton = document.createElement("button");
-      endorseButton.id = "ncc-view-endorse";
-      endorseButton.className = "ghost";
-      endorseButton.textContent = "Endorse";
-      actionsContainer.appendChild(endorseButton);
-  }
-
-  const localDraft = (localDrafts || []).find((draft) => draft.id === item.id);
-  const isDraft = item.status !== "published";
-  
-  const isSignedIn = !!state.signerPubkey;
-  const isOwner = isSignedIn && (item.author === state.signerPubkey || !item.author);
-
-  const canEdit = isDraft && isSignedIn && isOwner && !!localDraft;
-  const canRevise = !isDraft && isSignedIn;
-  const canEndorse = !isDraft && isSignedIn;
-
-  editButton.style.display = canEdit ? "inline-flex" : "none";
-  editButton.textContent = "Edit draft";
-  editButton.setAttribute("aria-label", "Edit draft");
-  
-  reviseButton.style.display = canRevise ? "inline-flex" : "none";
-  endorseButton.style.display = canEndorse ? "inline-flex" : "none";
-
-  editButton.onclick = async () => {
-    if (!canEdit) return;
-    showEditMode(localDraft);
-  };
-
-  reviseButton.onclick = async () => {
-    if (!canRevise) return;
-    const draft = createRevisionDraft(item, localDrafts || []);
-    if (!draft) return;
-    showEditMode(draft);
-  };
-  
-  endorseButton.onclick = () => {
-      if (!canEndorse) return;
-      handleEndorse(item);
-  };
-}
-
-function showEditMode(draft) {
-  if (!state.signerPubkey) {
-    showToast("You must be signed in to edit.", "error");
-    return;
-  }
-  updateState({ editDraft: draft });
-  const editPanel = document.getElementById("ncc-edit-panel");
-  const toggle = document.getElementById("ncc-edit-toggle");
-  const titleEditWrap = document.getElementById("ncc-view-title-edit");
-  const contentEditWrap = document.getElementById("ncc-view-content-edit");
-  const titleInput = document.getElementById("ncc-title-input");
-  const contentInput = document.getElementById("ncc-content-input");
-  const contentEl = document.getElementById("ncc-view-content");
-  const editButton = document.getElementById("ncc-view-edit");
-  const reviseButton = document.getElementById("ncc-view-revise");
-
-  editPanel.hidden = false;
-  editPanel.classList.remove("collapsed");
-  if (toggle) {
-    toggle.textContent = "▴";
-    toggle.setAttribute("aria-label", "Collapse edit fields");
-  }
-  titleEditWrap.hidden = false;
-  contentEditWrap.hidden = false;
-  contentEl.hidden = true;
-  titleInput.value = draft.title || "";
-  contentInput.value = draft.content || "";
-
-  const form = document.getElementById("ncc-edit-form");
-  form.summary.value = draft.tags?.summary || "";
-  form.topics.value = (draft.tags?.topics || []).join(", ");
-  form.lang.value = draft.tags?.lang || "";
-  form.version.value = draft.tags?.version || "";
-  form.supersedes.value = (draft.tags?.supersedes || []).join(", ");
-  form.license.value = draft.tags?.license || "";
-  form.authors.value = (draft.tags?.authors || []).join(", ");
-  form.published_at.value = draft.published_at || "";
-  form.d.value = stripNccNumber(draft.d);
-
-  if (editButton) {
-    editButton.style.display = "none";
-  }
-  if (reviseButton) reviseButton.style.display = "none";
-}
-
-function hideEditMode() {
-  updateState({ editDraft: null });
-  const editPanel = document.getElementById("ncc-edit-panel");
-  const contentEl = document.getElementById("ncc-view-content");
-  const titleEditWrap = document.getElementById("ncc-view-title-edit");
-  const contentEditWrap = document.getElementById("ncc-view-content-edit");
-  const toggle = document.getElementById("ncc-edit-toggle");
-  editPanel.hidden = true;
-  editPanel.classList.remove("collapsed");
-  if (toggle) {
-    toggle.textContent = "▴";
-    toggle.setAttribute("aria-label", "Collapse edit fields");
-  }
-  titleEditWrap.hidden = true;
-  contentEditWrap.hidden = true;
-  contentEl.hidden = false;
-  if (state.selectedNcc) {
-    setNccViewActions(state.selectedNcc, state.nccLocalDrafts);
-  }
-}
-
-function toggleEditPanel() {
-  const editPanel = document.getElementById("ncc-edit-panel");
-  const toggle = document.getElementById("ncc-edit-toggle");
-  if (!editPanel || !toggle) return;
-  const isCollapsed = editPanel.classList.toggle("collapsed");
-  toggle.textContent = isCollapsed ? "▾" : "▴";
-  toggle.setAttribute("aria-label", isCollapsed ? "Expand edit fields" : "Collapse edit fields");
-}
-
 function openNewNcc() {
   if (!state.signerPubkey) {
     showToast("You must be signed in to create an NCC.", "error");
@@ -593,191 +321,15 @@ function openNewNcc() {
       authors: []
     }
   };
-  openNccView(
-    {
-      ...draft,
-      d: "ncc-xx",
-      title: "New NCC",
-      status: "draft",
-      source: "local"
-    },
-    [draft]
-  );
-  showEditMode(draft);
-}
-
-async function saveEditDraft() {
-  if (!state.editDraft) return;
-  const form = document.getElementById("ncc-edit-form");
-  const titleInput = document.getElementById("ncc-title-input");
-  const contentInput = document.getElementById("ncc-content-input");
-  const nccNumber = stripNccNumber(form.d.value);
-  if (!nccNumber) {
-    showToast("NCC number is required.", "error");
-    return;
-  }
-  const supersedesList = splitList(form.supersedes.value);
-  const localDrafts = await listDrafts(KINDS.ncc);
-  const relayDocs = state.nccDocs || [];
-  const normalizedId = buildNccIdentifier(nccNumber);
-  const hasConflictLocal = localDrafts.some(
-    (draft) => draft.id !== state.editDraft.id && draft.d === normalizedId
-  );
-  const hasConflictRelay = relayDocs.some(
-    (event) => eventTagValue(event.tags, "d") === normalizedId
-  );
-  if ((hasConflictLocal || hasConflictRelay) && supersedesList.length === 0) {
-    showToast("NCC number already exists. Add a supersedes event to revise.", "error");
-    return;
-  }
-  const draft = {
-    ...state.editDraft,
-    d: normalizedId,
-    title: titleInput.value.trim(),
-    content: contentInput.value.trim(),
-    tags: {
-      summary: form.summary.value.trim(),
-      topics: splitList(form.topics.value),
-      lang: form.lang.value.trim(),
-      version: form.version.value.trim(),
-      supersedes: supersedesList,
-      license: form.license.value.trim(),
-      authors: splitList(form.authors.value)
-    },
-    published_at: form.published_at.value ? Number(form.published_at.value) : null
-  };
-  await saveDraft(draft);
-
-  if (state.signerPubkey) {
-    try {
-      const broadcast = await broadcastDraftToRelays(draft);
-      if (broadcast) {
-        draft.event_id = broadcast.eventId;
-        await saveDraft(draft);
-        showToast("Draft saved and pushed to relays.");
-      } else {
-        showToast("Draft saved locally (relay push failed).", "warning");
-      }
-    } catch (e) {
-      console.warn("Auto-push failed", e);
-      showToast("Draft saved locally. Relay push failed.", "warning");
-    }
-  } else {
-    showToast("Draft saved locally.");
-  }
-
-  await updateAllDrafts();
-
-  hideEditMode();
-  await refreshDashboard();
-  updateState({ currentDraft: { ...state.currentDraft, ncc: draft } });
-  openNccView(
-    {
-      ...state.selectedNcc,
-      title: draft.title,
-      content: draft.content,
-      status: draft.status,
-      published_at: draft.published_at,
-      source: "local"
-    },
-    state.nccLocalDrafts
-  );
-}
-
-// --- Draft Handling and Publishing ---
-
-function buildEndorsementSummary(event) {
-  const roles = [];
-  const topics = [];
-  let implementation = "";
-  let note = "";
-  (event.tags || []).forEach((tag) => {
-    if (!tag[0]) return;
-    if (tag[0] === "role") roles.push(tag[1]);
-    if (tag[0] === "t") topics.push(tag[1]);
-    if (tag[0] === "implementation" && !implementation) implementation = tag[1];
-    if (tag[0] === "note" && !note) note = tag[1];
+  
+  // Logic to open this draft in Power UI
+  // Since we are in Power UI, we should probably just select it if we added it to state
+  // For now, let's just save it and refresh
+  saveDraft(draft).then(() => {
+      updateAllDrafts().then(() => {
+          refreshUI();
+      });
   });
-  return {
-    id: event.id,
-    author: event.pubkey || "",
-    pubkey: event.pubkey || "",
-    created_at: event.created_at || 0,
-    d: eventTagValue(event.tags, "d") || "",
-    roles,
-    topics,
-    implementation,
-    note
-  };
-}
-
-function buildDraftTagList(draft) {
-  if (!draft) return [];
-  if (Array.isArray(draft.raw_tags) && draft.raw_tags.length) return draft.raw_tags;
-  if (Array.isArray(draft.raw_event?.tags) && draft.raw_event.tags.length) {
-    return draft.raw_event.tags;
-  }
-  const tags = [];
-  const push = (key, value) => {
-    if (!value) return;
-    tags.push([key, value]);
-  };
-  if (draft.tags) {
-    push("endorses", draft.tags.endorses);
-    (draft.tags.roles || []).forEach((role) => push("role", role));
-    (draft.tags.topics || []).forEach((topic) => push("t", topic));
-    push("implementation", draft.tags.implementation);
-    push("note", draft.tags.note);
-  }
-  return tags;
-}
-
-function buildEventFromDraft(draft) {
-  const createdAt =
-    draft.published_at || Math.floor((draft.updated_at || Date.now()) / 1000) || nowSeconds();
-  return {
-    id: draft.event_id || draft.id,
-    tags: buildDraftTagList(draft),
-    pubkey: draft.author_pubkey || draft.raw_event?.pubkey || "",
-    author: draft.author_pubkey || draft.raw_event?.pubkey || "",
-    created_at: createdAt,
-    content: draft.content || "",
-    status: draft.status || ""
-  };
-}
-
-async function refreshStoredEndorsementMetadata() {
-  try {
-    const drafts = await listDrafts(KINDS.endorsement);
-    const counts = new Map();
-    const details = new Map();
-    const seen = new Set();
-
-    for (const draft of drafts) {
-      if (!draft) continue;
-      const status = String(draft.status || "").toLowerCase();
-      if (status !== "published") continue;
-      const eventId = normalizeHexId(draft.event_id || draft.id);
-      if (!eventId || seen.has(eventId)) continue;
-      seen.add(eventId);
-      const event = buildEventFromDraft(draft);
-      const targets = getEndorsementTargets(event);
-      if (!targets.size) continue;
-      const summary = buildEndorsementSummary(event);
-      for (const target of targets) {
-        counts.set(target, (counts.get(target) || 0) + 1);
-        const bucket = details.get(target) || [];
-        bucket.push(summary);
-        details.set(target, bucket);
-      }
-    }
-
-    details.forEach((list) => list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)));
-
-    updateState({ endorsementCounts: counts, endorsementDetails: details });
-  } catch (error) {
-    console.error("NCC Manager: failed to refresh endorsement metadata", error);
-  }
 }
 
 async function persistRelayEvents(events) {
@@ -804,27 +356,11 @@ async function persistRelayEvents(events) {
   await Promise.allSettled(tasks);
 }
 
-function getEndorsementTargets(event) {
-  const targets = new Set();
-  const leads = eventTagValue(event.tags, "endorses");
-  if (leads) {
-    targets.add(normalizeEventId(leads));
-  }
-  (event.tags || [])
-    .filter((tag) => tag[0] === "e")
-    .forEach((tag) => targets.add(normalizeEventId(tag[1])));
-  return targets;
-}
-
 async function refreshEndorsementHelpers(forceRefresh = false) {
-  const helper = document.getElementById("endorse-helper-text");
-  if (helper) helper.textContent = "Loading NCC documents from relays...";
   try {
     const relays = await getRelays(getConfig);
-    if (!relays.length) {
-      if (helper) helper.textContent = "No relays configured. Add relays in Settings.";
-      return;
-    }
+    if (!relays.length) return;
+    
     const cacheKey = buildRelayCacheKey(relays);
     const cached = readCachedNcc(cacheKey);
     const cacheFresh = cached && Date.now() - cached.at < NCC_CACHE_TTL_MS;
@@ -834,22 +370,16 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     if ((cacheFresh && !forceRefresh) || !isOnline()) {
       events = cached?.items || [];
       usedCache = true;
-      if (!events.length && !isOnline()) {
-        if (helper) helper.textContent = "Offline and no cached NCC documents available.";
-        return;
-      }
     }
 
     if (!events.length) {
       try {
-        const fetched = await fetchNccDocuments(relays);
-        events = fetched;
+        events = await fetchNccDocuments(relays);
         writeCachedNcc(cacheKey, events);
       } catch (error) {
         if (cached?.items?.length) {
           events = cached.items;
           usedCache = true;
-          if (helper) helper.textContent = "Using cached NCC documents (offline fallback).";
         } else {
           throw error;
         }
@@ -857,8 +387,8 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
     }
 
     const filtered = events.filter((event) => isNccDocument(event));
-    const backups = events.filter((event) => isDraftIdentifier(eventTagValue(event.tags, "d")));
     await persistRelayEvents(filtered);
+    
     const eventIds = filtered.map((event) => normalizeHexId(event.id)).filter(Boolean);
     if (eventIds.length && isOnline()) {
       try {
@@ -868,11 +398,10 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
         console.warn("NCC Manager: failed to fetch endorsement counts", error);
       }
     }
-    await refreshStoredEndorsementMetadata();
+    
     updateState({
       nccOptions: buildNccOptions(filtered),
       nccDocs: filtered,
-      remoteDrafts: backups, // Populating the renamed state property
       relayStatus: {
         relays: relays.length,
         events: filtered.length,
@@ -880,351 +409,22 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
         at: Date.now()
       }
     });
-    renderEndorsementHelpers(state);
-    renderNsrHelpers(state);
-
-    const nccDrafts = await listDrafts(KINDS.ncc);
-    updateState({ nccLocalDrafts: nccDrafts });
-
-    refreshDashboard();
-    renderEndorsementDetailsPanel(state);
-    if (helper) {
-      if (usedCache && cached?.at) {
-        helper.textContent = `Loaded ${filtered.length} cached NCC documents (updated ${formatCacheAge(
-          cached.at
-        )}).`;
-      } else {
-        helper.textContent = `Loaded ${filtered.length} NCC documents from ${relays.length} relays.`;
-      }
-    }
-    console.info(
-      `NCC Manager: fetched ${filtered.length}/${events.length} NCC documents from ${relays.length} relays.`
-    );
+    
+    await updateAllDrafts();
+    refreshUI();
   } catch (error) {
-    if (helper) helper.textContent = "Failed to load NCC documents from relays.";
     console.error("NCC Manager: relay fetch failed", error);
   }
 }
 
-async function handleFormSubmit(kind) {
-  const form = document.getElementById(`${kind}-form`);
-  const formData = new FormData(form);
-
-  const base = state.currentDraft[kind] || {};
-  const draft = {
-    ...base,
-    id: base.id || crypto.randomUUID(),
-    kind: KINDS[kind],
-    status: base.status || "draft",
-    d: buildNccIdentifier(formData.get("d")),
-    title: formData.get("title")?.trim() || "",
-    content: formData.get("content")?.trim() || "",
-    published_at: formData.get("published_at")
-      ? Number(formData.get("published_at"))
-      : base.published_at
-  };
-
-  if (kind === "ncc") {
-    draft.tags = {
-      summary: formData.get("summary")?.trim() || "",
-      topics: splitList(formData.get("topics")),
-      lang: formData.get("lang")?.trim() || "",
-      version: formData.get("version")?.trim() || "",
-      supersedes: splitList(formData.get("supersedes")),
-      license: formData.get("license")?.trim() || "",
-      authors: splitList(formData.get("authors"))
-    };
-  }
-
-  if (kind === "nsr") {
-    draft.tags = {
-      authoritative: formData.get("authoritative")?.trim() || "",
-      steward: formData.get("steward")?.trim() || "",
-      previous: formData.get("previous")?.trim() || "",
-      reason: formData.get("reason")?.trim() || "",
-      effective_at: formData.get("effective_at")?.trim() || ""
-    };
-  }
-
-  if (kind === "endorsement") {
-    draft.tags = {
-      endorses: formData.get("endorses")?.trim() || "",
-      roles: splitList(formData.get("roles")),
-      implementation: formData.get("implementation")?.trim() || "",
-      note: formData.get("note")?.trim() || "",
-      topics: splitList(formData.get("topics"))
-    };
-  }
-
-  if (kind === "supporting") {
-    draft.tags = {
-      title: formData.get("title")?.trim() || "",
-      for: formData.get("for")?.trim() || "",
-      for_event: formData.get("for_event")?.trim() || "",
-      type: formData.get("type")?.trim() || "",
-      published_at: formData.get("published_at")?.trim() || nowSeconds(),
-      lang: formData.get("lang")?.trim() || "",
-      topics: splitList(formData.get("topics")),
-      license: formData.get("license")?.trim() || "",
-      authors: splitList(formData.get("authors"))
-    };
-  }
-
-  await saveDraft(draft);
-
-  if (state.signerPubkey) {
-    try {
-      const broadcast = await broadcastDraftToRelays(draft);
-      if (broadcast) {
-        draft.event_id = broadcast.eventId;
-        await saveDraft(draft);
-        showToast(`${kind.toUpperCase()} draft saved and pushed to relays.`);
-      } else {
-        showToast(`${kind.toUpperCase()} draft saved locally (relay push failed).`, "warning");
-      }
-    } catch (e) {
-      console.warn("Auto-push failed", e);
-      showToast(`${kind.toUpperCase()} draft saved locally. Relay push failed.`, "warning");
-    }
-  } else {
-    showToast(`${kind.toUpperCase()} draft saved locally.`);
-  }
-
-  updateState({ currentDraft: { ...state.currentDraft, [kind]: draft } });
-  
-  await updateAllDrafts();
-
-  await renderDrafts(
-    kind,
-    state,
-    listDrafts,
-    KINDS,
-    fetchAuthorEndorsements,
-    persistRelayEvents,
-    payloadToDraft,
-    createEventTemplate,
-    downloadJson,
-    publishDraft,
-    verifyDraft,
-    showToast
-  );
-  refreshDashboard();
-}
-
-async function handleListAction(kind, event) {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-  const action = target.dataset.action;
-  const id = target.dataset.id;
-  if (!action || !id) return;
-
-  const renderedEntry = findRenderedDraft(kind, id);
-
-  if (action === "delete") {
-    if (!state.signerPubkey) {
-      showToast("You must be signed in to delete.", "error");
-      return;
-    }
-    const storedDraft = await getDraft(id);
-    if (!storedDraft) {
-      showToast("Only local drafts can be deleted.", "error");
-      return;
-    }
-    await deleteDraft(id);
-    showToast("Draft deleted.");
-    await updateAllDrafts();
-    await renderDrafts(
-      kind,
-      state,
-      listDrafts,
-      KINDS,
-      fetchAuthorEndorsements,
-      persistRelayEvents,
-      payloadToDraft,
-      createEventTemplate,
-      downloadJson,
+function refreshUI() {
+  initPowerShell(state, {
+      saveItem: handlePowerSave,
       publishDraft,
-      verifyDraft,
-      showToast
-    );
-    refreshDashboard();
-    return;
-  }
-
-  let draft = await getDraft(id);
-  if (!draft && renderedEntry?.rawEvent) {
-    draft = payloadToDraft(renderedEntry.rawEvent);
-    draft.event_id =
-      renderedEntry.event_id || renderedEntry.rawEvent.event_id || renderedEntry.rawEvent.id;
-    draft.author_pubkey = renderedEntry.author || renderedEntry.rawEvent.pubkey || "";
-    draft.status = renderedEntry.status || "published";
-    draft.id = id;
-  }
-  if (!draft) return;
-
-  if (action === "edit") {
-    if (!state.signerPubkey) {
-      showToast("You must be signed in to edit.", "error");
-      return;
-    }
-    updateState({ currentDraft: { ...state.currentDraft, [kind]: draft } });
-    renderForm(kind, draft, state, KINDS);
-    return;
-  }
-
-  if (action === "duplicate") {
-    if (!state.signerPubkey) {
-      showToast("You must be signed in to duplicate.", "error");
-      return;
-    }
-    const clone = {
-      ...draft,
-      id: crypto.randomUUID(),
-      status: "draft",
-      event_id: "",
-      author_pubkey: ""
-    };
-    if (kind === "ncc" && draft.event_id) {
-      const supersedes = new Set(clone.tags?.supersedes || []);
-      supersedes.add(`event:${draft.event_id}`);
-      clone.tags.supersedes = Array.from(supersedes);
-    }
-    if (kind === "nsr" && draft.event_id) {
-      clone.tags.previous = `event:${draft.event_id}`;
-    }
-    await saveDraft(clone);
-    showToast("Draft duplicated.");
-    await updateAllDrafts();
-    await renderDrafts(
-      kind,
-      state,
-      listDrafts,
-      KINDS,
-      fetchAuthorEndorsements,
-      persistRelayEvents,
-      payloadToDraft,
-      createEventTemplate,
-      downloadJson,
-      publishDraft,
-      verifyDraft,
-      showToast
-    );
-    refreshDashboard();
-    return;
-  }
-
-  if (action === "export") {
-    const payload = renderedEntry?.rawEvent
-      ? { ...renderedEntry.rawEvent }
-      : createEventTemplate(draft);
-    payload.event_id = payload.event_id || draft.event_id || renderedEntry?.event_id || undefined;
-    payload.author_pubkey =
-      payload.author_pubkey || draft.author_pubkey || renderedEntry?.author || undefined;
-    downloadJson(`draft-${draft.d || draft.id}.json`, payload);
-    return;
-  }
-
-  if (action === "publish") {
-    await publishDraft(draft, kind);
-    return;
-  }
-
-  if (action === "verify") {
-    await verifyDraft(draft);
-  }
-}
-
-function handleEdit(id) {
-  const draft = (state.nccLocalDrafts || []).find((d) => d.id === id);
-  if (!draft) return;
-  openNccView(draft, state.nccLocalDrafts);
-  showEditMode(draft);
-}
-
-function handleRevise(id) {
-  const localDrafts = state.nccLocalDrafts || [];
-  let item = localDrafts.find((d) => d.id === id);
-  if (!item) {
-     item = (state.nccDocs || []).find((d) => d.id === id);
-  }
-  if (!item) return;
-  
-  openNccView(item, localDrafts);
-  const draft = createRevisionDraft(item, localDrafts);
-  if (draft) showEditMode(draft);
-}
-
-function handleEndorse(item) {
-  if (!state.signerPubkey) {
-    showToast("Sign in to endorse.", "error");
-    return;
-  }
-  
-  const d = item.d;
-  const eventId = item.event_id;
-  
-  if (!d || !eventId) {
-    showToast("Cannot endorse a draft without an ID. Publish it first.", "error");
-    return;
-  }
-
-  switchView("endorsement");
-  
-  updateState({ 
-      currentDraft: { 
-          ...state.currentDraft, 
-          endorsement: {
-              ...(state.currentDraft.endorsement || {}),
-              d: stripNccNumber(d),
-              tags: {
-                  ...(state.currentDraft.endorsement?.tags || {}),
-                  endorses: eventId
-              }
-          }
-      } 
-  });
-  
-  renderForm("endorsement", state.currentDraft.endorsement, state, KINDS);
-  
-  const nccSelect = document.getElementById("endorse-ncc-select");
-  const eventSelect = document.getElementById("endorse-event-select");
-  if (nccSelect && eventSelect) {
-      nccSelect.value = d;
-      if (typeof nccSelect.onchange === 'function') {
-          nccSelect.onchange();
-          setTimeout(() => {
-              eventSelect.value = eventId;
-          }, 0);
-      }
-  }
-}
-
-async function refreshDashboard() {
-  if (state.uiMode === "power") {
-    // Refresh Power UI
-    initPowerShell(state, {
-        switchShell,
-        saveItem: handlePowerSave,
-        publishDraft,
-        withdrawDraft,
-        openNewNcc,
-        createRevisionDraft
-    });
-  } else {
-    // Refresh Classic UI
-    await renderDashboard(
-      state,
-      listDrafts,
-      openNccView,
-      publishDraft,
-      setupEndorsementCounterButtons,
-      renderEndorsementDetailsPanel,
       withdrawDraft,
-      handleEdit,
-      handleRevise,
-      handleEndorse
-    );
-  }
+      openNewNcc,
+      createRevisionDraft
+  });
 }
 
 async function withdrawDraft(id) {
@@ -1234,7 +434,6 @@ async function withdrawDraft(id) {
       const event = (state.nccDocs || []).find((d) => d.id === id);
       if (event) {
         draft = toDraftFromRelay(event);
-        // Using existing ID logic from toDraftFromRelay
       }
     }
     
@@ -1265,11 +464,8 @@ async function withdrawDraft(id) {
     };
     
     await saveDraft(updated);
-    
-    const nccDrafts = await listDrafts(KINDS.ncc);
-    updateState({ nccLocalDrafts: nccDrafts });
-    
-    await refreshDashboard();
+    await updateAllDrafts();
+    refreshUI();
 
     showToast(`NCC withdrawn and update published to ${result.accepted}/${result.total} relays.`);
 
@@ -1288,7 +484,6 @@ async function publishDraft(draft, kind) {
     const nsec = sessionStorage.getItem("ncc-manager-nsec");
     const signer = await getSigner(signerMode, nsec);
 
-    // Ensure we publish with the correct status tag
     const publishableDraft = { ...draft, status: "published" };
     const template = createEventTemplate(publishableDraft);
     
@@ -1304,37 +499,16 @@ async function publishDraft(draft, kind) {
       raw_tags: event.tags || []
     };
     await saveDraft(updated);
-    updateState({ currentDraft: { ...state.currentDraft, [kind]: updated } });
-    renderForm(kind, updated, state, KINDS);
-    if (kind === "endorsement") {
-      await refreshStoredEndorsementMetadata();
-    }
-    await renderDrafts(
-      kind,
-      state,
-      listDrafts,
-      KINDS,
-      fetchAuthorEndorsements,
-      persistRelayEvents,
-      payloadToDraft,
-      createEventTemplate,
-      downloadJson,
-      publishDraft,
-      verifyDraft,
-      showToast
-    );
-    refreshDashboard();
+    await updateAllDrafts();
+    refreshUI();
     showToast(
-      `Published to ${result.accepted}/${result.total} relays (took ${result.attempts} attempt${
-        result.attempts === 1 ? "" : "s"
-      }).`
+      `Published to ${result.accepted}/${result.total} relays.`
     );
   } catch (error) {
     showToast(`Publish failed: ${error.message}`, "error");
   }
 }
 
-// Helper to auto-save drafts to relays
 async function broadcastDraftToRelays(draft) {
   if (!draft.d) return null;
   const relays = await getRelays(getConfig);
@@ -1358,491 +532,19 @@ async function broadcastDraftToRelays(draft) {
   return { eventId: event.id, result };
 }
 
-// Renamed from backupDraft
-async function saveDraftToRelays(draft, kind) {
-  try {
-    if (!draft.d) throw new Error("Draft must have an identifier (d tag) before saving to relays.");
-    
-    const broadcast = await broadcastDraftToRelays(draft);
-    if (!broadcast) {
-       if (!state.signerPubkey) throw new Error("Signer not connected.");
-       if ((await getRelays(getConfig)).length === 0) throw new Error("No relays configured.");
-       throw new Error("Broadcast failed.");
-    }
-    
-    const { eventId, result } = broadcast;
-
-    const updatedDraft = { ...draft, event_id: eventId };
-    await saveDraft(updatedDraft);
-    updateState({ currentDraft: { ...state.currentDraft, [kind]: updatedDraft } });
-
-    await renderDrafts(
-      kind,
-      state,
-      listDrafts,
-      KINDS,
-      fetchAuthorEndorsements,
-      persistRelayEvents,
-      payloadToDraft,
-      createEventTemplate,
-      downloadJson,
-      publishDraft,
-      verifyDraft,
-      showToast
-    );
-    
-    const nccDrafts = await listDrafts(KINDS.ncc);
-    updateState({ nccLocalDrafts: nccDrafts });
-    refreshDashboard();
-
-    showToast(
-      `Draft saved to ${result.accepted}/${result.total} relays.`
-    );
-  } catch (error) {
-    showToast(`Save to relay failed: ${error.message}`, "error");
-  }
-}
-
 function validateDraft(draft, kind) {
   if (!draft.d) return "NCC number is required.";
   if (kind === "ncc") {
     if (!draft.title) return "Title is required.";
     if (!draft.content) return "Content is required.";
   }
-  if (kind === "nsr") {
-    if (!draft.tags?.authoritative) return "Authoritative event id is required.";
-  }
-  if (kind === "endorsement") {
-    if (!draft.tags?.endorses) return "Endorses event id is required.";
-  }
-  if (kind === "supporting") {
-    if (!draft.tags?.for) return "Target NCC is required.";
-    if (!isNccIdentifier(draft.tags?.for)) return "Target NCC must start with ncc-.";
-    if (!draft.tags?.title) return "Title is required.";
-    if (!draft.tags?.published_at) return "Published at timestamp is required.";
-  }
   return "";
 }
 
-function findRenderedDraft(kind, id) {
-  const list = state.renderedDrafts?.[kind] || [];
-  return list.find((entry) => entry.id === id);
-}
-
-async function verifyDraft(draft) {
-  if (!draft.event_id) {
-    showToast("No event id to verify.", "error");
-    return;
-  }
-  try {
-    const relays = await getRelays(getConfig);
-    const found = await verifyEvent(relays, draft.event_id);
-    showToast(found ? "Event found on relays." : "Event not found yet.");
-  } catch (error) {
-    showToast("Verification failed.", "error");
-  }
-}
-
-function downloadJson(filename, payload) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-async function importDraft(file) {
-  try {
-    const text = await file.text();
-    const payload = JSON.parse(text);
-    const draft = payloadToDraft(payload);
-    await saveDraft(draft);
-    showToast("Draft imported.");
-    renderDrafts(
-      kindFromValue(draft.kind),
-      state,
-      listDrafts,
-      KINDS,
-      fetchAuthorEndorsements,
-      persistRelayEvents,
-      payloadToDraft,
-      createEventTemplate,
-      downloadJson,
-      publishDraft,
-      verifyDraft,
-      showToast
-    );
-    refreshDashboard();
-  } catch (error) {
-    showToast("Import failed.", "error");
-  }
-}
-
-function setupSupportingPanelControls() {
-  const panel = document.getElementById("supporting-panel");
-  const toggle = document.getElementById("supporting-toggle");
-  const saveButton = document.getElementById("supporting-save");
-  const form = document.getElementById("supporting-form");
-  if (!panel || !toggle || !saveButton || !form) return;
-
-  toggle.addEventListener("click", () => {
-    const isCollapsed = panel.classList.toggle("collapsed");
-    toggle.textContent = isCollapsed ? "▾" : "▴";
-    toggle.setAttribute(
-      "aria-label",
-      isCollapsed ? "Expand supporting document fields" : "Collapse supporting document fields"
-    );
-  });
-
-  saveButton.addEventListener("click", () => {
-    form.requestSubmit();
-  });
-}
-
-function kindFromValue(kind) {
-  if (kind === KINDS.ncc) return "ncc";
-  if (kind === KINDS.nsr) return "nsr";
-  return "endorsement";
-}
-
-async function exportAllDrafts() {
-  const drafts = await listDrafts();
-  const payloads = drafts.map((draft) => {
-    const payload = createEventTemplate(draft);
-    payload.event_id = draft.event_id || undefined;
-    payload.author_pubkey = draft.author_pubkey || undefined;
-    return payload;
-  });
-  downloadJson("ncc-drafts.json", payloads);
-}
-
-function setupEndorsementCounterButtons() {
-  const listEl = document.getElementById("recent-nccs");
-  if (!listEl) return;
-  listEl.querySelectorAll('button[data-action="show-endorsements"]').forEach((button) => {
-    button.addEventListener("click", () => {
-      updateState({
-        selectedEndorsementTarget: button.dataset.target || "",
-        selectedEndorsementLabel: button.dataset.label || ""
-      });
-      renderEndorsementDetailsPanel(state);
-    });
-  });
-}
-
-function setupEndorsementDetailsControls() {
-  const panel = document.getElementById("endorsement-details-panel");
-  if (!panel) return;
-  panel.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (target.dataset.action === "close-endorsement-details") {
-      updateState({ selectedEndorsementTarget: "", selectedEndorsementLabel: "" });
-      renderEndorsementDetailsPanel(state);
-    }
-  });
-}
-
-function setupSignerMenu() {
-  const button = document.getElementById("signer-status");
-  const menu = document.getElementById("signer-menu");
-  if (!button || !menu) return;
-  button.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    if (!state.signerPubkey) {
-      await promptSignerConnection();
-      return;
-    }
-    const isVisible = menu.classList.toggle("visible");
-    button.setAttribute("aria-expanded", isVisible.toString());
-  });
-  document.addEventListener("click", (event) => {
-    if (!menu.classList.contains("visible")) return;
-    if (menu.contains(event.target) || button.contains(event.target)) return;
-    hideSignerMenu();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      hideSignerMenu();
-    }
-  });
-  const signoutButton = document.getElementById("signer-menu-signout");
-  if (signoutButton) {
-    signoutButton.addEventListener("click", async (event) => {
-      event.preventDefault();
-      await signOutSigner();
-    });
-  }
-}
-
-async function initForms() {
-  renderForm("ncc", null, state, KINDS);
-  renderForm("nsr", null, state, KINDS);
-  renderForm("endorsement", null, state, KINDS);
-  renderForm("supporting", null, state, KINDS);
-
-  document.getElementById("ncc-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    handleFormSubmit("ncc");
-  });
-  document.getElementById("nsr-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    handleFormSubmit("nsr");
-  });
-  document.getElementById("endorsement-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    handleFormSubmit("endorsement");
-  });
-  document.getElementById("supporting-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    handleFormSubmit("supporting");
-  });
-}
-
-async function initLists() {
-  await renderDrafts(
-    "nsr",
-    state,
-    listDrafts,
-    KINDS,
-    fetchAuthorEndorsements,
-    persistRelayEvents,
-    payloadToDraft,
-    createEventTemplate,
-    downloadJson,
-    publishDraft,
-    verifyDraft,
-    showToast
-  );
-  await renderDrafts(
-    "endorsement",
-    state,
-    listDrafts,
-    KINDS,
-    fetchAuthorEndorsements,
-    persistRelayEvents,
-    payloadToDraft,
-    createEventTemplate,
-    downloadJson,
-    publishDraft,
-    verifyDraft,
-    showToast
-  );
-  await renderDrafts(
-    "supporting",
-    state,
-    listDrafts,
-    KINDS,
-    fetchAuthorEndorsements,
-    persistRelayEvents,
-    payloadToDraft,
-    createEventTemplate,
-    downloadJson,
-    publishDraft,
-    verifyDraft,
-    showToast
-  );
-
-  // Fetch NCC drafts for state and Power UI
-  const nccDrafts = await listDrafts(KINDS.ncc);
-  updateState({ nccLocalDrafts: nccDrafts });
-  refreshDashboard();
-
-  document
-    .getElementById("nsr-list")
-    .addEventListener("click", (event) => handleListAction("nsr", event));
-  document
-    .getElementById("endorsement-list")
-    .addEventListener("click", (event) => handleListAction("endorsement", event));
-  document
-    .getElementById("supporting-list")
-    .addEventListener("click", (event) => handleListAction("supporting", event));
-}
-
-function initNav() {
-  document.querySelectorAll(".nav-item").forEach((button) => {
-    if (!button.dataset.view) return;
-    button.addEventListener("click", () => switchView(button.dataset.view));
-  });
-  const newNccButton = document.getElementById("nav-new-ncc");
-  if (newNccButton) {
-    newNccButton.addEventListener("click", () => {
-      openNewNcc();
-    });
-  }
-}
-
-function initNewButtons() {
-  document.getElementById("new-nsr").addEventListener("click", () => {
-    updateState({ currentDraft: { ...state.currentDraft, nsr: null } });
-    renderForm("nsr", null, state, KINDS);
-  });
-  document.getElementById("new-endorsement").addEventListener("click", () => {
-    updateState({ currentDraft: { ...state.currentDraft, endorsement: null } });
-    renderForm("endorsement", null, state, KINDS);
-  });
-  const newSupportingButton = document.getElementById("new-supporting");
-  if (newSupportingButton) {
-    newSupportingButton.addEventListener("click", () => {
-      updateState({ currentDraft: { ...state.currentDraft, supporting: null } });
-      renderForm("supporting", null, state, KINDS);
-      switchView("supporting");
-    });
-  }
-}
-
-function initSettings() {
-  document.getElementById("add-relay").addEventListener("click", async () => {
-    const input = document.getElementById("relay-input");
-    const value = input.value.trim();
-    if (!value) return;
-    const normalized = value.startsWith("ws") ? value : `wss://${value}`;
-    const current = (await getConfig("user_relays", [])) || [];
-    if (!current.includes(normalized)) {
-      current.push(normalized);
-      await setConfig("user_relays", current);
-    }
-    renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
-  });
-  document.getElementById("clear-relays").addEventListener("click", async () => {
-    await setConfig("user_relays", []);
-    renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
-  });
-  document.getElementById("refresh-defaults").addEventListener("click", fetchDefaults);
-
-  const modeSelect = document.getElementById("signer-mode");
-  const nsecField = document.getElementById("nsec-field");
-  modeSelect.addEventListener("change", () => {
-    updateState({ signerMode: modeSelect.value });
-    nsecField.style.display = state.signerMode === "nsec" ? "grid" : "none";
-  });
-  nsecField.style.display = state.signerMode === "nsec" ? "grid" : "none";
-
-  document.getElementById("save-signer").addEventListener("click", async () => {
-    const mode = modeSelect.value;
-    updateState({ signerMode: mode });
-    await setConfig("signer_mode", mode);
-    if (mode === "nsec") {
-      const nsec = document.getElementById("nsec-input").value.trim();
-      if (!nsec) {
-        showToast("Enter a valid nsec.", "error");
-        return;
-      }
-      sessionStorage.setItem("ncc-manager-nsec", nsec);
-    }
-    updateSignerStatus();
-    showToast("Signer updated.");
-  });
-
-  document.getElementById("clear-signer").addEventListener("click", async () => {
-    sessionStorage.removeItem("ncc-manager-nsec");
-    await setConfig("signer_mode", "nip07");
-    updateState({ signerMode: "nip07" });
-    modeSelect.value = "nip07";
-    document.getElementById("nsec-input").value = "";
-    updateSignerStatus();
-    showToast("Signer cleared.");
-  });
-
-  document.getElementById("import-button").addEventListener("click", async () => {
-    const fileInput = document.getElementById("import-file");
-    if (fileInput.files?.length) {
-      await importDraft(fileInput.files[0]);
-      fileInput.value = "";
-    }
-  });
-
-  document.getElementById("export-all").addEventListener("click", exportAllDrafts);
-
-  const uiSelect = document.getElementById("ui-mode-select");
-  if (uiSelect) {
-    uiSelect.addEventListener("change", async () => {
-      const mode = uiSelect.value;
-      await setConfig("ui_mode", mode);
-      switchShell(mode);
-    });
-  }
-
-  const refreshButton = document.getElementById("refresh-endorsement-data");
-  if (refreshButton) {
-    refreshButton.addEventListener("click", () => refreshEndorsementHelpers(true));
-  }
-}
-
 async function init() {
-  initNav();
-  initNewButtons();
-  initSettings();
-  setupSignerMenu();
-  setupSupportingPanelControls();
-  setupEndorsementDetailsControls();
   await loadConfig();
   await fetchDefaults();
-  renderRelays(state.defaults, await getConfig("user_relays", []), setConfig);
-  await initForms();
-  await initLists();
-  await refreshDashboard();
   await refreshEndorsementHelpers();
-
-  document.getElementById("ncc-view-back").addEventListener("click", () => switchView("dashboard"));
-  document.getElementById("ncc-edit-cancel").addEventListener("click", hideEditMode);
-  document.getElementById("ncc-edit-save").addEventListener("click", saveEditDraft);
-  document.getElementById("ncc-edit-toggle").addEventListener("click", toggleEditPanel);
-
-  document.addEventListener("click", async (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const action = target.dataset.action;
-
-    if (action === "save-remote") {
-      const kind = target.dataset.kind;
-      if (!kind) return;
-      const draft = state.currentDraft[kind];
-      if (!draft) {
-        showToast("Please save the draft locally first.", "error");
-        return;
-      }
-      target.disabled = true;
-      await saveDraftToRelays(draft, kind);
-      target.disabled = false;
-    }
-
-    if (action === "import-remote") {
-      const id = target.dataset.id;
-      const backup = state.remoteDrafts.find((b) => b.id === id);
-      if (backup) {
-        const draft = payloadToDraft(backup);
-        draft.d = stripDraftPrefix(draft.d);
-        draft.source = "local";
-        draft.status = "draft";
-        draft.id = crypto.randomUUID();
-        draft.event_id = "";
-        
-        await saveDraft(draft);
-        showToast("Remote draft imported as local draft.");
-        
-        const kindKey = Object.keys(KINDS).find((k) => KINDS[k] === draft.kind);
-        if (kindKey) {
-          await renderDrafts(
-            kindKey,
-            state,
-            listDrafts,
-            KINDS,
-            fetchAuthorEndorsements,
-            persistRelayEvents,
-            payloadToDraft,
-            createEventTemplate,
-            downloadJson,
-            publishDraft,
-            verifyDraft,
-            showToast
-          );
-        }
-        refreshDashboard();
-      }
-    }
-  });
 }
 
 init();
