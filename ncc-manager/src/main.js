@@ -52,7 +52,7 @@ import {
   writeCachedNcc
 } from "./state.js";
 
-import { initPowerShell } from "./power_ui.js";
+import { initPowerShell, focusItem } from "./power_ui.js";
 
 const APP_VERSION = (() => {
   const version = pkg?.version || "0.0.0";
@@ -401,7 +401,7 @@ function createRevisionDraft(item, localDrafts) {
   };
 }
 
-function openNewNcc() {
+async function openNewNcc() {
   if (!state.signerPubkey) {
     showToast("You must be signed in to create an NCC.", "error");
     return;
@@ -427,11 +427,15 @@ function openNewNcc() {
     }
   };
   
-  saveDraft(draft).then(() => {
-      updateAllDrafts().then(() => {
-          refreshUI();
-      });
-  });
+  try {
+    await saveDraft(draft);
+    await updateAllDrafts();
+    refreshUI();
+    focusItem(draft.id, true);
+  } catch (error) {
+    console.error("Failed to create new NCC draft:", error);
+    showToast(`Failed to create draft: ${error.message}`, "error");
+  }
 }
 
 async function persistRelayEvents(events) {
