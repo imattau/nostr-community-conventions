@@ -37,6 +37,10 @@ export const state = {
   FALLBACK_RELAYS: FALLBACK_RELAYS
 };
 
+export function isFallbackRelay(url) {
+  return FALLBACK_RELAYS.includes(url);
+}
+
 export async function getRelays(getConfig) {
   if (typeof getConfig !== "function") return [];
   const defaultRelays = (await getConfig("default_relays", [])) || [];

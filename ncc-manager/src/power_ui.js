@@ -1,5 +1,5 @@
 import { esc, shortenKey, normalizeEventId } from "./utils.js";
-import { KINDS } from "./state.js";
+import { KINDS, isFallbackRelay } from "./state.js";
 import { renderExplorer } from "./ui/explorer.js";
 import { renderInspector } from "./ui/inspector.js";
 import { renderContent } from "./ui/editor.js";
@@ -766,6 +766,10 @@ function renderSettingsModal() {
                     <div id="p-nsec-field" class="p-field" style="display: ${_state.signerMode === "nsec" ? "flex" : "none"}">
                         <label>nsec1...</label>
                         <input type="password" id="p-nsec-input" placeholder="nsec1..." />
+                        <p class="p-muted-text small" style="margin-top: 8px; color: var(--warning)">
+                            ⚠️ <strong>Security Warning:</strong> Your nsec is kept in memory for this session only. 
+                            Never share your nsec or paste it into untrusted applications.
+                        </p>
                     </div>
                     <button class="p-btn-primary" id="p-save-signer">Update Signer</button>
                 </section>
@@ -774,7 +778,7 @@ function renderSettingsModal() {
                     <h3>Data Management</h3>
                     <div class="p-inspector-actions">
                         <button class="p-btn-ghost" id="p-export-all">Export All Drafts (JSON)</button>
-                        <button class="p-btn-ghost" id="p-clear-cache">Clear Relay Cache</button>
+                        <button class="p-btn-ghost" id="p-clear-cache" style="color: var(--danger)">Clear ALL Local Data & Cache</button>
                     </div>
                 </section>
             </div>
@@ -787,14 +791,29 @@ function renderSettingsModal() {
         const container = document.getElementById("p-settings-relays");
         if (!container) return;
         const userRelays = await actions.getConfig?.("user_relays", []);
-        container.innerHTML = userRelays.length 
-            ? userRelays.map(r => `
+        const defaultRelays = _state.FALLBACK_RELAYS || [];
+        
+        let html = "";
+        
+        if (userRelays.length) {
+            html += `<div class="p-muted-text small" style="margin-bottom: 8px">Custom Relays</div>`;
+            html += userRelays.map(r => `
                 <div class="p-settings-row">
-                    <span>${esc(r)}</span>
+                    <span>${esc(r)} <small class="p-type-tag" style="margin-left: 8px">USER</small></span>
                     <button class="p-danger-link" data-relay="${esc(r)}">Remove</button>
                 </div>
-            `).join("")
-            : `<div class="p-muted-text small">No custom relays added</div>`;
+            `).join("");
+        }
+
+        html += `<div class="p-muted-text small" style="margin: 16px 0 8px">Built-in Fallbacks</div>`;
+        html += defaultRelays.map(r => `
+            <div class="p-settings-row" style="opacity: 0.7">
+                <span>${esc(r)} <small class="p-type-tag" style="margin-left: 8px; color: var(--muted); background: transparent; border: 1px solid var(--border)">SYSTEM</small></span>
+                <span class="small p-muted-text">Managed</span>
+            </div>
+        `).join("");
+
+        container.innerHTML = html;
         
         container.querySelectorAll(".p-danger-link").forEach(btn => {
             btn.onclick = async () => {
