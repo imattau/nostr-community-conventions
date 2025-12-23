@@ -324,6 +324,34 @@ body.mode-power {
 .p-prop-key { color: var(--muted); }
 .p-prop-val { color: var(--text); font-weight: 500; text-align: right; word-break: break-all; margin-left: 12px; }
 
+.p-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.p-field label {
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.p-field input, .p-field select, .p-field textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  outline: none;
+  width: 100%;
+}
+.p-field input:focus, .p-field select:focus {
+  border-color: var(--accent);
+  background: rgba(255,255,255,0.02);
+}
+
 .p-inspector-actions { display: grid; gap: 8px; }
 
 /* 8. Status Bar (Fixed) */
