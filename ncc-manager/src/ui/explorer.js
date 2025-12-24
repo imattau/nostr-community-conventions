@@ -1,6 +1,6 @@
 import { esc, eventTagValue, shortenKey, normalizeEventId } from "../utils.js";
 import { KINDS } from "../state.js";
-import { payloadToDraft } from "../nostr.js";
+import { payloadToDraft } from "../services/nostr.js";
 
 const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
 
@@ -222,12 +222,18 @@ function renderExplorerBranch(group, sectionType, context) {
     const status = determineStatus(mainNcc || group.kinds.endorsement[0]?.item || group.kinds.supporting[0]?.item || group.kinds.nsr[0]?.item, sectionType, currentItemId, findItem);
     const badgeLabel = status === "published" ? "PUB" : status === "withdrawn" ? "WITH" : "DRAFT";
 
+    // Validation check
+    const dTag = group.rawKey; // This matches 'd'
+    const validation = state.validationResults?.get(dTag);
+    const hasWarnings = validation?.warnings?.length > 0;
+    const warningIcon = hasWarnings ? `<span class="p-icon-warning" title="${esc(validation.warnings.join('\n'))}">⚠️</span>` : "";
+
     let bodyHtml = "";
     const isDraftSection = sectionType === "drafts";
     
     if (group.kinds.ncc.length) {
         const nccItems = isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc;
-        bodyHtml += nccItems.map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state)).join("");
+        bodyHtml += nccItems.map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state, validation)).join("");
     }
 
     const subTrees = [
@@ -252,7 +258,7 @@ function renderExplorerBranch(group, sectionType, context) {
                         </span>
                     </button>
                     <div class="p-nav-branch-body ${subClosed ? "" : "is-open"}">
-                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published", currentItemId, state)).join("")}
+                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published", currentItemId, state, validation)).join("")}
                     </div>
                 </div>
             `;
@@ -263,7 +269,11 @@ function renderExplorerBranch(group, sectionType, context) {
         <div class="p-nav-tree">
             <button class="p-nav-branch-header" data-branch="${branchKey}">
                 <span class="p-nav-branch-icon">${isClosed ? ">" : "V"}</span>
-                <span class="p-nav-branch-title">${esc(group.label)} <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small></span>
+                <span class="p-nav-branch-title">
+                   ${esc(group.label)} 
+                   <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small>
+                   ${warningIcon}
+                </span>
                 <span class="p-badge-mini status-${status}">${badgeLabel}</span>
             </button>
             <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
@@ -273,7 +283,7 @@ function renderExplorerBranch(group, sectionType, context) {
     `;
 }
 
-function renderExplorerItem(entry, idx, inheritedStatus, currentItemId, state) {
+function renderExplorerItem(entry, idx, inheritedStatus, currentItemId, state, validation) {
     const { item } = entry;
     const isActive = item.id === currentItemId ? " active" : "";
     const status = normalizeStatus(item.status || inheritedStatus);
@@ -293,11 +303,24 @@ function renderExplorerItem(entry, idx, inheritedStatus, currentItemId, state) {
         label = `${shortenKey(author)} · ${dateStr}`;
     }
 
+    let extraBadge = "";
+    if (validation && item.kind === KINDS.ncc) {
+        const itemId = item.event_id || item.id;
+        if (itemId === validation.authoritativeDocId) {
+             extraBadge = `<span class="p-badge-mini" style="background:var(--accent);color:var(--bg);margin-left:4px" title="Authoritative Revision">AUTH</span>`;
+        } else if (validation.forkedBranches?.includes(itemId)) {
+             extraBadge = `<span class="p-badge-mini" style="background:var(--warning);color:var(--bg);margin-left:4px" title="Forked / Non-Authoritative Tip">FORK</span>`;
+        }
+    }
+
     return `
         <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
             <div class="p-nav-meta">
                 <span class="p-nav-label">${esc(label)}</span>
-                <span class="p-badge-mini status-${status}">${statusLabel}</span>
+                <div style="display:flex;align-items:center">
+                    <span class="p-badge-mini status-${status}">${statusLabel}</span>
+                    ${extraBadge}
+                </div>
             </div>
             <div class="p-nav-date">${dateStr}</div>
         </div>

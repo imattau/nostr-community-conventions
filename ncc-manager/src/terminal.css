@@ -60,3 +60,7 @@ body.mode-terminal {
 .theme-terminal .p-empty-icon {
     font-size: 2rem;
 }
+
+.theme-terminal .p-content-header h1 {
+    color: var(--text);
+}

@@ -120,7 +120,7 @@ export function payloadToDraft(payload) {
       topics: tagMap.t || [],
       lang: tagMap.lang?.[0] || "",
       version: tagMap.version?.[0] || "",
-      supersedes: tagMap.supersedes || [],
+      supersedes: (tagMap.supersedes || []).map(normalizeSupersedes),
       license: tagMap.license?.[0] || "",
       authors: tagMap.authors || []
     };
@@ -128,12 +128,12 @@ export function payloadToDraft(payload) {
 
   if (draft.kind === 30051) {
     draft.tags = {
-      authoritative: tagMap.authoritative?.[0] || "",
+      authoritative: normalizeSupersedes(tagMap.authoritative?.[0] || ""),
       type: tagMap.type?.[0] || "",
       steward: tagMap.steward?.[0] || "",
-      previous: tagMap.previous?.[0] || "",
-      from: tagMap.from?.[0] || "",
-      to: tagMap.to?.[0] || "",
+      previous: normalizeSupersedes(tagMap.previous?.[0] || ""),
+      from: normalizeSupersedes(tagMap.from?.[0] || ""),
+      to: normalizeSupersedes(tagMap.to?.[0] || ""),
       reason: tagMap.reason?.[0] || "",
       effective_at: tagMap.effective_at?.[0] || ""
     };
@@ -141,7 +141,7 @@ export function payloadToDraft(payload) {
 
   if (draft.kind === 30052) {
     draft.tags = {
-      endorses: tagMap.endorses?.[0] || "",
+      endorses: normalizeSupersedes(tagMap.endorses?.[0] || ""),
       roles: tagMap.role || [],
       implementation: tagMap.implementation?.[0] || "",
       note: tagMap.note?.[0] || "",
@@ -154,7 +154,7 @@ export function payloadToDraft(payload) {
       title: tagMap.title?.[0] || "",
       for: tagMap.for?.[0] || "",
       published_at: tagMap.published_at?.[0] || "",
-      for_event: tagMap.for_event?.[0] || "",
+      for_event: normalizeSupersedes(tagMap.for_event?.[0] || ""),
       type: tagMap.type?.[0] || "",
       topics: tagMap.t || [],
       lang: tagMap.lang?.[0] || "",

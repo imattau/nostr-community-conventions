@@ -131,15 +131,17 @@ export function renderInspector(container, item, state, options = {}) {
         </div>
     `;
 
-    renderActions(document.getElementById("p-inspector-actions"), item, isPublished, isEditMode, actions);
+    renderActions(document.getElementById("p-inspector-actions"), item, isPublished, isEditMode);
 }
 
-function renderActions(container, item, isPublished, isEditMode, actions) {
+function renderActions(container, item, isPublished, isEditMode) {
     if (!container) return;
     container.innerHTML = "";
 
     if (!isEditMode) {
+        // VIEW MODE ACTIONS
         if (!isPublished) {
+            // It's a DRAFT (local or remote)
             const editBtn = document.createElement("button");
             editBtn.className = "p-btn-accent";
             editBtn.textContent = "Edit";
@@ -154,6 +156,7 @@ function renderActions(container, item, isPublished, isEditMode, actions) {
             publishBtn.dataset.id = item.id;
             container.appendChild(publishBtn);
 
+            // DELETE or WITHDRAW logic for draft
             if (!item.event_id) {
                 const deleteBtn = document.createElement("button");
                 deleteBtn.className = "p-btn-ghost";
@@ -172,6 +175,7 @@ function renderActions(container, item, isPublished, isEditMode, actions) {
                 container.appendChild(withdrawBtn);
             }
         } else {
+            // Published Item
             const reviseBtn = document.createElement("button");
             reviseBtn.className = "p-btn-accent";
             reviseBtn.textContent = "Revise";
@@ -179,7 +183,7 @@ function renderActions(container, item, isPublished, isEditMode, actions) {
             reviseBtn.dataset.id = item.id;
             container.appendChild(reviseBtn);
 
-            if (actions.withdrawDraft && item.status !== "withdrawn") {
+            if (item.status !== "withdrawn") {
                 const withdrawBtn = document.createElement("button");
                 withdrawBtn.className = "p-btn-ghost";
                 withdrawBtn.style.color = "var(--danger)";
@@ -190,13 +194,15 @@ function renderActions(container, item, isPublished, isEditMode, actions) {
             }
         }
     } else {
+        // EDIT MODE ACTIONS
         if (!isPublished) {
             const saveBtn = document.createElement("button");
             saveBtn.className = "p-btn-accent";
             saveBtn.textContent = "Save (Ctrl+S)";
             saveBtn.dataset.action = "save-item";
             container.appendChild(saveBtn);
-        } else {
+        }
+        else {
             const saveMsg = document.createElement("span");
             saveMsg.className = "p-muted-text small";
             saveMsg.style.padding = "6px 0";

@@ -1,5 +1,5 @@
-import { KINDS } from './state.js';
-import { normalizeEventId } from './utils.js';
+import { KINDS } from '../state.js';
+import { normalizeEventId } from '../utils.js';
 
 /**
  * Validates a draft object before it's published as a Nostr event.

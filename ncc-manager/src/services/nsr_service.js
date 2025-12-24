@@ -3,8 +3,8 @@ import {
   createEventTemplate, 
   publishEvent
 } from "./nostr.js";
-import { nowSeconds } from "./utils.js";
-import { KINDS } from "./state.js";
+import { nowSeconds } from "../utils.js";
+import { KINDS } from "../state.js";
 
 /**
  * Service to manage NSR (NCC Succession Record) events.

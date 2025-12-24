@@ -15,6 +15,7 @@ import QRCode from 'qrcode';
 import nip46 from "./services/nip46.js";
 
 let _getConfig = null;
+let _setConfig = null;
 let currentItemId = null;
 let isEditMode = false;
 let revisionSourceId = null; 
@@ -43,10 +44,11 @@ function log(...args) {
     if (DEBUG) console.log("%c[PowerUI]", "color: #58a6ff; font-weight: bold", ...args);
 }
 
-export function initPowerShell(appState, appVersion, getConfigFunc) {
+export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFunc) {
     _state = appState || {};
     if (appVersion) _appVersion = appVersion;
     if (getConfigFunc) _getConfig = getConfigFunc;
+    if (setConfigFunc) _setConfig = setConfigFunc;
     
     const shell = document.getElementById("shell-power");
     if (!shell) return;
@@ -119,6 +121,21 @@ export function initPowerShell(appState, appVersion, getConfigFunc) {
 }
 
 function setupGlobalListeners() {
+    eventBus.on('revision-created', (newDraft) => {
+        if (newDraft) {
+            revisionSourceId = currentItemId; // Track where we came from
+            focusItem(newDraft.id, true);
+        }
+    });
+
+    eventBus.on('save-successful', (item) => {
+        updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+        Object.assign(findItem(item.id) || {}, item); // Update local copy
+        isEditMode = false;
+        revisionSourceId = null;
+        refreshUI();
+    });
+
     document.addEventListener("click", async (e) => {
         const shell = document.getElementById("shell-power");
         if (!shell || shell.hidden || shell.style.display === "none") return;
@@ -961,9 +978,14 @@ function renderSettingsModal() {
     const themeSelect = document.getElementById("p-theme-select");
     themeSelect.onchange = async () => {
         const selectedTheme = themeSelect.value;
-        eventBus.emit('set-config', { key: "theme", value: selectedTheme });
-        document.body.className = `mode-${selectedTheme}`;
-        _state.theme = selectedTheme; // Update local state for immediate feedback
+        await _setConfig("theme", selectedTheme);
+        
+        document.body.classList.remove('theme-terminal');
+        if (selectedTheme === 'terminal') {
+            document.body.classList.add('theme-terminal');
+        }
+        
+        _state.theme = selectedTheme;
     };
 
     const addBtn = document.getElementById("p-add-relay");

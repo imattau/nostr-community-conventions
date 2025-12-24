@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { validateDraftForPublish } from './validation.js';
-import { KINDS } from './state.js';
+import { KINDS } from '../state.js';
 
 test('validateDraftForPublish() should require identifier', () => {
     const draft = { kind: KINDS.ncc };
