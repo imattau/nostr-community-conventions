@@ -1,5 +1,6 @@
 import { SimplePool } from "nostr-tools/pool";
 import { finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
+import nip46 from './nip46.js';
 
 export const pool = new SimplePool();
 
@@ -176,6 +177,16 @@ export async function getSigner(mode, nsec) {
       type: "nip07",
       pubkey,
       signEvent: (template) => window.nostr.signEvent(template)
+    };
+  }
+
+  if (mode === "nip46") {
+    if (!nip46.isConnected()) throw new Error("NIP-46 signer not connected");
+    const pubkey = await nip46.getPublicKey();
+    return {
+      type: "nip46",
+      pubkey,
+      signEvent: (template) => nip46.signEvent(template)
     };
   }
 
