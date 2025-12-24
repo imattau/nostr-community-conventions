@@ -1,19 +1,20 @@
+import { eventBus } from "./eventBus.js";
 import { esc, shortenKey, normalizeEventId } from "./utils.js";
 import { KINDS, isFallbackRelay } from "./state.js";
 import { renderExplorer } from "./ui/explorer.js";
 import { renderInspector } from "./ui/inspector.js";
 import { renderContent } from "./ui/editor.js";
-import { 
-    toggleCommandPalette, 
-    renderCommandList, 
+import {
+    toggleCommandPalette,
+    renderCommandList,
     executeCommand as paletteExecuteCommand,
     handlePaletteNavigation,
     executeCommand
 } from "./ui/palette.js";
 import QRCode from 'qrcode';
-import nip46 from "./nip46.js";
+import nip46 from "./services/nip46.js";
 
-let actions = {};
+let _getConfig = null;
 let currentItemId = null;
 let isEditMode = false;
 let revisionSourceId = null; 
@@ -33,7 +34,7 @@ const TYPE_LABELS = {
 
 const COMMANDS = [
     { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
-    { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => actions.openNewNcc?.() },
+    { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => eventBus.emit('open-new-ncc') },
     { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
@@ -42,14 +43,13 @@ function log(...args) {
     if (DEBUG) console.log("%c[PowerUI]", "color: #58a6ff; font-weight: bold", ...args);
 }
 
-export function initPowerShell(appState, appActions, appVersion) {
+export function initPowerShell(appState, appVersion, getConfigFunc) {
     _state = appState || {};
-    actions = appActions || {};
     if (appVersion) _appVersion = appVersion;
+    if (getConfigFunc) _getConfig = getConfigFunc;
     
     const shell = document.getElementById("shell-power");
     if (!shell) return;
-
     if (!shell.innerHTML.includes("p-topbar")) {
         log("Rendering base shell structure");
         shell.innerHTML = `
@@ -272,20 +272,20 @@ function setupGlobalListeners() {
 
 async function handleInspectorAction(action, id) {
     if (action === "delete-item") {
-        actions.deleteItem?.(id);
+        eventBus.emit('delete-item', id);
     } else if (action === "withdraw-item") {
-        actions.withdrawDraft?.(id);
+        eventBus.emit('withdraw-item', id);
     } else if (action === "edit-item") {
         isEditMode = true;
         const item = findItem(id);
         if (item) {
             renderContent(document.getElementById("p-content-column"), item, { isEditMode, updateStatus, TYPE_LABELS });
-            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, actions, findItem });
+            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, findItem });
         }
     } else if (action === "publish-item") {
         const item = findItem(id);
         if (item && confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
-            actions.publishDraft?.(item, TYPE_LABELS[item.kind].toLowerCase());
+            eventBus.emit('publish-item', { item, kind: TYPE_LABELS[item.kind].toLowerCase() });
         }
     } else if (action === "revise-item") {
         handleReviseAction(id);
@@ -306,12 +306,12 @@ async function handleInspectorAction(action, id) {
             const tempDraftId = currentItemId;
             revisionSourceId = null;
             currentItemId = sourceId;
-            await actions.deleteItemSilent?.(tempDraftId);
+            eventBus.emit('delete-item-silent', tempDraftId);
         } else {
             const found = findItem(currentItemId);
             if (found) {
                 renderContent(document.getElementById("p-content-column"), found, { isEditMode, updateStatus, TYPE_LABELS });
-                renderInspector(document.getElementById("p-inspector-body"), found, _state, { isEditMode, actions, findItem });
+                renderInspector(document.getElementById("p-inspector-body"), found, _state, { isEditMode, findItem });
                 refreshUI();
             }
         }
@@ -344,9 +344,9 @@ function handleGlobalAction(action, target) {
     } else if (action === "sign-in") {
         openSignInModal();
     } else if (action === "sign-out") {
-        actions.signOut?.();
+        eventBus.emit('sign-out');
     } else if (action === "open-settings") {
-        renderSettingsModal();
+        renderSettingsModal(_getConfig);
     } else if (action === "close-modal") {
         const modal = target.closest(".p-modal-overlay");
         if (modal) modal.remove();
@@ -400,7 +400,7 @@ function refreshUI() {
         const item = findItem(currentItemId);
         if (item) {
             renderContent(document.getElementById("p-content-column"), item, { isEditMode, updateStatus, TYPE_LABELS });
-            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, actions, findItem });
+            renderInspector(document.getElementById("p-inspector-body"), item, _state, { isEditMode, findItem });
         } else {
             currentItemId = null;
             renderEmptyState();
@@ -540,20 +540,7 @@ async function handleReviseAction(id) {
     const item = findItem(id);
     if (!item) return;
     
-    const draft = await actions.createRevisionDraft?.(item, _state.nccLocalDrafts);
-    if (draft) {
-        revisionSourceId = id;
-        draft.id = crypto.randomUUID();
-        draft.event_id = "";
-        draft.status = "draft";
-        draft.source = "local";
-        
-        currentItemId = draft.id;
-        isEditMode = true;
-
-        await actions.saveItem?.(draft.id, draft.content, draft);
-        refreshUI();
-    }
+    eventBus.emit('create-revision-draft', item);
 }
 
 async function handleSaveShortcut() {
@@ -571,23 +558,8 @@ async function handleSaveShortcut() {
     
     const content = editor.value;
     updateStatus("Saving...");
-    try {
-        const updatedItem = await actions.saveItem(currentItemId, content, item);
-        updateStatus(`Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-        
-        if (updatedItem) {
-            Object.assign(item, updatedItem);
-        } else {
-            item.content = content;
-        }
-        
-        isEditMode = false; 
-        revisionSourceId = null; 
-        refreshUI();
-    } catch (e) {
-        updateStatus("Save failed");
-        console.error("Save error:", e);
-    }
+    
+    eventBus.emit('save-item', { id: currentItemId, content, item });
 }
 
 function setupKeyboardShortcuts() {
@@ -796,8 +768,7 @@ function openEndorsementModal(nccItem) {
                 note: note
             }
         };
-
-        await actions.saveItem?.(draft.id, draft.content, draft);
+        await eventBus.emit('save-item', { id: draft.id, content: draft.content, item: draft });
         openItem(draft.id);
         modal.remove();
     };
@@ -857,7 +828,7 @@ function openNsrModal(nccItem) {
             }
         };
 
-        await actions.saveItem?.(draft.id, draft.content, draft);
+        await eventBus.emit('save-item', { id: draft.id, content: draft.content, item: draft });
         openItem(draft.id);
         modal.remove();
     };
@@ -880,9 +851,8 @@ function openSupportingDocFlow(nccItem) {
         }
     };
 
-    actions.saveItem?.(draft.id, draft.content, draft).then(() => {
-        focusItem(draft.id, true);
-    });
+    eventBus.emit('save-item', { id: draft.id, content: draft.content, item: draft });
+    focusItem(draft.id, true);
 }
 
 function renderSettingsModal() {
@@ -952,7 +922,7 @@ function renderSettingsModal() {
     const refreshRelays = async () => {
         const container = document.getElementById("p-settings-relays");
         if (!container) return;
-        const userRelays = await actions.getConfig?.("user_relays", []);
+        const userRelays = await _getConfig?.("user_relays", []);
         const defaultRelays = _state.FALLBACK_RELAYS || [];
         
         let html = "";
@@ -980,7 +950,7 @@ function renderSettingsModal() {
         container.querySelectorAll(".p-danger-link").forEach(btn => {
             btn.onclick = async () => {
                 const next = userRelays.filter(r => r !== btn.dataset.relay);
-                await actions.setConfig?.("user_relays", next);
+                eventBus.emit('set-config', { key: "user_relays", value: next });
                 refreshRelays();
             };
         });
@@ -991,7 +961,7 @@ function renderSettingsModal() {
     const themeSelect = document.getElementById("p-theme-select");
     themeSelect.onchange = async () => {
         const selectedTheme = themeSelect.value;
-        await actions.setConfig("theme", selectedTheme);
+        eventBus.emit('set-config', { key: "theme", value: selectedTheme });
         document.body.className = `mode-${selectedTheme}`;
         _state.theme = selectedTheme; // Update local state for immediate feedback
     };
@@ -1002,10 +972,10 @@ function renderSettingsModal() {
         const val = relayInput.value.trim();
         if (!val) return;
         const normalized = val.startsWith("ws") ? val : `wss://${val}`;
-        const current = await actions.getConfig?.("user_relays", []);
+        const current = await _getConfig?.("user_relays", []);
         if (!current.includes(normalized)) {
             current.push(normalized);
-            await actions.setConfig?.("user_relays", current);
+            eventBus.emit('set-config', { key: "user_relays", value: current });
             relayInput.value = "";
             refreshRelays();
         }
@@ -1021,13 +991,15 @@ function renderSettingsModal() {
     saveSignerBtn.onclick = async () => {
         const mode = modeSelect.value;
         const nsec = document.getElementById("p-nsec-input").value.trim();
-        await actions.updateSignerConfig?.(mode, nsec);
+        eventBus.emit('update-signer-config', { mode, nsec });
         modal.remove();
     };
 
-    document.getElementById("p-export-all").onclick = () => actions.exportAll?.();
+    document.getElementById("p-export-all").onclick = () => eventBus.emit('export-all');
     document.getElementById("p-clear-cache").onclick = () => {
-        localStorage.clear();
-        window.location.reload();
+        if (confirm("Are you sure you want to clear ALL local data? This cannot be undone.")) {
+            eventBus.emit('clear-cache');
+            window.location.reload();
+        }
     };
 }

@@ -6,7 +6,7 @@ import {
   getDraft,
   setConfig,
   getConfig
-} from "./store.js";
+} from "./services/store.js";
 import {
   createEventTemplate,
   payloadToDraft,
@@ -18,7 +18,7 @@ import {
   fetchAuthorEndorsements,
   fetchProfile,
   fetchSuccessionRecords
-} from "./nostr.js";
+} from "./services/nostr.js";
 import pkg from "../package.json";
 
 import {
@@ -45,19 +45,25 @@ import {
   suggestNextNccNumber
 } from "./utils.js";
 
-import {
-  state,
-  updateState,
-  KINDS,
-  getRelays,
-  buildRelayCacheKey,
-  readCachedNcc,
-  writeCachedNcc
+import { 
+  KINDS, 
+  state as initialState, 
+  getRelays, 
+  buildRelayCacheKey, 
+  readCachedNcc, 
+  writeCachedNcc 
 } from "./state.js";
+import { stateManager } from "./stateManager.js";
+
+// Initialize state manager with the initial state
+stateManager.updateState(initialState);
 
 import { initPowerShell, focusItem } from "./power_ui.js";
-import { nsrService } from "./nsr_service.js";
-import { validateDraftForPublish } from "./validation.js";
+import { nsrService } from "./services/nsr_service.js";
+import { validateDraftForPublish } from "./services/validation.js";
+
+// Import UI components to register them
+import "./ui/explorer-tree.js";
 
 const APP_VERSION = (() => {
   const version = pkg?.version || "0.0.0";
@@ -83,7 +89,7 @@ async function updateAllDrafts() {
     listDrafts(KINDS.supporting)
   ]);
   
-  updateState({ 
+  stateManager.updateState({ 
     nccLocalDrafts: ncc,
     nsrLocalDrafts: nsr,
     endorsementLocalDrafts: endorsement,
@@ -99,29 +105,14 @@ async function initShell() {
       return;
   }
   
-  updateState({ uiMode: "power" });
   power.hidden = false;
   
   await updateAllDrafts();
   try {
     initPowerShell(
-      state,
-      {
-        saveItem: handlePowerSave,
-        publishDraft,
-        withdrawDraft,
-        deleteItem: handlePowerDelete,
-        deleteItemSilent: handlePowerDeleteSilent,
-        openNewNcc,
-        createRevisionDraft,
-        promptSigner: promptSignerConnection,
-        signOut: signOutSigner,
-        getConfig,
-        setConfig,
-        updateSignerConfig: handleUpdateSignerConfig,
-        exportAll: handleExportAllDrafts
-      },
-      APP_VERSION
+      stateManager.getState(),
+      APP_VERSION,
+      getConfig
     );
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
@@ -129,7 +120,7 @@ async function initShell() {
 }
 
 async function handleUpdateSignerConfig(mode, nsec) {
-    updateState({ signerMode: mode });
+    stateManager.updateState({ signerMode: mode });
     await setConfig("signer_mode", mode);
     if (mode === "nsec") {
         if (!nsec) {
@@ -178,6 +169,7 @@ async function handlePowerDeleteSilent(id) {
 
 async function handlePowerSave(id, content, fullDraft = null) {
   let item = fullDraft;
+  const state = stateManager.getState();
   
   if (!item) {
     const pending = state.pendingDrafts?.get(id);
@@ -269,7 +261,7 @@ async function signOutSigner() {
   sessionStorage.removeItem("ncc-manager-nsec");
   await setConfig("signer_mode", "nip07");
   // Explicitly clear signer state and prevent immediate re-probing
-  updateState({ 
+  stateManager.updateState({ 
       signerPubkey: null, 
       signerProfile: null, 
       signerMode: "nip07" 
@@ -281,29 +273,31 @@ async function signOutSigner() {
 }
 
 async function refreshSignerProfile() {
+  const state = stateManager.getState();
   if (!state.signerPubkey) {
-    updateState({ signerProfile: null });
+    stateManager.updateState({ signerProfile: null });
     return;
   }
   try {
     const relays = await getRelays(getConfig);
     const targets = relays.length ? relays : FALLBACK_RELAYS;
     if (!targets.length) return;
-    updateState({ signerProfile: await fetchProfile(state.signerPubkey, targets) });
+    stateManager.updateState({ signerProfile: await fetchProfile(state.signerPubkey, targets) });
   } catch (error) {
     console.error("NCC Manager: signer profile fetch failed", error);
-    updateState({ signerProfile: null });
+    stateManager.updateState({ signerProfile: null });
   }
 }
 
 async function updateSignerStatus() {
   const nsec = sessionStorage.getItem("ncc-manager-nsec");
+  const state = stateManager.getState();
   try {
     const signer = await getSigner(state.signerMode, nsec);
-    updateState({ signerPubkey: signer.pubkey });
+    stateManager.updateState({ signerPubkey: signer.pubkey });
     await refreshSignerProfile();
   } catch (error) {
-    updateState({ signerPubkey: null, signerProfile: null });
+    stateManager.updateState({ signerPubkey: null, signerProfile: null });
   }
   
   await updateAllDrafts();
@@ -311,13 +305,14 @@ async function updateSignerStatus() {
 }
 
 async function fetchDefaults() {
+  const state = stateManager.getState();
   try {
     const res = await fetch("/api/defaults");
     const data = await res.json();
-    updateState({ defaults: data.relays || [] });
+    stateManager.updateState({ defaults: data.relays || [] });
     await setConfig("default_relays", state.defaults);
   } catch (error) {
-    updateState({ defaults: FALLBACK_RELAYS });
+    stateManager.updateState({ defaults: FALLBACK_RELAYS });
     await setConfig("default_relays", state.defaults);
     showToast("Using fallback default relays (server unavailable).", "error");
   }
@@ -328,8 +323,8 @@ async function loadConfig() {
   const signerMode = (await getConfig("signer_mode", "nip07")) || "nip07";
   const savedTheme = (await getConfig("theme", "power")) || "power";
   
-  updateState({ defaults: defaultRelays, signerMode: signerMode, theme: savedTheme });
-  document.body.className = `mode-${savedTheme}`;
+  stateManager.updateState({ defaults: defaultRelays, signerMode: signerMode, theme: savedTheme });
+  document.body.className = `theme-${savedTheme}`;
   
   await initShell();
   await updateSignerStatus();
@@ -385,6 +380,7 @@ function buildRevisionSupersedes(tags, eventId) {
 
 function createRevisionDraft(item, localDrafts) {
   const eventId = item.event_id || item.id;
+  const state = stateManager.getState();
   const relaySource =
     item.raw_event ||
     state.nccDocs?.find((doc) => normalizeHexId(doc.id) === normalizeHexId(eventId));
@@ -424,6 +420,7 @@ function createRevisionDraft(item, localDrafts) {
 }
 
 function openNewNcc() {
+  const state = stateManager.getState();
   if (!state.signerPubkey) {
     showToast("You must be signed in to create an NCC.", "error");
     return;
@@ -457,6 +454,7 @@ function openNewNcc() {
 
 async function persistRelayEvents(events) {
   if (!events?.length) return;
+  const state = stateManager.getState();
   const tasks = [];
   for (const event of events) {
     if (!event?.id) continue;
@@ -529,8 +527,8 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
         console.warn("NCC Manager: failed to fetch related events", error);
       }
     }
-    
-    updateState({
+
+    stateManager.updateState({
       nccOptions: buildNccOptions(filtered),
       nccDocs: filtered,
       relayStatus: {
@@ -550,27 +548,14 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
 
 function refreshUI() {
   initPowerShell(
-    state,
-    {
-      saveItem: handlePowerSave,
-      publishDraft,
-      withdrawDraft,
-      deleteItem: handlePowerDelete,
-      deleteItemSilent: handlePowerDeleteSilent,
-      openNewNcc,
-      createRevisionDraft,
-      promptSigner: promptSignerConnection,
-      signOut: signOutSigner,
-      getConfig,
-      setConfig,
-      updateSignerConfig: handleUpdateSignerConfig,
-      exportAll: handleExportAllDrafts
-    },
-    APP_VERSION
+    stateManager.getState(),
+    APP_VERSION,
+    getConfig
   );
 }
 
 async function withdrawDraft(id) {
+  const state = stateManager.getState();
   try {
     if (!confirm("Are you sure you want to withdraw this NCC? This will broadcast a withdrawal update to the Nostr network.")) return;
     
@@ -620,6 +605,7 @@ async function withdrawDraft(id) {
 }
 
 async function publishDraft(draft, kind) {
+  const state = stateManager.getState();
   try {
     const validationError = validateDraftForPublish(draft);
     if (validationError) throw new Error(validationError);
@@ -704,6 +690,7 @@ async function broadcastDraftToRelays(draft) {
   if (!draft.d) return null;
   const relays = await getRelays(getConfig);
   if (!relays.length) return null;
+  const state = stateManager.getState();
   if (!state.signerPubkey) return null;
 
   const signerMode = state.signerMode;
@@ -723,8 +710,26 @@ async function broadcastDraftToRelays(draft) {
   return { eventId: event.id, result };
 }
 
+import { eventBus } from './eventBus.js';
+
+function setupEventListeners() {
+    eventBus.on('open-new-ncc', openNewNcc);
+    eventBus.on('delete-item', handlePowerDelete);
+    eventBus.on('delete-item-silent', handlePowerDeleteSilent);
+    eventBus.on('withdraw-item', withdrawDraft);
+    eventBus.on('publish-item', ({ item, kind }) => publishDraft(item, kind));
+    eventBus.on('create-revision-draft', createRevisionDraft);
+    eventBus.on('save-item', ({ id, content, item }) => handlePowerSave(id, content, item));
+    eventBus.on('sign-out', signOutSigner);
+    eventBus.on('update-signer-config', ({ mode, nsec }) => handleUpdateSignerConfig(mode, nsec));
+    eventBus.on('export-all', handleExportAllDrafts);
+    eventBus.on('clear-cache', () => localStorage.clear());
+    eventBus.on('set-config', ({ key, value }) => setConfig(key, value));
+}
+
 async function init() {
   await loadConfig();
+  setupEventListeners();
   await fetchDefaults();
   await refreshEndorsementHelpers();
 }
