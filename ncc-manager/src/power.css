@@ -587,79 +587,72 @@ body.mode-power {
 
 /* 10. Responsive Design */
 .p-mobile-nav {
-    display: none; /* Hidden by default */
+    display: none;
+}
+.p-bottom-bar {
+    display: none;
 }
 
 @media (max-width: 900px) {
-
     .p-main {
-
-        grid-template-columns: 100%; /* Single column layout */
-
+        grid-template-columns: 100%;
+        padding-bottom: var(--topbar-h); /* Space for bottom bar */
     }
-
-
 
     .p-explorer, .p-inspector {
-
         position: fixed;
-
         top: var(--topbar-h);
-
         bottom: var(--status-h);
-
         width: 300px;
-
         z-index: 200;
-
         transform: translateX(-100%);
-
         transition: transform 0.3s ease;
-
         border-right: 1px solid var(--border);
-
         background: var(--bg);
-
     }
-
-
 
     .p-inspector {
-
         right: 0;
-
         left: auto;
-
         transform: translateX(100%);
-
     }
-
-
 
     .p-explorer.is-open, .p-inspector.is-open {
-
         transform: translateX(0);
-
     }
-
-    
 
     .p-top-center, .p-top-right .p-signer-wrapper {
-
-        display: none; /* Hide search and signer on mobile */
-
+        display: none;
     }
-
-
 
     .p-mobile-nav {
-
         display: flex;
-
         gap: 8px;
-
     }
 
+    .p-bottom-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: var(--topbar-h);
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+        z-index: 200;
+        padding: 0 8px;
+    }
+
+    /* Override status bar to sit on top of the bottom bar */
+    .p-status {
+        position: fixed;
+        bottom: var(--topbar-h);
+        left: 0;
+        right: 0;
+        z-index: 199;
+    }
 }
 
 
