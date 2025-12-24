@@ -7,8 +7,11 @@ import {
     toggleCommandPalette, 
     renderCommandList, 
     executeCommand as paletteExecuteCommand,
-    handlePaletteNavigation
+    handlePaletteNavigation,
+    executeCommand
 } from "./ui/palette.js";
+import QRCode from 'qrcode';
+import nip46 from "./nip46.js";
 
 let actions = {};
 let currentItemId = null;
@@ -146,7 +149,7 @@ function setupGlobalListeners() {
 
         const paletteItem = target.closest(".p-palette-item");
         if (paletteItem && paletteItem.dataset.cmd) {
-            executeCommand(paletteItem.dataset.cmd);
+            paletteExecuteCommand(paletteItem.dataset.cmd, COMMANDS, () => toggleCommandPalette(false));
             return;
         }
 
@@ -339,7 +342,7 @@ function handleGlobalAction(action, target) {
         inspectorPane?.classList.toggle("is-open");
         createContentOverlay(closePanes);
     } else if (action === "sign-in") {
-        actions.promptSigner?.();
+        openSignInModal();
     } else if (action === "sign-out") {
         actions.signOut?.();
     } else if (action === "open-settings") {
@@ -610,7 +613,7 @@ function setupKeyboardShortcuts() {
         }
 
         if (paletteActive) {
-            if (handlePaletteNavigation(e.key, COMMANDS, executeCommand)) {
+            if (handlePaletteNavigation(e.key, COMMANDS, (id) => paletteExecuteCommand(id, COMMANDS, () => toggleCommandPalette(false)))) {
                 e.preventDefault();
             }
             return;
@@ -621,10 +624,6 @@ function setupKeyboardShortcuts() {
             refreshUI();
         }
     });
-}
-
-function executeCommand(id) {
-    paletteExecuteCommand(id, COMMANDS, () => toggleCommandPalette(false));
 }
 
 function renderContextMenu(x, y, item) {
@@ -669,6 +668,79 @@ function renderContextMenu(x, y, item) {
             openNsrModal(item);
         }
         menu.remove();
+    });
+}
+
+function openSignInModal() {
+    const modal = document.createElement("div");
+    modal.className = "p-modal-overlay";
+    modal.innerHTML = `
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2>Sign In</h2>
+                <button class="p-ghost-btn" data-action="close-modal">X</button>
+            </div>
+            <div class="p-modal-body">
+                <div class="p-inspector-actions">
+                    <button class="p-btn-primary" data-action="signin-nip07">Browser Extension (NIP-07)</button>
+                    <button class="p-btn-primary" data-action="signin-qr">QR Code (NIP-46)</button>
+                </div>
+
+                <div id="p-qr-container" style="display: none; text-align: center; margin-top: 20px;">
+                    <p id="p-qr-status" class="p-muted-text small">Scan with a NIP-46 compatible wallet:</p>
+                    <canvas id="p-qr-canvas"></canvas>
+                </div>
+
+                <div class="p-modal-section">
+                    <div class="p-field" style="margin-top: 20px;">
+                        <label>Or connect with a bunker address (NIP-46)</label>
+                        <input type="text" id="p-bunker-input" placeholder="bunker://..." />
+                        <button class="p-btn-accent" style="margin-top: 8px;" data-action="signin-bunker">Connect</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const handleNip46Connect = (bunkerUrl) => {
+        const statusEl = document.getElementById("p-qr-status");
+        if (statusEl) statusEl.textContent = "Connecting...";
+        
+        try {
+            const generatedUrl = nip46.connect(bunkerUrl, (pubkey) => {
+                actions.updateSignerConfig?.("nip46");
+                modal.remove();
+            });
+
+            if (generatedUrl) { // QR code flow
+                const qrContainer = document.getElementById("p-qr-container");
+                const canvas = document.getElementById("p-qr-canvas");
+                QRCode.toCanvas(canvas, generatedUrl, { width: 256 }, (error) => {
+                    if (error) console.error(error);
+                });
+                qrContainer.style.display = "block";
+                if (statusEl) statusEl.textContent = "Scan with a NIP-46 compatible wallet:";
+            }
+        } catch (e) {
+            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+        }
+    };
+
+    modal.addEventListener("click", (e) => {
+        const action = e.target.dataset.action;
+        if (action === "signin-nip07") {
+            actions.promptSigner?.();
+            modal.remove();
+        } else if (action === "signin-qr") {
+            handleNip46Connect(null);
+        } else if (action === "signin-bunker") {
+            const bunkerUrl = document.getElementById("p-bunker-input").value;
+            if (bunkerUrl) {
+                handleNip46Connect(bunkerUrl);
+            }
+        }
     });
 }
 
@@ -848,7 +920,8 @@ function renderSettingsModal() {
                     <div class="p-field">
                         <label>Signing Mode</label>
                         <select id="p-signer-mode">
-                            <option value="nip07" ${_state.signerMode === "nip07" ? "selected" : ""}>NIP-07 Browser Extension</option>
+                            <option value="nip07" ${_state.signerMode === "nip07" ? "selected" : ""}>Browser Extension (NIP-07)</option>
+                            <option value="nip46" ${_state.signerMode === "nip46" ? "selected" : ""}>Remote Signer (NIP-46)</option>
                             <option value="nsec" ${_state.signerMode === "nsec" ? "selected" : ""}>Local nsec (Session Only)</option>
                         </select>
                     </div>
