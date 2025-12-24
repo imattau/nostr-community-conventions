@@ -61,6 +61,7 @@ stateManager.updateState(initialState);
 import { initPowerShell, focusItem } from "./power_ui.js";
 import { nsrService } from "./services/nsr_service.js";
 import { validateDraftForPublish } from "./services/validation.js";
+import { validateNccChain } from "./services/chain_validator.js";
 
 // Import UI components to register them
 import "./ui/explorer-tree.js";
@@ -95,6 +96,51 @@ async function updateAllDrafts() {
     endorsementLocalDrafts: endorsement,
     supportingLocalDrafts: supporting
   });
+  
+  runGlobalValidation();
+}
+
+function runGlobalValidation() {
+  const state = stateManager.getState();
+  const docs = state.nccDocs || [];
+  
+  const rawNsrs = (state.nsrLocalDrafts || [])
+    .filter(d => d.raw_event) 
+    .map(d => d.raw_event);
+
+  const groupedDocs = new Map();
+  docs.forEach(doc => {
+      const d = eventTagValue(doc.tags, 'd');
+      if (!d) return;
+      if (!groupedDocs.has(d)) groupedDocs.set(d, []);
+      groupedDocs.get(d).push(doc);
+  });
+  
+  const groupedNsrs = new Map();
+  rawNsrs.forEach(nsr => {
+      const d = eventTagValue(nsr.tags, 'd');
+      if (!d) return;
+      if (!groupedNsrs.has(d)) groupedNsrs.set(d, []);
+      groupedNsrs.get(d).push(nsr);
+  });
+
+  const results = new Map();
+  
+  for (const d of groupedDocs.keys()) {
+      const dDocs = groupedDocs.get(d) || [];
+      const dNsrs = groupedNsrs.get(d) || [];
+      const validation = validateNccChain(d, dDocs, dNsrs);
+      
+      if (validation.authoritativeDocId) {
+          console.log(`[Validation] Authoritative for ${d}: ${validation.authoritativeDocId}`);
+      } else if (validation.warnings.length > 0) {
+          console.warn(`[Validation] Warnings for ${d}:`, validation.warnings);
+      }
+      
+      results.set(d.toUpperCase(), validation);
+  }
+  
+  stateManager.updateState({ validationResults: results });
 }
 
 async function initShell() {
@@ -112,7 +158,8 @@ async function initShell() {
     initPowerShell(
       stateManager.getState(),
       APP_VERSION,
-      getConfig
+      getConfig,
+      setConfig
     );
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
@@ -228,6 +275,8 @@ async function handlePowerSave(id, content, fullDraft = null) {
   await updateAllDrafts();
   refreshUI();
   
+  eventBus.emit('save-successful', item);
+  
   // Return the updated item so caller can update their reference
   return item;
 }
@@ -324,7 +373,11 @@ async function loadConfig() {
   const savedTheme = (await getConfig("theme", "power")) || "power";
   
   stateManager.updateState({ defaults: defaultRelays, signerMode: signerMode, theme: savedTheme });
-  document.body.className = `theme-${savedTheme}`;
+  
+  document.body.classList.add('mode-power');
+  if (savedTheme === 'terminal') {
+    document.body.classList.add('theme-terminal');
+  }
   
   await initShell();
   await updateSignerStatus();
@@ -357,25 +410,29 @@ function toDraftFromRelay(item) {
       supersedes: tagMap.supersedes || [],
       license: tagMap.license?.[0] || "",
       authors: tagMap.authors || [],
-      // For Kind 30052/30053
-      endorses: tagMap.endorses?.[0] || "",
+      // For Kind 30052/30053/30051
+      authoritative: normalizeEventId(tagMap.authoritative?.[0] || ""),
+      from: normalizeEventId(tagMap.from?.[0] || ""),
+      to: normalizeEventId(tagMap.to?.[0] || ""),
+      previous: normalizeEventId(tagMap.previous?.[0] || ""),
+      endorses: normalizeEventId(tagMap.endorses?.[0] || ""),
       for: tagMap.for?.[0] || "",
-      for_event: tagMap.for_event?.[0] || "",
+      for_event: normalizeEventId(tagMap.for_event?.[0] || ""),
       type: tagMap.type?.[0] || ""
     }
   };
 }
 
 function buildRevisionSupersedes(tags, eventId) {
-  const list = tags?.supersedes ? [...tags.supersedes] : [];
+  // For a linear chain, we only want to supersede the immediate predecessor.
+  // We do not want to carry over the predecessor's own supersedes list.
   if (eventId) {
     const normalized = normalizeEventId(eventId);
     if (normalized) {
-      const target = normalized; // No prefix for supersedes
-      if (!list.includes(target)) list.push(target);
+      return [normalized];
     }
   }
-  return list;
+  return [];
 }
 
 function createRevisionDraft(item, localDrafts) {
@@ -539,6 +596,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
       }
     });
     
+    runGlobalValidation();
     await updateAllDrafts();
     refreshUI();
   } catch (error) {
@@ -550,7 +608,8 @@ function refreshUI() {
   initPowerShell(
     stateManager.getState(),
     APP_VERSION,
-    getConfig
+    getConfig,
+    setConfig
   );
 }
 
@@ -718,7 +777,18 @@ function setupEventListeners() {
     eventBus.on('delete-item-silent', handlePowerDeleteSilent);
     eventBus.on('withdraw-item', withdrawDraft);
     eventBus.on('publish-item', ({ item, kind }) => publishDraft(item, kind));
-    eventBus.on('create-revision-draft', createRevisionDraft);
+    
+    eventBus.on('create-revision-draft', (item) => {
+        const state = stateManager.getState();
+        const newDraft = createRevisionDraft(item, state.nccLocalDrafts);
+        if (newDraft) {
+            handlePowerSave(newDraft.id, newDraft.content, newDraft)
+                .then(savedDraft => {
+                    eventBus.emit('revision-created', savedDraft);
+                });
+        }
+    });
+
     eventBus.on('save-item', ({ id, content, item }) => handlePowerSave(id, content, item));
     eventBus.on('sign-out', signOutSigner);
     eventBus.on('update-signer-config', ({ mode, nsec }) => handleUpdateSignerConfig(mode, nsec));

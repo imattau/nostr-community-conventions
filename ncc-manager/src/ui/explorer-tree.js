@@ -1,16 +1,18 @@
 import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
 
-@customElement('explorer-tree')
 export class ExplorerTree extends LitElement {
-  @property({ type: Array })
-  sections = [];
+  static properties = {
+    sections: { type: Array },
+    currentItemId: { type: String }
+  };
 
-  @property({ type: String })
-  currentItemId = null;
+  constructor() {
+    super();
+    this.sections = [];
+    this.currentItemId = null;
+  }
 
   static styles = css`
-    /* Styles will be moved here from power.css */
     :host {
       display: block;
       padding: 12px;
@@ -30,3 +32,5 @@ export class ExplorerTree extends LitElement {
     `;
   }
 }
+
+customElements.define('explorer-tree', ExplorerTree);

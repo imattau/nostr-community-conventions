@@ -18,7 +18,7 @@ export const KINDS = {
   supporting: 30053
 };
 
-// Centralized state object
+// Centralized state object (initial values)
 export const state = {
   nccOptions: [],
   nccDocs: [],
@@ -34,7 +34,9 @@ export const state = {
   persistedRelayEvents: new Set(),
   pendingDrafts: new Map(),
   remoteDrafts: [],
-  FALLBACK_RELAYS: FALLBACK_RELAYS
+  FALLBACK_RELAYS: FALLBACK_RELAYS,
+  theme: "power",
+  validationResults: new Map()
 };
 
 export function isFallbackRelay(url) {
@@ -49,11 +51,6 @@ export async function getRelays(getConfig) {
     .map((relay) => (relay || "").trim())
     .filter(Boolean);
   return uniq(normalized);
-}
-
-// Function to update state (simple setter for now)
-export function updateState(newState) {
-  Object.assign(state, newState);
 }
 
 // Caching mechanism
