@@ -94,6 +94,8 @@ export function initPowerShell(appState, appActions, appVersion) {
           <div id="p-status-online" class="offline">Offline</div>
         </div>
       </footer>
+      
+      <div class="p-bottom-bar"></div>
 
       <div id="p-palette-overlay" class="p-palette-overlay" hidden style="display: none;">
         <div class="p-palette">
@@ -367,6 +369,21 @@ function createContentOverlay(onClick) {
 }
 
 function refreshUI() {
+    // Move signer to bottom bar on mobile
+    if (window.innerWidth <= 900) {
+        const signer = document.getElementById("p-top-signer");
+        const bottomBar = document.querySelector(".p-bottom-bar");
+        if (signer && bottomBar && !bottomBar.contains(signer)) {
+            bottomBar.appendChild(signer);
+        }
+    } else {
+        const signer = document.getElementById("p-top-signer");
+        const topBar = document.querySelector(".p-top-right");
+        if (signer && topBar && !topBar.contains(signer)) {
+            topBar.appendChild(signer);
+        }
+    }
+
     renderExplorer(document.getElementById("p-explorer-body"), _state, {
         searchQuery,
         currentItemId,
