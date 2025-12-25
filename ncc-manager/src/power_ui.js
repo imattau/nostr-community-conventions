@@ -1,6 +1,6 @@
 import { eventBus } from "./eventBus.js";
-import { esc, shortenKey, normalizeEventId } from "./utils.js";
-import { KINDS, isFallbackRelay } from "./state.js";
+import { esc, shortenKey, showToast } from "./utils.js";
+import { KINDS } from "./state.js";
 import { renderExplorer } from "./ui/explorer.js";
 import { renderInspector } from "./ui/inspector.js";
 import { renderContent } from "./ui/editor.js";
@@ -8,8 +8,7 @@ import {
     toggleCommandPalette,
     renderCommandList,
     executeCommand as paletteExecuteCommand,
-    handlePaletteNavigation,
-    executeCommand
+    handlePaletteNavigation
 } from "./ui/palette.js";
 import QRCode from 'qrcode';
 import nip46 from "./services/nip46.js";
@@ -23,8 +22,9 @@ let searchQuery = "";
 let _state = null;
 let listenersSetup = false;
 let keyboardHooked = false;
-const collapsedBranches = new Set();
+let expandedBranches = new Set();
 let _appVersion = "v0.0.0";
+let _actions = null; // New: to store actions
 
 const TYPE_LABELS = {
     [KINDS.ncc]: "NCC",
@@ -35,27 +35,39 @@ const TYPE_LABELS = {
 
 const COMMANDS = [
     { id: "save", title: "Save", kb: "Ctrl+S", run: () => handleSaveShortcut() },
-    { id: "new", title: "New NCC Draft", kb: "Ctrl+N", run: () => eventBus.emit('open-new-ncc') },
+    { 
+        id: "new", 
+        title: "New NCC Draft", 
+        kb: "Ctrl+N", 
+        run: () => {
+            if (!_state?.signerPubkey) {
+                showToast("Please sign in to create new NCCs.");
+                return;
+            }
+            eventBus.emit('open-new-ncc');
+        }
+    },
     { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
-const DEBUG = true;
-function log(...args) {
-    if (DEBUG) console.log("%c[PowerUI]", "color: #58a6ff; font-weight: bold", ...args);
-}
-
-export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFunc) {
+export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFunc, actions) {
     _state = appState || {};
     if (appVersion) _appVersion = appVersion;
     if (getConfigFunc) _getConfig = getConfigFunc;
     if (setConfigFunc) _setConfig = setConfigFunc;
+    if (actions) _actions = actions; // Store actions
     
     const shell = document.getElementById("shell-power");
-    if (!shell) return;
-    if (!shell.innerHTML.includes("p-topbar")) {
-        log("Rendering base shell structure");
+    if (!shell) {
+        console.error("initPowerShell: #shell-power element not found.");
+        return;
+    }
+    
+    // Check if the shell structure has already been rendered
+    if (!document.getElementById("p-topbar")) { // Check for existence of a key element
+        console.info("Rendering base shell structure"); // Replaced log with console.info
         shell.innerHTML = `
-      <header class="p-topbar">
+      <header class="p-topbar" id="p-topbar"> <!-- Added ID here for robustness -->
         <div class="p-brand" role="button">
           <span class="p-accent">></span> NCC Console
           <span class="p-version">${_appVersion}</span>
@@ -71,6 +83,7 @@ export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFun
           </div>
         </div>
           <div class="p-top-right">
+             <button class="p-btn-ghost p-btn-sm desktop-only" data-action="toggle-inspector" title="Toggle Inspector Sidepanel">Inspector</button>
              <div class="p-mobile-nav" style="padding-right: 8px">
                 <button class="p-btn-ghost" data-action="toggle-inspector">Inspector</button>
              </div>
@@ -80,12 +93,14 @@ export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFun
 
       <div class="p-main">
         <aside class="p-pane p-explorer">
-          <div id="p-explorer-body" class="p-scroll"></div>
+          <div class="p-pane-header" id="p-explorer-header"></div>
+          <div id="p-explorer-body" class="p-scroll"><explorer-tree></explorer-tree></div> <!-- Added class="p-scroll" back -->
         </aside>
         <section class="p-pane p-content">
           <div id="p-content-column" class="p-content-inner"></div>
         </section>
         <aside class="p-pane p-inspector">
+          <div class="p-pane-header" id="p-inspector-header"></div>
           <div id="p-inspector-body" class="p-inspector-inner"></div>
         </aside>
       </div>
@@ -109,15 +124,21 @@ export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFun
         </div>
       </div>
     `;
-  }
+    }
 
-  if (!listenersSetup) {
-    setupGlobalListeners();
-    setupKeyboardShortcuts();
-    listenersSetup = true;
-  }
+    shell.hidden = false; // Ensure shell is visible regardless of re-render
+    
+    if (!listenersSetup) {
+      // Ensure inspector is open by default on desktop
+      if (window.innerWidth > 900) {
+          document.querySelector(".p-inspector")?.classList.add("is-open");
+      }
+      setupGlobalListeners();
+      setupKeyboardShortcuts();
+      listenersSetup = true;
+    }
 
-  refreshUI();
+    refreshUI();
 }
 
 function setupGlobalListeners() {
@@ -136,12 +157,23 @@ function setupGlobalListeners() {
         refreshUI();
     });
 
-    document.addEventListener("click", async (e) => {
-        const shell = document.getElementById("shell-power");
-        if (!shell || shell.hidden || shell.style.display === "none") return;
+    eventBus.on('explorer-set-expanded', (keys) => {
+        expandedBranches = new Set(keys);
+        refreshUI();
+    });
 
-        const target = e.target;
-        
+    const shell = document.getElementById("shell-power"); // Get shell reference once
+    if (!shell) {
+        console.error("setupGlobalListeners: #shell-power element not found, cannot attach listeners.");
+        return;
+    }
+
+    shell.addEventListener("click", async (e) => { // Attach listener to shell, not document
+        if (shell.hidden || shell.style.display === "none") return;
+
+        const path = e.composedPath(); // Use composedPath for events from Shadow DOM
+        const target = path[0]; // The original event target within the Shadow DOM
+
         const navItem = target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
             e.preventDefault();
@@ -211,11 +243,11 @@ function setupGlobalListeners() {
         renderCommandList(e.target.value, COMMANDS);
     });
 
-    document.addEventListener("contextmenu", (e) => {
-        const shell = document.getElementById("shell-power");
-        if (!shell || shell.hidden || shell.style.display === "none") return;
+    shell.addEventListener("contextmenu", (e) => { // Attach listener to shell
+        if (shell.hidden || shell.style.display === "none") return;
 
-        const target = e.target;
+        const path = e.composedPath();
+        const target = path[0]; // The actual target within the Shadow DOM
         const navItem = target.closest(".p-nav-item");
         
         if (navItem && navItem.dataset.id) {
@@ -230,8 +262,10 @@ function setupGlobalListeners() {
     });
 
     let longPressTimer;
-    document.addEventListener("touchstart", (e) => {
-        const navItem = e.target.closest(".p-nav-item");
+    shell.addEventListener("touchstart", (e) => { // Attach listener to shell
+        const path = e.composedPath();
+        const target = path[0];
+        const navItem = target.closest(".p-nav-item");
         if (navItem && navItem.dataset.id) {
             longPressTimer = setTimeout(() => {
                 const item = findItem(navItem.dataset.id);
@@ -245,8 +279,8 @@ function setupGlobalListeners() {
             }, 500); // 500ms for long press
         }
     });
-    document.addEventListener("touchend", () => clearTimeout(longPressTimer));
-    document.addEventListener("touchmove", () => clearTimeout(longPressTimer));
+    shell.addEventListener("touchend", () => clearTimeout(longPressTimer));
+    shell.addEventListener("touchmove", () => clearTimeout(longPressTimer));
 
     document.addEventListener("click", () => {
         const menu = document.getElementById("p-context-menu");
@@ -338,7 +372,6 @@ async function handleInspectorAction(action, id) {
 function handleGlobalAction(action, target) {
     const explorerPane = document.querySelector(".p-explorer");
     const inspectorPane = document.querySelector(".p-inspector");
-    const contentPane = document.querySelector(".p-content");
 
     if (target.closest(".p-dropdown")) {
         target.closest(".p-dropdown").classList.remove("is-open");
@@ -351,22 +384,48 @@ function handleGlobalAction(action, target) {
     };
 
     if (action === "toggle-explorer") {
-        closePanes();
-        explorerPane?.classList.toggle("is-open");
-        createContentOverlay(closePanes);
+        if (window.innerWidth <= 900) {
+            closePanes();
+            explorerPane?.classList.toggle("is-open");
+            createContentOverlay(closePanes);
+        } else {
+            explorerPane?.classList.toggle("is-open");
+        }
     } else if (action === "toggle-inspector") {
-        closePanes();
-        inspectorPane?.classList.toggle("is-open");
-        createContentOverlay(closePanes);
+        if (window.innerWidth <= 900) {
+            closePanes();
+            inspectorPane?.classList.toggle("is-open");
+            createContentOverlay(closePanes);
+        } else {
+            inspectorPane?.classList.toggle("is-open");
+        }
+    } else if (action === "toggle-edit-mode") {
+        isEditMode = !isEditMode;
+        refreshUI();
     } else if (action === "sign-in") {
         openSignInModal();
     } else if (action === "sign-out") {
         eventBus.emit('sign-out');
     } else if (action === "open-settings") {
         renderSettingsModal(_getConfig);
+    } else if (action === "new-ncc") {
+        if (!_state?.signerPubkey) {
+            showToast("Please sign in to create new NCCs.");
+            return;
+        }
+        eventBus.emit('open-new-ncc');
+    } else if (action === "toggle-all-explorer") {
+        if (expandedBranches.size > 0) {
+            expandedBranches = new Set();
+            refreshUI();
+        } else {
+            eventBus.emit('explorer-expand-all');
+        }
     } else if (action === "close-modal") {
         const modal = target.closest(".p-modal-overlay");
-        if (modal) modal.remove();
+        if (modal) {
+            modal.remove();
+        }
     }
 }
 
@@ -389,6 +448,13 @@ function createContentOverlay(onClick) {
 }
 
 function refreshUI() {
+    // Increment uiRefreshId to ensure Lit components re-render when needed
+    if (_state && typeof _state.uiRefreshId === 'number') {
+        _state.uiRefreshId++;
+    } else if (_state) {
+        _state.uiRefreshId = 0; // Initialize if it doesn't exist
+    }
+
     // Move signer to bottom bar on mobile
     if (window.innerWidth <= 900) {
         const signer = document.getElementById("p-top-signer");
@@ -407,9 +473,11 @@ function refreshUI() {
     renderExplorer(document.getElementById("p-explorer-body"), _state, {
         searchQuery,
         currentItemId,
-        collapsedBranches,
+        expandedBranches: new Set(expandedBranches), // Pass a new Set instance
         findItem
     });
+    renderExplorerHeader();
+    renderInspectorHeader();
     renderTopBar();
     renderStatusBar();
     
@@ -425,6 +493,48 @@ function refreshUI() {
     } else {
         renderEmptyState();
     }
+}
+
+function renderInspectorHeader() {
+    const el = document.getElementById("p-inspector-header");
+    if (!el) return;
+    
+    let actionsHtml = "";
+    if (currentItemId) {
+        const item = findItem(currentItemId);
+        const isPublished = item && item.event_id && (item.status || "").toLowerCase() === "published";
+        
+        if (!isPublished) {
+            actionsHtml += `
+                <button class="p-btn-icon" data-action="toggle-edit-mode" title="${isEditMode ? "View Mode" : "Edit Metadata"}">
+                    ${isEditMode ? "📖" : "✎"}
+                </button>
+            `;
+        }
+    }
+
+    el.innerHTML = `
+        <span>${isEditMode ? "Metadata Editor" : "Inspector"}</span>
+        <div style="display: flex; gap: 4px">
+            ${actionsHtml}
+            <button class="p-btn-icon" data-action="toggle-inspector" title="Hide Inspector">×</button>
+        </div>
+    `;
+}
+
+function renderExplorerHeader() {
+    const el = document.getElementById("p-explorer-header");
+    if (!el) return;
+    const isAnyExpanded = expandedBranches.size > 0;
+    el.innerHTML = `
+        <span>Explorer</span>
+        <div style="display: flex; gap: 4px">
+            <button class="p-btn-icon" data-action="toggle-all-explorer" title="${isAnyExpanded ? "Collapse All" : "Expand All"}">
+                ${isAnyExpanded ? "↑" : "↓"}
+            </button>
+            <button class="p-btn-icon" data-action="new-ncc" title="New NCC Draft">+</button>
+        </div>
+    `;
 }
 
 function renderTopBar() {
@@ -489,11 +599,14 @@ function renderEmptyState() {
         <div class="p-empty-state">
           <div class="p-empty-icon">_</div>
           <div class="p-empty-text">Select an item from the Explorer to begin</div>
-          <div class="p-empty-hint">Press <code>Ctrl+K</code> for commands</div>
+          <div class="p-empty-hint">
+            Press <code>Ctrl+K</code> for commands<br>
+            or <button class="p-btn-accent p-btn-sm" style="margin-top: 16px" data-action="new-ncc">Create New NCC</button>
+          </div>
         </div>
     `;
     const inspector = document.getElementById("p-inspector-body");
-    if (inspector) inspector.innerHTML = "";
+    if (inspector) renderInspector(inspector, null, _state);
 }
 
 function findItem(id) {
@@ -509,7 +622,8 @@ function findItem(id) {
         ...(_state.nsrLocalDrafts || []),
         ...(_state.endorsementLocalDrafts || []),
         ...(_state.supportingLocalDrafts || []),
-        ...(_state.nccDocs || []),
+        // Retrieve full event objects from eventsById using the IDs in nccDocs
+        ...(_state.nccDocs || []).map(id => _state.eventsById.get(id)).filter(Boolean),
         ...(_state.remoteDrafts || [])
     ];
     
@@ -548,10 +662,16 @@ export function focusItem(id, editMode = false) {
 
 function toggleBranch(id) {
     if (!id) return;
-    if (collapsedBranches.has(id)) collapsedBranches.delete(id);
-    else collapsedBranches.add(id);
+    if (expandedBranches.has(id)) {
+        expandedBranches.delete(id);
+    } else {
+        expandedBranches.add(id);
+    }
+    // Create a new Set instance to force Lit's change detection
+    expandedBranches = new Set(expandedBranches); // Reassign with a new Set instance
     refreshUI();
 }
+
 
 async function handleReviseAction(id) {
     const item = findItem(id);
@@ -616,6 +736,8 @@ function setupKeyboardShortcuts() {
 }
 
 function renderContextMenu(x, y, item) {
+    if (!_state?.signerPubkey) return;
+
     const existing = document.getElementById("p-context-menu");
     if (existing) existing.remove();
 
@@ -693,13 +815,13 @@ function openSignInModal() {
 
     document.body.appendChild(modal);
 
-    const handleNip46Connect = (bunkerUrl) => {
+    const handleNip46Connect = async (bunkerUrl) => {
         const statusEl = document.getElementById("p-qr-status");
         if (statusEl) statusEl.textContent = "Connecting...";
         
         try {
-            const generatedUrl = nip46.connect(bunkerUrl, (pubkey) => {
-                actions.updateSignerConfig?.("nip46");
+            const generatedUrl = await nip46.connect(bunkerUrl, () => { // pubkey removed as it's unused
+                _actions.updateSignerConfig?.("nip46");
                 modal.remove();
             });
 
@@ -713,21 +835,33 @@ function openSignInModal() {
                 if (statusEl) statusEl.textContent = "Scan with a NIP-46 compatible wallet:";
             }
         } catch (e) {
-            if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+            console.error(e);
+            if (statusEl && statusEl.offsetParent) {
+                statusEl.textContent = `Error: ${e.message}`;
+            } else {
+                showToast(`Connection failed: ${e.message}`, "error");
+            }
         }
     };
 
     modal.addEventListener("click", (e) => {
-        const action = e.target.dataset.action;
-        if (action === "signin-nip07") {
-            actions.promptSigner?.();
+        const actionBtn = e.target.closest("[data-action]");
+        if (!actionBtn) return;
+        const action = actionBtn.dataset.action;
+
+        if (action === "close-modal") {
+            modal.remove();
+        } else if (action === "signin-nip07") {
+            _actions.promptSigner?.("nip07");
             modal.remove();
         } else if (action === "signin-qr") {
             handleNip46Connect(null);
         } else if (action === "signin-bunker") {
-            const bunkerUrl = document.getElementById("p-bunker-input").value;
+            const bunkerUrl = document.getElementById("p-bunker-input").value.trim();
             if (bunkerUrl) {
                 handleNip46Connect(bunkerUrl);
+            } else {
+                showToast("Please enter a bunker URL", "error");
             }
         }
     });
@@ -898,29 +1032,10 @@ function renderSettingsModal() {
                         <select id="p-theme-select">
                             <option value="power" ${_state.theme === "power" ? "selected" : ""}>Power (Default)</option>
                             <option value="terminal" ${_state.theme === "terminal" ? "selected" : ""}>Terminal</option>
+                            <option value="vscode" ${_state.theme === "vscode" ? "selected" : ""}>VS Code Dark</option>
+                            <option value="vscode-light" ${_state.theme === "vscode-light" ? "selected" : ""}>VS Code Light</option>
                         </select>
                     </div>
-                </section>
-
-                <section class="p-modal-section">
-                    <h3>Signer Configuration</h3>
-                    <div class="p-field">
-                        <label>Signing Mode</label>
-                        <select id="p-signer-mode">
-                            <option value="nip07" ${_state.signerMode === "nip07" ? "selected" : ""}>Browser Extension (NIP-07)</option>
-                            <option value="nip46" ${_state.signerMode === "nip46" ? "selected" : ""}>Remote Signer (NIP-46)</option>
-                            <option value="nsec" ${_state.signerMode === "nsec" ? "selected" : ""}>Local nsec (Session Only)</option>
-                        </select>
-                    </div>
-                    <div id="p-nsec-field" class="p-field" style="display: ${_state.signerMode === "nsec" ? "flex" : "none"}">
-                        <label>nsec1...</label>
-                        <input type="password" id="p-nsec-input" placeholder="nsec1..." />
-                        <p class="p-muted-text small" style="margin-top: 8px; color: var(--warning)">
-                            !!! <strong>Security Warning:</strong> Your nsec is kept in memory for this session only. 
-                            Never share your nsec or paste it into untrusted applications.
-                        </p>
-                    </div>
-                    <button class="p-btn-primary" id="p-save-signer">Update Signer</button>
                 </section>
 
                 <section class="p-modal-section">
@@ -935,6 +1050,13 @@ function renderSettingsModal() {
     `;
 
     document.body.appendChild(modal);
+
+    modal.addEventListener("click", (e) => {
+        const actionBtn = e.target.closest("[data-action]");
+        if (actionBtn && actionBtn.dataset.action === "close-modal") {
+            modal.remove();
+        }
+    });
 
     const refreshRelays = async () => {
         const container = document.getElementById("p-settings-relays");
@@ -981,8 +1103,14 @@ function renderSettingsModal() {
         await _setConfig("theme", selectedTheme);
         
         document.body.classList.remove('theme-terminal');
+        document.body.classList.remove('theme-vscode');
+        document.body.classList.remove('theme-vscode-light');
         if (selectedTheme === 'terminal') {
             document.body.classList.add('theme-terminal');
+        } else if (selectedTheme === 'vscode') {
+            document.body.classList.add('theme-vscode');
+        } else if (selectedTheme === 'vscode-light') {
+            document.body.classList.add('theme-vscode-light');
         }
         
         _state.theme = selectedTheme;
@@ -1001,20 +1129,6 @@ function renderSettingsModal() {
             relayInput.value = "";
             refreshRelays();
         }
-    };
-
-    const modeSelect = document.getElementById("p-signer-mode");
-    const nsecWrap = document.getElementById("p-nsec-field");
-    modeSelect.onchange = () => {
-        nsecWrap.style.display = modeSelect.value === "nsec" ? "flex" : "none";
-    };
-
-    const saveSignerBtn = document.getElementById("p-save-signer");
-    saveSignerBtn.onclick = async () => {
-        const mode = modeSelect.value;
-        const nsec = document.getElementById("p-nsec-input").value.trim();
-        eventBus.emit('update-signer-config', { mode, nsec });
-        modal.remove();
     };
 
     document.getElementById("p-export-all").onclick = () => eventBus.emit('export-all');

@@ -34,16 +34,41 @@ const LANGUAGE_OPTIONS = [
 export function renderInspector(container, item, state, options = {}) {
     const { 
         isEditMode = false, 
-        actions = {},
-        findItem
     } = options;
 
     if (!container) return;
     if (!item) {
+        const relayStatus = state?.relayStatus || {};
+        const lastSync = relayStatus.at ? new Date(relayStatus.at).toLocaleTimeString() : "Never";
+        const signer = state?.signerPubkey ? (state.signerProfile?.name || shortenKey(state.signerPubkey)) : "Guest";
+        const totalPublished = state?.nccDocs?.length || 0;
+        const totalDrafts = (state?.nccLocalDrafts?.length || 0) + 
+                           (state?.nsrLocalDrafts?.length || 0) + 
+                           (state?.endorsementLocalDrafts?.length || 0) + 
+                           (state?.supportingLocalDrafts?.length || 0);
+
         container.innerHTML = `
             <div class="p-section">
-                <span class="p-section-title">Inspector</span>
-                <p class="p-nav-label">Select an item to view metadata and actions.</p>
+                <span class="p-section-title">Session Overview</span>
+                <div class="p-prop-row"><span class="p-prop-key">User</span><span class="p-prop-val">${esc(signer)}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Signer Mode</span><span class="p-prop-val">${state?.signerMode || 'None'}</span></div>
+            </div>
+            <div class="p-section">
+                <span class="p-section-title">Network</span>
+                <div class="p-prop-row"><span class="p-prop-key">Active Relays</span><span class="p-prop-val">${relayStatus.relays || 0}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Indexed Events</span><span class="p-prop-val">${relayStatus.events || 0}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Last Sync</span><span class="p-prop-val">${lastSync}</span></div>
+            </div>
+            <div class="p-section">
+                <span class="p-section-title">Workspace</span>
+                <div class="p-prop-row"><span class="p-prop-key">Published NCCs</span><span class="p-prop-val">${totalPublished}</span></div>
+                <div class="p-prop-row"><span class="p-prop-key">Local Drafts</span><span class="p-prop-val">${totalDrafts}</span></div>
+            </div>
+            <div class="p-section" style="border-style: dashed; background: transparent; opacity: 0.7">
+                <span class="p-section-title">Did you know?</span>
+                <p style="font-size: 0.75rem; color: var(--muted); margin: 0; line-height: 1.4">
+                    Right-click on an NCC in the explorer to quickly create endorsements or succession records.
+                </p>
             </div>
         `;
         return;

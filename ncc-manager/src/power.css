@@ -2,7 +2,7 @@
    NCC Power Console - Pro IDE Theme
    ========================================= */
 
-:root {
+body:not(.theme-terminal):not(.theme-vscode):not(.theme-vscode-light) {
   --bg: #0d1117;
   --panel: #161b22;
   --panel-2: #0d1117;
@@ -16,7 +16,9 @@
   --success: #3fb950;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  
+}
+
+:root { /* Global non-theme specific vars */
   --topbar-h: 48px;
   --status-h: 28px;
 }
@@ -160,10 +162,14 @@ body.mode-power {
 }
 .p-signer-dot.active { background: var(--success); box-shadow: 0 0 4px var(--success); }
 
-/* 4. Workspace Layout (3 columns) */
+.desktop-only { display: block; }
+@media (max-width: 900px) { .desktop-only { display: none !important; } }
+
+/* Workspace Layout (3 columns) */
 .p-main {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 380px;
+  display: flex; /* Use flex instead of grid for easier column hiding */
+  height: 100%;
+  width: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
@@ -177,9 +183,36 @@ body.mode-power {
   border-right: 1px solid var(--border);
 }
 
-.p-explorer { background: var(--panel); }
-.p-content { background: var(--bg); }
-.p-inspector { border-right: none; border-left: 1px solid var(--border); background: var(--panel); }
+.p-explorer { 
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--panel); 
+}
+.p-content { 
+    flex: 1;
+    background: var(--bg); 
+}
+.p-inspector { 
+    width: 380px;
+    flex-shrink: 0;
+    border-right: none; 
+    border-left: 1px solid var(--border); 
+    background: var(--panel); 
+}
+
+.p-pane.p-inspector:not(.is-open) {
+    display: none;
+}
+
+/* On desktop, panes are open by default unless manually toggled */
+@media (min-width: 901px) {
+    .p-pane.p-explorer, .p-pane.p-inspector {
+        display: flex;
+    }
+    .p-pane.p-inspector:not(.is-open) {
+        display: none;
+    }
+}
 
 /* Scrolling Rules */
 .p-scroll, .p-content-inner, .p-inspector-inner {
@@ -193,83 +226,23 @@ body.mode-power {
 .p-content-inner { padding: 32px 40px; }
 .p-inspector-inner { padding: 16px; }
 
-/* 5. Explorer Styling */
-.p-nav-group { margin-bottom: 24px; }
-.p-nav-header {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding-bottom: 8px;
-  letter-spacing: 0.05em;
-  font-weight: 600;
-}
-
-.p-nav-tree { margin-bottom: 4px; }
-.p-nav-branch-header {
-  width: 100%;
-  background: transparent;
-  border: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  cursor: pointer;
-  color: var(--text);
-  font-size: 0.9rem;
-  text-align: left;
-}
-.p-nav-branch-title {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-}
-.p-type-tag {
-  font-size: 0.6rem;
-  font-weight: 800;
-  color: var(--accent);
-  background: rgba(88, 166, 255, 0.1);
-  padding: 1px 4px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-.p-muted-type {
-  font-size: 0.65rem;
-  color: var(--muted);
-  font-weight: normal;
-  text-transform: uppercase;
-}
-.p-nav-branch-body { display: none; padding-left: 16px; }
-.p-nav-branch-body.is-open { display: block; }
-
-.p-nav-subtree {
-  margin-top: 4px;
-}
-.p-nav-subtree .p-nav-branch-header {
-  padding: 4px 0;
-  opacity: 0.8;
-}
-.p-nav-subtree .p-nav-branch-title {
-  font-size: 0.8rem;
-}
-
-.p-nav-item {
-  padding: 6px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  margin: 2px 0;
-  border-left: 2px solid transparent;
-}
-.p-nav-item:hover { background: var(--accent-soft); }
-.p-nav-item.active { background: var(--accent-soft); border-left-color: var(--accent); }
-
-.p-nav-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; pointer-events: none; }
-.p-nav-id { font-weight: 600; font-size: 0.8rem; letter-spacing: 0.02em; pointer-events: none; }
-.p-nav-label { font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.p-nav-date { font-size: 0.7rem; color: var(--muted); opacity: 0.6; margin-top: 2px; pointer-events: none; }
+/* 5. Explorer Styling - Moved to explorer-tree.js Shadow DOM */
+/* .p-nav-group { margin-bottom: 24px; } */
+/* .p-nav-header { ... } */
+/* .p-nav-tree { ... } */
+/* .p-nav-branch-header { ... } */
+/* .p-nav-branch-title { ... } */
+/* .p-type-tag { ... } */
+/* .p-muted-type { ... } */
+/* .p-nav-branch-body { ... } */
+/* .p-nav-subtree { ... } */
+/* .p-nav-item { ... } */
+/* .p-nav-item:hover { ... } */
+/* .p-nav-item.active { ... } */
+/* .p-nav-meta { ... } */
+/* .p-nav-id { ... } */
+/* .p-nav-label { ... } */
+/* .p-nav-date { ... } */
 
 /* 6. Content Area Styling */
 .p-empty-state {
@@ -374,10 +347,10 @@ body.mode-power {
 #p-status-online.offline { color: var(--danger); }
 
 /* 9. Components */
-.p-badge-mini { font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; }
-.status-published { color: var(--success); border: 1px solid rgba(63, 185, 80, 0.4); }
-.status-draft { color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); }
-.status-withdrawn { color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.4); }
+/* .p-badge-mini { font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; } */
+/* .status-published { color: var(--success); border: 1px solid rgba(63, 185, 80, 0.4); } */
+/* .status-draft { color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.4); } */
+/* .status-withdrawn { color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.4); } */
 
 .p-btn-primary, .p-btn-accent, .p-btn-ghost {
   border-radius: 4px;
@@ -386,9 +359,45 @@ body.mode-power {
   cursor: pointer;
   border: 1px solid var(--border);
 }
+.p-btn-sm { padding: 4px 8px; font-size: 0.75rem; }
 .p-btn-accent { background: #238636; color: white; }
 .p-btn-ghost { background: transparent; color: var(--muted); }
 .p-btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+.p-pane-header {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  background: var(--panel);
+  flex-shrink: 0;
+}
+
+.p-btn-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.p-btn-icon:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 
 /* Signer Dropdown */
 .p-signer-wrapper {
@@ -616,8 +625,8 @@ body.mode-power {
         left: auto;
         transform: translateX(100%);
     }
-
-    .p-explorer.is-open, .p-inspector.is-open {
+    
+    .p-explorer.is-open, .p-inspector.is-open { /* Moved to appear AFTER .p-explorer */
         transform: translateX(0);
     }
 

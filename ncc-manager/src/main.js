@@ -3,7 +3,6 @@ import {
   saveDraft,
   listDrafts,
   deleteDraft,
-  getDraft,
   setConfig,
   getConfig
 } from "./services/store.js";
@@ -12,33 +11,23 @@ import {
   payloadToDraft,
   getSigner,
   publishEvent,
-  verifyEvent,
   fetchNccDocuments,
   fetchEndorsements,
-  fetchAuthorEndorsements,
   fetchProfile,
   fetchSuccessionRecords
 } from "./services/nostr.js";
 import pkg from "../package.json";
 
 import {
-  esc,
   shortenKey,
-  formatCacheAge,
-  renderMarkdown,
-  splitList,
   nowSeconds,
-  stripNccNumber,
   buildNccIdentifier,
-  isNccIdentifier,
   eventTagValue,
   normalizeEventId,
   normalizeHexId,
   isNccDocument,
   buildNccOptions,
   buildDraftIdentifier,
-  isDraftIdentifier,
-  stripDraftPrefix,
   isOnline,
   showToast,
   incrementVersion,
@@ -60,8 +49,7 @@ stateManager.updateState(initialState);
 
 import { initPowerShell, focusItem } from "./power_ui.js";
 import { nsrService } from "./services/nsr_service.js";
-import { validateDraftForPublish } from "./services/validation.js";
-import { validateNccChain } from "./services/chain_validator.js";
+import { validateDraftForPublish } from "./services/chain_validator.js";
 
 // Import UI components to register them
 import "./ui/explorer-tree.js";
@@ -100,10 +88,40 @@ async function updateAllDrafts() {
   runGlobalValidation();
 }
 
-function runGlobalValidation() {
+let lastValidatedState = new Map(); // Map<dTag, string of concatenated event IDs>
+let validationWorker = null;
+let validationPromises = new Map(); // Map<dTag, { resolve, reject }>
+let validationJobId = 0;
+
+function getValidationWorker() {
+    if (!validationWorker) {
+        validationWorker = new Worker(new URL('./workers/validationWorker.js', import.meta.url), { type: 'module' });
+        validationWorker.onmessage = (e) => {
+            const { id, result } = e.data;
+            if (validationPromises.has(id)) {
+                const { resolve } = validationPromises.get(id);
+                validationPromises.delete(id);
+                resolve(result);
+            }
+        };
+        validationWorker.onerror = (e) => {
+            console.error("Validation worker error:", e);
+            // Reject all pending promises on worker error
+            validationPromises.forEach(({ reject }) => reject(new Error("Validation worker error")));
+            validationPromises.clear();
+        };
+    }
+    return validationWorker;
+}
+
+async function runGlobalValidation() {
   const state = stateManager.getState();
-  const docs = state.nccDocs || [];
+  const docIds = state.nccDocs || [];
   
+  // Retrieve full event objects from eventsById
+  const docs = docIds.map(id => state.eventsById.get(id)).filter(Boolean);
+  
+  // Filter NSRs to only include published ones (or those with raw_event)
   const rawNsrs = (state.nsrLocalDrafts || [])
     .filter(d => d.raw_event) 
     .map(d => d.raw_event);
@@ -124,23 +142,58 @@ function runGlobalValidation() {
       groupedNsrs.get(d).push(nsr);
   });
 
-  const results = new Map();
-  
+  const newValidationResults = new Map();
+  const currentValidatedState = new Map();
+  const validationTasks = [];
+
+  const worker = getValidationWorker();
+
   for (const d of groupedDocs.keys()) {
       const dDocs = groupedDocs.get(d) || [];
       const dNsrs = groupedNsrs.get(d) || [];
-      const validation = validateNccChain(d, dDocs, dNsrs);
+
+      // Create a unique identifier for the current set of docs and nsrs for this d-tag
+      const currentDDocsIds = dDocs.map(doc => doc.id).sort().join(',');
+      const currentDNsrsIds = dNsrs.map(nsr => nsr.id).sort().join(',');
+      const currentStateIdentifier = `${currentDDocsIds}|${currentDNsrsIds}`;
       
-      if (validation.authoritativeDocId) {
-          console.log(`[Validation] Authoritative for ${d}: ${validation.authoritativeDocId}`);
-      } else if (validation.warnings.length > 0) {
-          console.warn(`[Validation] Warnings for ${d}:`, validation.warnings);
+      currentValidatedState.set(d, currentStateIdentifier);
+
+      // Check if this d-tag's state has changed since last validation
+      if (lastValidatedState.has(d) && lastValidatedState.get(d) === currentStateIdentifier && state.validationResults.has(d.toUpperCase())) {
+          // No change, reuse previous validation result
+          newValidationResults.set(d.toUpperCase(), state.validationResults.get(d.toUpperCase()));
+          continue;
       }
-      
-      results.set(d.toUpperCase(), validation);
+
+      // State has changed or no previous validation, run validation in worker
+      const jobId = validationJobId++;
+      const promise = new Promise((resolve, reject) => {
+          validationPromises.set(jobId, { resolve, reject });
+          worker.postMessage({ id: jobId, targetD: d, rawDocs: dDocs, rawNsrs: dNsrs });
+      }).then(result => {
+          newValidationResults.set(d.toUpperCase(), result);
+      }).catch(error => {
+          console.error(`[Validation] Error for ${d}:`, error);
+          newValidationResults.set(d.toUpperCase(), { d, authoritativeDocId: null, authoritativeNsrId: null, tips: [], forkPoints: [], forkedBranches: [], warnings: [`Error during validation: ${error.message}`] });
+      });
+      validationTasks.push(promise);
   }
+
+  await Promise.allSettled(validationTasks);
+
+  // Update lastValidatedState for next run
+  lastValidatedState = currentValidatedState;
   
-  stateManager.updateState({ validationResults: results });
+  // Also remove validation results for d-tags that no longer exist
+  const existingDTags = new Set(Array.from(groupedDocs.keys()).map(d => d.toUpperCase()));
+  for (const dTag of state.validationResults.keys()) {
+      if (!existingDTags.has(dTag)) {
+          newValidationResults.delete(dTag);
+      }
+  }
+
+  stateManager.updateState({ validationResults: newValidationResults });
 }
 
 async function initShell() {
@@ -154,30 +207,28 @@ async function initShell() {
   power.hidden = false;
   
   await updateAllDrafts();
+
+  const actions = {
+    updateSignerConfig: handleUpdateSignerConfig,
+    promptSigner: promptSignerConnection,
+  };
+
   try {
     initPowerShell(
       stateManager.getState(),
       APP_VERSION,
       getConfig,
-      setConfig
+      setConfig,
+      actions // Pass the actions object
     );
   } catch (e) {
     console.error("Failed to init PowerShell:", e);
   }
 }
 
-async function handleUpdateSignerConfig(mode, nsec) {
+async function handleUpdateSignerConfig(mode) {
     stateManager.updateState({ signerMode: mode });
     await setConfig("signer_mode", mode);
-    if (mode === "nsec") {
-        if (!nsec) {
-            showToast("nsec is required for local signing", "error");
-            return;
-        }
-        sessionStorage.setItem("ncc-manager-nsec", nsec);
-    } else {
-        sessionStorage.removeItem("ncc-manager-nsec");
-    }
     await updateSignerStatus();
     showToast("Signer configuration updated");
     refreshUI();
@@ -233,9 +284,10 @@ async function handlePowerSave(id, content, fullDraft = null) {
     item = allLocal.find(d => d.id === id);
     
     if (!item) {
-      const relayItem = (state.nccDocs || []).find(d => d.id === id);
-      if (relayItem) {
-        item = toDraftFromRelay(relayItem);
+      // If it's a relay event, get it from the central store
+      const relayEvent = state.eventsById.get(id);
+      if (relayEvent) {
+        item = toDraftFromRelay(relayEvent); // Convert the raw event to a draft
         item.id = id; 
       }
     }
@@ -281,33 +333,30 @@ async function handlePowerSave(id, content, fullDraft = null) {
   return item;
 }
 
-async function promptSignerConnection() {
-  if (state.signerMode === "nip07") {
+async function promptSignerConnection(overrideMode) {
+  const state = stateManager.getState();
+  const mode = overrideMode || state.signerMode;
+
+  if (mode === "nip07") {
     if (!window.nostr) {
       showToast("Install a NIP-07 signer to sign in.", "error");
       return;
     }
     try {
       await window.nostr.getPublicKey();
-    } catch (error) {
+      // If successful, ensure mode is persisted
+      stateManager.updateState({ signerMode: "nip07" });
+      await setConfig("signer_mode", "nip07");
+    } catch (_error) { // Used _error
+      void _error; // Explicitly consume unused variable
       showToast("Signer denied access.", "error");
       return;
-    }
-  } else {
-    // If in nsec mode but no nsec provided yet, open settings
-    const nsec = sessionStorage.getItem("ncc-manager-nsec");
-    if (!nsec) {
-        showToast("Enter your nsec in Settings to sign in.", "info");
-        // We could trigger settings modal here if we had a clean way, 
-        // but for now just inform the user.
-        return;
     }
   }
   await updateSignerStatus();
 }
 
 async function signOutSigner() {
-  sessionStorage.removeItem("ncc-manager-nsec");
   await setConfig("signer_mode", "nip07");
   // Explicitly clear signer state and prevent immediate re-probing
   stateManager.updateState({ 
@@ -332,20 +381,19 @@ async function refreshSignerProfile() {
     const targets = relays.length ? relays : FALLBACK_RELAYS;
     if (!targets.length) return;
     stateManager.updateState({ signerProfile: await fetchProfile(state.signerPubkey, targets) });
-  } catch (error) {
-    console.error("NCC Manager: signer profile fetch failed", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
     stateManager.updateState({ signerProfile: null });
   }
 }
 
 async function updateSignerStatus() {
-  const nsec = sessionStorage.getItem("ncc-manager-nsec");
   const state = stateManager.getState();
   try {
-    const signer = await getSigner(state.signerMode, nsec);
+    const signer = await getSigner(state.signerMode);
     stateManager.updateState({ signerPubkey: signer.pubkey });
     await refreshSignerProfile();
-  } catch (error) {
+  } catch (_error) { // Used _error
     stateManager.updateState({ signerPubkey: null, signerProfile: null });
   }
   
@@ -360,7 +408,8 @@ async function fetchDefaults() {
     const data = await res.json();
     stateManager.updateState({ defaults: data.relays || [] });
     await setConfig("default_relays", state.defaults);
-  } catch (error) {
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
     stateManager.updateState({ defaults: FALLBACK_RELAYS });
     await setConfig("default_relays", state.defaults);
     showToast("Using fallback default relays (server unavailable).", "error");
@@ -377,15 +426,24 @@ async function loadConfig() {
   document.body.classList.add('mode-power');
   if (savedTheme === 'terminal') {
     document.body.classList.add('theme-terminal');
+  } else if (savedTheme === 'vscode') {
+    document.body.classList.add('theme-vscode');
+  } else if (savedTheme === 'vscode-light') {
+    document.body.classList.add('theme-vscode-light');
   }
   
   await initShell();
   await updateSignerStatus();
 }
 
-function toDraftFromRelay(item) {
+function toDraftFromRelay(input) {
+  const state = stateManager.getState();
+  // Input can be a raw event object or an event ID string
+  const rawEvent = (typeof input === 'string') ? state.eventsById.get(input) : input;
+  if (!rawEvent) return null; // Event not found in central store
+  
   const tagMap = {};
-  (item.tags || []).forEach((tag) => {
+  (rawEvent.tags || []).forEach((tag) => {
     const key = tag[0];
     if (!key) return;
     tagMap[key] = tagMap[key] || [];
@@ -396,12 +454,12 @@ function toDraftFromRelay(item) {
     id: crypto.randomUUID(),
     kind: KINDS.ncc,
     status: "draft",
-    author_pubkey: item.pubkey || item.author_pubkey || "",
-    d: buildNccIdentifier(eventTagValue(item.tags || [], "d")) || item.d || "",
-    title: eventTagValue(item.tags || [], "title") || item.title || "",
-    content: item.content || "",
+    author_pubkey: rawEvent.pubkey || rawEvent.author_pubkey || "",
+    d: buildNccIdentifier(eventTagValue(rawEvent.tags || [], "d")) || rawEvent.d || "",
+    title: eventTagValue(rawEvent.tags || [], "title") || rawEvent.title || "",
+    content: rawEvent.content || "",
     published_at:
-      Number(eventTagValue(item.tags || [], "published_at")) || item.created_at || nowSeconds(),
+      Number(eventTagValue(rawEvent.tags || [], "published_at")) || rawEvent.created_at || nowSeconds(),
     tags: {
       summary: tagMap.summary?.[0] || "",
       topics: tagMap.t || [],
@@ -438,29 +496,31 @@ function buildRevisionSupersedes(tags, eventId) {
 function createRevisionDraft(item, localDrafts) {
   const eventId = item.event_id || item.id;
   const state = stateManager.getState();
-  const relaySource =
-    item.raw_event ||
-    state.nccDocs?.find((doc) => normalizeHexId(doc.id) === normalizeHexId(eventId));
-  if (relaySource) {
-    const base = toDraftFromRelay(relaySource);
-    return {
-      ...base,
-      id: crypto.randomUUID(),
-      status: "draft",
-      author_pubkey: state.signerPubkey,
-      event_id: "",
-      published_at: null,
-      tags: {
-        ...base.tags,
-        version: incrementVersion(base.tags?.version),
-        supersedes: buildRevisionSupersedes(base.tags, eventId)
-      },
-      source: "local"
-    };
-  }
-
-  const baseDraft = (localDrafts || []).find((d) => d.id === item.id);
-  if (!baseDraft) return null;
+  
+  // Try to get the raw event from the central store first
+      const rawEventSource = state.eventsById.get(eventId);
+  
+    if (rawEventSource) {
+      const base = toDraftFromRelay(rawEventSource);
+      return {
+        ...base,
+        id: crypto.randomUUID(),
+        status: "draft",
+        author_pubkey: state.signerPubkey,
+        event_id: "",
+        published_at: null,
+        tags: {
+          ...base.tags,
+          version: incrementVersion(base.tags?.version),
+          // Ensure buildRevisionSupersedes gets the event_id, not the full raw event, for its logic
+          supersedes: buildRevisionSupersedes(base.tags, eventId) 
+        },
+        source: "local"
+      };
+    }
+  
+    // Fallback to local drafts if not found in relay events
+    const baseDraft = (localDrafts || []).find((d) => d.id === item.id);  if (!baseDraft) return null;
   return {
     ...baseDraft,
     id: crypto.randomUUID(),
@@ -513,31 +573,45 @@ async function persistRelayEvents(events) {
   if (!events?.length) return;
   const state = stateManager.getState();
   const tasks = [];
+  const updatedEventsById = new Map(state.eventsById); // Create a mutable copy
+
   for (const event of events) {
     if (!event?.id) continue;
+    
+    // Always store the full event in eventsById
+    updatedEventsById.set(event.id, event);
+
+    // Only add to persistedRelayEvents for tracking if it's new
     if (state.persistedRelayEvents.has(event.id)) continue;
     state.persistedRelayEvents.add(event.id);
+    
+    // Also save a draft representation locally
     const draft = payloadToDraft(event);
     draft.source = "relay";
-    draft.event_id = event.id;
+    draft.event_id = event.id; // Ensure event_id matches the actual Nostr event ID
     const timestamp = event.created_at || nowSeconds();
     draft.updated_at = timestamp * 1000;
     draft.created_at = timestamp * 1000;
     draft.published_at = timestamp;
-    draft.id = event.id;
-    draft.raw_tags = event.tags || [];
-    draft.raw_event = event;
+    draft.id = event.id; // Use event.id as local draft ID for relay events
     tasks.push(saveDraft(draft));
   }
   if (!tasks.length) return;
-  await Promise.allSettled(tasks);
+  
+  // Update the central eventsById store
+  stateManager.updateState({ eventsById: updatedEventsById });
 }
 
 async function refreshEndorsementHelpers(forceRefresh = false) {
   try {
     const relays = await getRelays(getConfig);
-    if (!relays.length) return;
+    if (!relays.length) {
+        return;
+    }
     
+    const state = stateManager.getState(); // Get current state to access signerPubkey
+    const signerPubkey = state.signerPubkey;
+
     const cacheKey = buildRelayCacheKey(relays);
     const cached = readCachedNcc(cacheKey);
     const cacheFresh = cached && Date.now() - cached.at < NCC_CACHE_TTL_MS;
@@ -551,7 +625,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
 
     if (!events.length) {
       try {
-        events = await fetchNccDocuments(relays);
+        events = await fetchNccDocuments(relays, signerPubkey); // Pass signerPubkey
         writeCachedNcc(cacheKey, events);
       } catch (error) {
         if (cached?.items?.length) {
@@ -575,7 +649,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
         tasks.push(fetchEndorsements(relays, eventIds).then(persistRelayEvents));
       }
       if (dValues.length) {
-        tasks.push(fetchSuccessionRecords(relays, dValues).then(persistRelayEvents));
+        tasks.push(fetchSuccessionRecords(relays, dValues).then(events => persistRelayEvents(events)));
       }
       
       try {
@@ -587,7 +661,7 @@ async function refreshEndorsementHelpers(forceRefresh = false) {
 
     stateManager.updateState({
       nccOptions: buildNccOptions(filtered),
-      nccDocs: filtered,
+      nccDocs: filtered.map(e => e.id), // Store only IDs in nccDocs
       relayStatus: {
         relays: relays.length,
         events: filtered.length,
@@ -620,7 +694,8 @@ async function withdrawDraft(id) {
     
     let draft = (state.nccLocalDrafts || []).find((d) => d.id === id);
     if (!draft) {
-      const event = (state.nccDocs || []).find((d) => d.id === id);
+      // If it's a relay event, get it from the central store
+      const event = state.eventsById.get(id);
       if (event) {
         draft = toDraftFromRelay(event);
       }
@@ -631,8 +706,7 @@ async function withdrawDraft(id) {
     const relays = await getRelays(getConfig);
     if (!relays.length) throw new Error("No relays configured");
     const signerMode = state.signerMode;
-    const nsec = sessionStorage.getItem("ncc-manager-nsec");
-    const signer = await getSigner(signerMode, nsec);
+    const signer = await getSigner(signerMode);
 
     const withdrawnDraft = { 
       ...draft, 
@@ -647,9 +721,9 @@ async function withdrawDraft(id) {
     const updated = {
       ...withdrawnDraft,
       event_id: event.id,
-      author_pubkey: signer.pubkey,
-      raw_event: event,
-      raw_tags: event.tags || []
+      author_pubkey: signer.pubkey
+      // raw_event and raw_tags are no longer stored directly in the draft object
+      // as the full event is available via state.eventsById.
     };
     
     await saveDraft(updated);
@@ -658,8 +732,8 @@ async function withdrawDraft(id) {
 
     showToast(`NCC withdrawn and update published to ${result.accepted}/${result.total} relays.`);
 
-  } catch (error) {
-    showToast(`Withdraw failed: ${error.message}`, "error");
+  } catch (_error) {
+    showToast(`Withdraw failed: ${_error.message}`, "error");
   }
 }
 
@@ -671,8 +745,7 @@ async function publishDraft(draft, kind) {
     const relays = await getRelays(getConfig);
     if (!relays.length) throw new Error("No relays configured");
     const signerMode = state.signerMode;
-    const nsec = sessionStorage.getItem("ncc-manager-nsec");
-    const signer = await getSigner(signerMode, nsec);
+    const signer = await getSigner(signerMode);
 
     const publishableDraft = { ...draft, status: "published" };
     const template = createEventTemplate(publishableDraft);
@@ -684,9 +757,9 @@ async function publishDraft(draft, kind) {
       ...publishableDraft,
       event_id: event.id,
       author_pubkey: signer.pubkey,
-      published_at: publishableDraft.published_at || nowSeconds(),
-      raw_event: event,
-      raw_tags: event.tags || []
+      published_at: publishableDraft.published_at || nowSeconds()
+      // raw_event and raw_tags are no longer stored directly in the draft object
+      // as the full event is available via state.eventsById.
     };
     await saveDraft(updated);
     await updateAllDrafts();
@@ -702,7 +775,7 @@ async function publishDraft(draft, kind) {
       const supersedes = draft.tags?.supersedes?.[0]; // Taking the primary/first supersedes reference
       
       if (!supersedes) {
-        log("No supersedes found, skipping auto-NSR for initial publish.");
+        console.info("No supersedes found, skipping auto-NSR for initial publish.");
         return;
       }
 
@@ -728,7 +801,7 @@ async function publishDraft(draft, kind) {
         });
 
         if (nsrResult.skipped) {
-            console.log("NSR already exists for this revision.");
+            console.info("NSR already exists for this revision.");
         } else {
             if (nsrResult.event) {
                 await persistRelayEvents([nsrResult.event]);
@@ -740,8 +813,8 @@ async function publishDraft(draft, kind) {
         showToast("Published revision, but NSR failed. You may need to create it manually.", "warning");
       }
     }
-  } catch (error) {
-    showToast(`Publish failed: ${error.message}`, "error");
+  } catch (_error) {
+    showToast(`Publish failed: ${_error.message}`, "error");
   }
 }
 
@@ -753,8 +826,7 @@ async function broadcastDraftToRelays(draft) {
   if (!state.signerPubkey) return null;
 
   const signerMode = state.signerMode;
-  const nsec = sessionStorage.getItem("ncc-manager-nsec");
-  const signer = await getSigner(signerMode, nsec);
+  const signer = await getSigner(signerMode);
 
   const backupD = buildDraftIdentifier(draft.d);
   const backupDraftPayload = { ...draft, d: backupD, status: "draft" };
@@ -791,7 +863,7 @@ function setupEventListeners() {
 
     eventBus.on('save-item', ({ id, content, item }) => handlePowerSave(id, content, item));
     eventBus.on('sign-out', signOutSigner);
-    eventBus.on('update-signer-config', ({ mode, nsec }) => handleUpdateSignerConfig(mode, nsec));
+    eventBus.on('update-signer-config', ({ mode }) => handleUpdateSignerConfig(mode));
     eventBus.on('export-all', handleExportAllDrafts);
     eventBus.on('clear-cache', () => localStorage.clear());
     eventBus.on('set-config', ({ key, value }) => setConfig(key, value));

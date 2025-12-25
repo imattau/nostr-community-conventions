@@ -1,6 +1,6 @@
 {
   "name": "@0xx0lostcause0xx0/ncc-manager",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": false,
   "type": "module",
   "description": "Web app for managing NCC drafts, publishing, and verification.",
@@ -26,6 +26,8 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
     "build": "vite build",
     "start": "NODE_ENV=production node server.js",
+    "lint": "eslint .",
+    "test": "node --test src/*.test.js src/**/*.test.js",
     "format": "prettier --write .",
     "pack:test": "npm run build && sh -c 'set -e; TARBALL=$(npm pack --silent); echo \"Installing $TARBALL globally\"; npm install -g \"$TARBALL\"; ncc-manager --no-open'"
   },
@@ -43,11 +45,12 @@
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
-    "@babel/plugin-proposal-class-properties": "^7.18.6",
+    "@babel/eslint-parser": "^7.28.5",
     "@eslint/compat": "^2.0.0",
     "@eslint/eslintrc": "^3.3.3",
     "concurrently": "^9.0.1",
     "eslint": "^9.8.0",
+    "jsdom": "^27.3.0",
     "vite": "^5.4.21"
   }
 }

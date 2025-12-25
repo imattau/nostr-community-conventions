@@ -39,7 +39,7 @@ export const nsrService = {
     // 1. Check for duplicates
     const existing = await this.findExistingNSR(relays, d, authoritativeId, fromId);
     if (existing) {
-      console.log("NSR already exists, skipping duplicate publish", existing.id);
+      console.info("NSR already exists, skipping duplicate publish", existing.id);
       return { skipped: true, eventId: existing.id };
     }
 

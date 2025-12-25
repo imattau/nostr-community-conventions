@@ -1,18 +1,21 @@
 import { esc, eventTagValue, shortenKey, normalizeEventId } from "../utils.js";
 import { KINDS } from "../state.js";
 import { payloadToDraft } from "../services/nostr.js";
+import { html } from 'lit'; // Import html tag literal
+import { eventBus } from "../eventBus.js";
 
 const REVISION_DESCRIPTORS = ["latest", "previous revision", "earlier revision"];
 
-let lastRenderedState = null;
+let lastUiRefreshId = null;
+let lastSearchQuery = "";
+let lastCurrentItemId = null;
+let lastSections = [];
 
 export function renderExplorer(container, state, options = {}) {
     const { 
         searchQuery = "", 
         currentItemId = null, 
-        collapsedBranches = new Set(),
-        onToggleBranch,
-        onOpenItem,
+        expandedBranches = new Set(),
         findItem
     } = options;
 
@@ -21,18 +24,13 @@ export function renderExplorer(container, state, options = {}) {
     const query = searchQuery.trim().toLowerCase();
     
     // Performance optimization: Quick state comparison to skip redundant renders
-    const currentState = JSON.stringify({
-        query,
-        currentItemId,
-        collapsedCount: collapsedBranches.size,
-        localNcc: state.nccLocalDrafts?.length,
-        relayNcc: state.nccDocs?.length,
-        // Using lengths as a proxy for 'data changed' for performance, 
-        // though deep comparison would be more accurate but slower.
-    });
-
-    if (currentState === lastRenderedState) return;
-    lastRenderedState = currentState;
+    // Use uiRefreshId for global state changes, and specific props for local changes.
+    if (state.uiRefreshId === lastUiRefreshId && searchQuery === lastSearchQuery && currentItemId === lastCurrentItemId) {
+        return;
+    }
+    lastUiRefreshId = state.uiRefreshId;
+    lastSearchQuery = searchQuery;
+    lastCurrentItemId = currentItemId;
 
     // Pool all items with conceptual de-duplication
     const conceptualMap = new Map();
@@ -41,9 +39,16 @@ export function renderExplorer(container, state, options = {}) {
         (items || []).forEach(rawItem => {
             if (!rawItem) return;
             
-            let item = rawItem;
-            if (!item.d && rawItem.tags) {
-                item = payloadToDraft(rawItem);
+            let item;
+            if (typeof rawItem === 'string') { // If rawItem is an ID string, look up the full object
+                item = state.eventsById.get(rawItem);
+                if (!item) return; // Skip if full object not found
+            } else {
+                item = rawItem;
+            }
+
+            if (!item.d && item.tags) { // Ensure 'd' tag is present, or convert if possible
+                item = payloadToDraft(item);
             }
 
             let identity = item.event_id || item.id;
@@ -101,19 +106,47 @@ export function renderExplorer(container, state, options = {}) {
         { title: "Published", items: filterExplorerItems(publishedPool, query), type: "published" },
         { title: "Withdrawn", items: filterExplorerItems(withdrawnPool, query), type: "withdrawn" }
     ];
+    lastSections = sections;
 
-    container.innerHTML = sections.map(section => renderExplorerSection(section, { 
-        collapsedBranches, 
-        currentItemId, 
+    // Pass data to the explorer-tree custom element
+    let explorerTree = container.querySelector('explorer-tree');
+    if (!explorerTree) {
+        explorerTree = document.createElement('explorer-tree');
+        container.innerHTML = ''; // Clear existing content
+        container.appendChild(explorerTree);
+    }
+    explorerTree.sections = sections;
+    explorerTree.currentItemId = currentItemId;
+    // Always create a new context object to trigger Lit's change detection
+    explorerTree.context = {
+        expandedBranches: new Set(expandedBranches), // Ensure this is also a new Set
         state,
-        findItem 
-    })).join("");
+        findItem
+    };
 }
 
+eventBus.on('explorer-expand-all', () => {
+    const allKeys = [];
+    lastSections.forEach(section => {
+        const groups = buildRevisionGroups(section.items);
+        groups.forEach(group => {
+            const branchKey = `${section.type}:${group.rawKey}`;
+            allKeys.push(branchKey);
+            // Also add subtrees
+            allKeys.push(`${branchKey}:endorsement`);
+            allKeys.push(`${branchKey}:nsr`);
+            allKeys.push(`${branchKey}:supporting`);
+        });
+    });
+    eventBus.emit('explorer-set-expanded', allKeys);
+});
+
 function filterExplorerItems(items, query) {
-    if (!items.length) return [];
+    if (!items.length) {
+        return [];
+    }
     const ensureTs = (val) => (val > 1e12 ? val : val * 1000) || 0;
-    return items
+    const filtered = items
         .filter((item) => {
             if (!query) return true;
             const label = (item.d || "").toLowerCase();
@@ -125,17 +158,18 @@ function filterExplorerItems(items, query) {
             const bTs = ensureTs(b.updated_at || b.created_at);
             return (bTs || 0) - (aTs || 0);
         });
+    return filtered;
 }
 
-function renderExplorerSection(section, context) {
+export function renderExplorerSection(section, context) {
     const { title, items, type: sectionType } = section;
     const groups = buildRevisionGroups(items);
-    return `
+    return html`
         <div class="p-nav-group">
             <div class="p-nav-header">
                 <span>${title} (${items.length})</span>
             </div>
-            ${groups.length ? groups.map((group) => renderExplorerBranch(group, sectionType, context)).join("") : `<div class="p-nav-empty">No items found</div>`}
+            ${groups.length ? groups.map((group) => renderExplorerBranch(group, sectionType, context)) : html`<div class="p-nav-empty">No items found</div>`}
         </div>
     `;
 }
@@ -213,9 +247,9 @@ function computeRevisionDepth(item, peers) {
 }
 
 function renderExplorerBranch(group, sectionType, context) {
-    const { collapsedBranches, currentItemId, state, findItem } = context;
+    const { expandedBranches, currentItemId, state, findItem } = context;
     const branchKey = `${sectionType}:${group.rawKey}`;
-    const isClosed = collapsedBranches.has(branchKey);
+    const isOpen = expandedBranches.has(branchKey);
     
     const mainNcc = group.kinds.ncc[0]?.item;
     const title = mainNcc ? (mainNcc.title || eventTagValue(mainNcc.tags, "title")) : group.label;
@@ -226,49 +260,48 @@ function renderExplorerBranch(group, sectionType, context) {
     const dTag = group.rawKey; // This matches 'd'
     const validation = state.validationResults?.get(dTag);
     const hasWarnings = validation?.warnings?.length > 0;
-    const warningIcon = hasWarnings ? `<span class="p-icon-warning" title="${esc(validation.warnings.join('\n'))}">⚠️</span>` : "";
+    const warningIcon = hasWarnings ? html`<span class="p-icon-warning" title="${esc(validation.warnings.join('\n'))}">⚠️</span>` : '';
 
-    let bodyHtml = "";
     const isDraftSection = sectionType === "drafts";
     
-    if (group.kinds.ncc.length) {
-        const nccItems = isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc;
-        bodyHtml += nccItems.map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state, validation)).join("");
-    }
+    const nccItemsHtml = group.kinds.ncc.length
+        ? (isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc).map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state, validation))
+        : [];
 
-    const subTrees = [
+    const subTrees = [ 
         { key: "endorsement", label: "Endorsements", items: group.kinds.endorsement },
         { key: "nsr", label: "Succession", items: group.kinds.nsr },
         { key: "supporting", label: "Supporting Docs", items: group.kinds.supporting }
     ];
 
-    subTrees.forEach(sub => {
+    const subTreesHtml = subTrees.map(sub => {
         if (sub.items.length) {
             const subKey = `${branchKey}:${sub.key}`;
-            const subClosed = collapsedBranches.has(subKey);
+            const subOpen = expandedBranches.has(subKey);
             const itemsToShow = isDraftSection ? [sub.items[0]] : sub.items;
 
-            bodyHtml += `
+            return html`
                 <div class="p-nav-tree p-nav-subtree">
-                    <button class="p-nav-branch-header" data-branch="${subKey}">
-                        <span class="p-nav-branch-icon">${subClosed ? ">" : "V"}</span>
+                    <button class="p-nav-branch-header" data-branch="${subKey}" style="background-color: transparent;">
+                        <span class="p-nav-branch-icon">${subOpen ? "▾" : "▸"}</span>
                         <span class="p-nav-branch-title">
                             <span class="p-type-tag">${sub.label}</span>
                             <small class="p-muted-text">(${itemsToShow.length})</small>
                         </span>
                     </button>
-                    <div class="p-nav-branch-body ${subClosed ? "" : "is-open"}">
-                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published", currentItemId, state, validation)).join("")}
+                    <div class="p-nav-branch-body ${subOpen ? "is-open" : ""}">
+                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published", currentItemId, state, validation))}
                     </div>
                 </div>
             `;
         }
-    });
+        return null;
+    }).filter(Boolean);
 
-    return `
+    return html`
         <div class="p-nav-tree">
-            <button class="p-nav-branch-header" data-branch="${branchKey}">
-                <span class="p-nav-branch-icon">${isClosed ? ">" : "V"}</span>
+            <button class="p-nav-branch-header" data-branch="${branchKey}" style="background-color: transparent;">
+                <span class="p-nav-branch-icon">${isOpen ? "▾" : "▸"}</span>
                 <span class="p-nav-branch-title">
                    ${esc(group.label)} 
                    <small class="p-nav-label-muted" style="margin-left:8px">${esc(shortenKey(title, 20, 0))}</small>
@@ -276,8 +309,9 @@ function renderExplorerBranch(group, sectionType, context) {
                 </span>
                 <span class="p-badge-mini status-${status}">${badgeLabel}</span>
             </button>
-            <div class="p-nav-branch-body ${isClosed ? "" : "is-open"}">
-                ${bodyHtml}
+            <div class="p-nav-branch-body ${isOpen ? "is-open" : ""}">
+                ${nccItemsHtml}
+                ${subTreesHtml}
             </div>
         </div>
     `;
@@ -303,17 +337,17 @@ function renderExplorerItem(entry, idx, inheritedStatus, currentItemId, state, v
         label = `${shortenKey(author)} · ${dateStr}`;
     }
 
-    let extraBadge = "";
+    let extraBadge = html``; // Initialize as empty Lit TemplateResult
     if (validation && item.kind === KINDS.ncc) {
         const itemId = item.event_id || item.id;
         if (itemId === validation.authoritativeDocId) {
-             extraBadge = `<span class="p-badge-mini" style="background:var(--accent);color:var(--bg);margin-left:4px" title="Authoritative Revision">AUTH</span>`;
+             extraBadge = html`<span class="p-badge-mini" style="background:var(--accent);color:var(--bg);margin-left:4px" title="Authoritative Revision">AUTH</span>`;
         } else if (validation.forkedBranches?.includes(itemId)) {
-             extraBadge = `<span class="p-badge-mini" style="background:var(--warning);color:var(--bg);margin-left:4px" title="Forked / Non-Authoritative Tip">FORK</span>`;
+             extraBadge = html`<span class="p-badge-mini" style="background:var(--warning);color:var(--bg);margin-left:4px" title="Forked / Non-Authoritative Tip">FORK</span>`;
         }
     }
 
-    return `
+    return html`
         <div class="p-nav-item${isActive}" data-id="${item.id}" title="${esc(title)}">
             <div class="p-nav-meta">
                 <span class="p-nav-label">${esc(label)}</span>
