@@ -165,7 +165,8 @@ app.get("/api/endorsements/counts", async (req, res) => {
       }
     }
     res.json({ counts });
-  } catch (error) {
+  } catch (_error) {
+    void _error;
     res.status(500).json({ counts: {}, error: "Failed to aggregate endorsement counts" });
   }
 });
@@ -175,5 +176,5 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`NCC Manager running at http://${HOST}:${PORT}`);
+  console.info(`NCC Manager running at http://${HOST}:${PORT}`);
 });

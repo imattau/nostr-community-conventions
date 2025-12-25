@@ -5,8 +5,7 @@ let paletteIndex = 0;
 
 export function toggleCommandPalette(show, options = {}) {
     const { 
-        commands = [], 
-        onHighlightSelection 
+        commands = [] 
     } = options;
 
     const overlay = document.getElementById("p-palette-overlay");

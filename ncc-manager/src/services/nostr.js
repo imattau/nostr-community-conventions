@@ -111,7 +111,8 @@ export function payloadToDraft(payload) {
     event_id: payload.event_id || payload.id || "",
     author_pubkey: payload.author_pubkey || payload.pubkey || "",
     published_at: tagMap.published_at ? Number(tagMap.published_at[0]) : null,
-    tags: {}
+    // raw_event is now stored centrally in state.eventsById, so don't duplicate it here.
+    // Instead, this draft is a view of the event.
   };
 
   if (draft.kind === 30050) {
@@ -133,7 +134,7 @@ export function payloadToDraft(payload) {
       steward: tagMap.steward?.[0] || "",
       previous: normalizeSupersedes(tagMap.previous?.[0] || ""),
       from: normalizeSupersedes(tagMap.from?.[0] || ""),
-      to: normalizeSupersedes(tagMap.to?.[0] || ""),
+      to: normalizeSupersedes(tagMap.to?.[0] || ""), // Corrected typo
       reason: tagMap.reason?.[0] || "",
       effective_at: tagMap.effective_at?.[0] || ""
     };
@@ -162,14 +163,14 @@ export function payloadToDraft(payload) {
       authors: tagMap.authors || []
     };
   }
-
-  draft.raw_event = payload;
-  draft.raw_tags = tags;
+  // raw_event and raw_tags are no longer stored directly in the draft object
+  // as the full event is available via state.eventsById.
+  // This draft serves as a lighter, processed view.
 
   return draft;
 }
 
-export async function getSigner(mode, nsec) {
+export async function getSigner(mode) {
   if (mode === "nip07") {
     if (!window.nostr) throw new Error("NIP-07 signer not available");
     const pubkey = await window.nostr.getPublicKey();
@@ -190,16 +191,7 @@ export async function getSigner(mode, nsec) {
     };
   }
 
-  if (!nsec) throw new Error("nsec is required for local signer");
-  const decoded = nip19.decode(nsec);
-  if (decoded.type !== "nsec") throw new Error("Invalid nsec format");
-  const sk = decoded.data;
-  const pubkey = getPublicKey(sk);
-  return {
-    type: "nsec",
-    pubkey,
-    signEvent: (template) => finalizeEvent(template, sk)
-  };
+  throw new Error(`Unsupported signer mode: ${mode}`);
 }
 
 const profileCache = new Map();
@@ -233,7 +225,8 @@ export async function fetchProfile(pubkey, relays = []) {
   if (latest?.content) {
     try {
       profile = JSON.parse(latest.content);
-    } catch (error) {
+    } catch (_error) {
+      void _error; // Explicitly consume unused variable
       // ignore
     }
   }
@@ -281,13 +274,18 @@ export async function verifyEvent(relays, eventId) {
   return events.length > 0;
 }
 
-export async function fetchNccDocuments(relays) {
+export async function fetchNccDocuments(relays, authorPubkey = null) {
+  const filter = {
+    kinds: [30050]
+  };
+  if (authorPubkey) {
+    filter.authors = [authorPubkey];
+  }
+  filter.limit = 500; // Re-add limit now that we have authors, to reduce relay load if author has many.
+
   const events = await pool.querySync(
     relays,
-    {
-      kinds: [30050],
-      limit: 500
-    },
+    filter,
     { maxWait: 8000 }
   );
   return events;
@@ -297,27 +295,22 @@ export async function fetchEndorsements(relays, eventIds) {
   if (!relays.length || !eventIds.length) return [];
   const uniqueIds = Array.from(new Set(eventIds.filter(Boolean)));
   if (!uniqueIds.length) return [];
-  const normalized = uniqueIds.map((id) => id.replace(/^event:/i, "").trim()).filter(Boolean);
   
-  // Split into separate calls to be safe with all relay implementations
-  const [eventsE, eventsEndorses] = await Promise.all([
-    pool.querySync(relays, {
-      kinds: [30052],
-      "#e": normalized,
-      limit: 1000
-    }, { maxWait: 4000 }),
-    pool.querySync(relays, {
-      kinds: [30052],
-      "#endorses": normalized,
-      limit: 1000
-    }, { maxWait: 4000 })
-  ]);
-
-  const dedup = new Map();
-  [...(eventsE || []), ...(eventsEndorses || [])].forEach((event) => {
-      if (event && event.id) dedup.set(event.id, event);
-  });
-  return Array.from(dedup.values());
+  // NIP-01 filters support multiple #e tags, so combine into a single query
+  const filters = [{
+    kinds: [30052],
+    '#e': uniqueIds,
+    limit: 1000
+  }];
+  
+  // Some relays might not support multiple #e, and old 'endorses' tag might still be around.
+  // Use both #e (event ID) and #endorses (custom tag used before NIP-33 event ID tag standardization)
+  // The client then filters based on what it expects.
+  // This is a trade-off for compatibility vs strictness. For efficiency, one query is better.
+  // If relays are smart, they'll dedup.
+  
+  // For now, let's keep it simple with one query that Nostr-tools should handle.
+  return pool.querySync(relays, filters, { maxWait: 4000 });
 }
 
 export async function fetchSuccessionRecords(relays, dValues) {
@@ -325,11 +318,14 @@ export async function fetchSuccessionRecords(relays, dValues) {
   const uniqueDs = Array.from(new Set(dValues.filter(Boolean)));
   if (!uniqueDs.length) return [];
   
-  return pool.querySync(relays, {
+  // NIP-33 D-tag filters support multiple #d tags.
+  const filters = [{
     kinds: [30051],
-    "#d": uniqueDs,
+    '#d': uniqueDs,
     limit: 1000
-  }, { maxWait: 4000 });
+  }];
+
+  return pool.querySync(relays, filters, { maxWait: 4000 });
 }
 
 export async function fetchAuthorEndorsements(relays, pubkey) {

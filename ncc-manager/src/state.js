@@ -36,7 +36,9 @@ export const state = {
   remoteDrafts: [],
   FALLBACK_RELAYS: FALLBACK_RELAYS,
   theme: "power",
-  validationResults: new Map()
+  signerMode: "nip07",
+  validationResults: new Map(),
+  eventsById: new Map(), // Central store for all raw Nostr events by ID
 };
 
 export function isFallbackRelay(url) {

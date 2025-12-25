@@ -3,6 +3,7 @@ const subscribers = [];
 
 const state = {
   theme: "power",
+  uiRefreshId: Date.now() // Add uiRefreshId here
   // All other state properties will be populated by main.js
 };
 
@@ -11,6 +12,7 @@ export const stateManager = {
   
   updateState: (newState) => {
     Object.assign(state, newState);
+    state.uiRefreshId = Date.now(); // Update uiRefreshId on state change
     subscribers.forEach(callback => callback(state));
   },
 

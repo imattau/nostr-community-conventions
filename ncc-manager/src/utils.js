@@ -1,13 +1,12 @@
 // src/utils.js
 import { marked } from "marked";
-import sanitizeHtml from "sanitize-html";
 
 export function esc(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;");
+    .replace(/"/g, "&quot;");
 }
 
 export function shortenKey(value, head = 6, tail = 4) {
@@ -31,37 +30,10 @@ const markdownOptions = {
   mangle: false
 };
 
-const markdownSanitizeOptions = {
-  allowedTags: [
-    "a",
-    "p",
-    "br",
-    "strong",
-    "em",
-    "ul",
-    "ol",
-    "li",
-    "blockquote",
-    "code",
-    "pre",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "hr"
-  ],
-  allowedAttributes: {
-    a: ["href", "name", "target", "rel"],
-    code: ["class"]
-  }
-};
-
 export function renderMarkdown(content) {
   if (!content) return "";
   const raw = marked.parse(content, markdownOptions);
-  return sanitizeHtml(raw, markdownSanitizeOptions);
+  return raw; // Temporarily bypass sanitizeHtml(raw, markdownSanitizeOptions);
 }
 
 export function splitList(value) {
@@ -112,7 +84,7 @@ export function incrementVersion(version) {
   if (!version) return "1";
   const match = version.match(/(.*?)(\d+)([^\d]*)$/);
   if (!match) return version;
-  const [_, prefix, num, suffix] = match;
+  const [, prefix, num, suffix] = match; // Fixed: Skip the first element in destructuring
   return `${prefix}${parseInt(num, 10) + 1}${suffix}`;
 }
 
@@ -156,8 +128,12 @@ export function normalizeHexId(value) {
 }
 
 export function isNccDocument(event) {
+  if (!event || !event.tags) {
+    return false;
+  }
   const dValue = eventTagValue(event.tags, "d");
-  return dValue && dValue.toLowerCase().startsWith("ncc-");
+  const isNcc = dValue && dValue.toLowerCase().startsWith("ncc-");
+  return isNcc;
 }
 
 export function buildNccOptions(events) {

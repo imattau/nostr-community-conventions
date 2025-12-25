@@ -32,7 +32,8 @@ async function checkServerStorage() {
     if (!res.ok) throw new Error("Server storage unavailable");
     const data = await res.json();
     serverStatus = Boolean(data.server);
-  } catch (error) {
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
     serverStatus = false;
   }
   return serverStatus;
@@ -66,8 +67,9 @@ export async function saveDraft(draft) {
       });
       return data;
     }
-  } catch (error) {
-    console.warn("Server save failed, falling back to IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.warn("Server save failed, falling back to IndexedDB:", _error);
   }
 
   // Fallback to IndexedDB
@@ -82,8 +84,9 @@ export async function getDraft(id) {
       const data = await serverRequest(`/api/drafts/${id}`);
       if (data?.draft) return data.draft;
     }
-  } catch (error) {
-    console.warn("Server fetch failed, falling back to IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.warn("Server fetch failed, falling back to IndexedDB:", _error);
   }
 
   // Fallback to IndexedDB
@@ -97,8 +100,9 @@ export async function deleteDraft(id) {
       await serverRequest(`/api/drafts/${id}`, { method: "DELETE" });
       return;
     }
-  } catch (error) {
-    console.warn("Server delete failed, falling back to IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.warn("Server delete failed, falling back to IndexedDB:", _error);
   }
 
   // Fallback to IndexedDB
@@ -115,8 +119,9 @@ export async function listDrafts(kind) {
         return data.drafts;
       }
     }
-  } catch (error) {
-    console.warn("Server list failed, falling back to IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.warn("Server list failed, falling back to IndexedDB:", _error);
   }
 
   // Fallback to IndexedDB
@@ -132,8 +137,9 @@ export async function setConfig(key, value) {
   try {
     const database = await getDb();
     await database.put(CONFIG_STORE_NAME, { key, value });
-  } catch (error) {
-    console.error("Failed to set config in IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.error("Failed to set config in IndexedDB:", _error);
   }
 }
 
@@ -142,8 +148,9 @@ export async function getConfig(key, fallback = null) {
     const database = await getDb();
     const entry = await database.get(CONFIG_STORE_NAME, key);
     return entry ? entry.value : fallback;
-  } catch (error) {
-    console.error("Failed to get config from IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.error("Failed to get config from IndexedDB:", _error);
     return fallback;
   }
 }
@@ -153,8 +160,9 @@ export async function getAllConfig() {
     const database = await getDb();
     const entries = await database.getAll(CONFIG_STORE_NAME);
     return entries;
-  } catch (error) {
-    console.error("Failed to get all config from IndexedDB:", error);
+  } catch (_error) {
+    void _error; // Explicitly consume unused variable
+    console.error("Failed to get all config from IndexedDB:", _error);
     return [];
   }
 }

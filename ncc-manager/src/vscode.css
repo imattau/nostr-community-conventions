@@ -1,0 +1,111 @@
+.theme-vscode {
+    /* Backgrounds */
+    --bg: #1E1E1E; /* Editor background */
+    --panel: #252526; /* Panel background (Explorer, Inspector) */
+    --panel-2: #333333; /* Input fields, secondary panels */
+
+    /* Text & Colors */
+    --text: #D4D4D4; /* Default text color */
+    --muted: #858585; /* Muted text color */
+    --accent: #007ACC; /* Primary accent blue */
+    --accent-soft: rgba(0, 122, 204, 0.15); /* Soft accent for hover/active */
+
+    /* Borders & Separators */
+    --border: #3E3E42; /* Border color */
+
+    /* Status Colors (Approximations) */
+    --danger: #F44747; /* Red */
+    --warning: #DCDCAA; /* Yellow */
+    --success: #6A9955; /* Green */
+
+    /* Fonts */
+    --mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'monospace'; /* VS Code like monospaced */
+    --ui: 'Segoe UI', 'sans-serif'; /* VS Code like UI font */
+}
+
+.theme-vscode-light {
+    /* Backgrounds */
+    --bg: #FFFFFF;
+    --panel: #F3F3F3;
+    --panel-2: #F8F8F8;
+
+    /* Text & Colors */
+    --text: #333333;
+    --muted: #616161;
+    --accent: #007ACC;
+    --accent-soft: rgba(0, 122, 204, 0.1);
+
+    /* Borders & Separators */
+    --border: #E5E5E5;
+
+    /* Status Colors */
+    --danger: #CD3131;
+    --warning: #BF8803;
+    --success: #388A34;
+
+    /* Fonts */
+    --mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'monospace';
+    --ui: 'Segoe UI', 'sans-serif';
+}
+
+body.theme-vscode {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui);
+}
+
+body.theme-vscode-light {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui);
+}
+
+/* Specific overrides for VS Code theme if needed */
+.theme-vscode .p-btn-accent,
+.theme-vscode-light .p-btn-accent {
+    background: var(--accent);
+    color: white; /* Ensure text is white on accent button */
+}
+.theme-vscode .p-btn-accent:hover,
+.theme-vscode-light .p-btn-accent:hover {
+    background: var(--accent);
+    opacity: 0.9;
+}
+
+.theme-vscode .p-top-search,
+.theme-vscode-light .p-top-search,
+.theme-vscode .p-field input,
+.theme-vscode-light .p-field input,
+.theme-vscode .p-field select,
+.theme-vscode-light .p-field select,
+.theme-vscode .p-field textarea,
+.theme-vscode-light .p-field textarea {
+    border-color: var(--border);
+    background: var(--panel-2);
+}
+
+.theme-vscode .p-top-search:focus,
+.theme-vscode-light .p-top-search:focus,
+.theme-vscode .p-field input:focus,
+.theme-vscode-light .p-field input:focus,
+.theme-vscode .p-field select:focus,
+.theme-vscode-light .p-field select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.theme-vscode .p-badge-mini.status-published,
+.theme-vscode-light .p-badge-mini.status-published {
+    color: var(--success);
+    border-color: rgba(56, 138, 52, 0.4);
+}
+.theme-vscode .p-badge-mini.status-draft,
+.theme-vscode-light .p-badge-mini.status-draft {
+    color: var(--warning);
+    border-color: rgba(191, 136, 3, 0.4);
+}
+.theme-vscode .p-badge-mini.status-withdrawn,
+.theme-vscode-light .p-badge-mini.status-withdrawn {
+    color: var(--danger);
+    border-color: rgba(205, 49, 49, 0.4);
+}
