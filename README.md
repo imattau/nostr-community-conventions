@@ -239,3 +239,94 @@ A relay conforms to NCC-06 if:
 ## Conclusion
 
 NCC-06 defines a minimal, identity-first relay profile that composes service discovery, trust assertion, and dynamic location using existing Nostr primitives, while preserving strict separation between storage, assertion, and enforcement.
+
+---
+
+## Appendix A: Minimal Reference Implementation (Informative)
+
+This appendix sketches a minimal, working-shaped system that conforms to NCC-06:
+
+- A protocol-dumb NIP-01 relay (WebSocket)
+- A sidecar publisher for NCC-02 and NCC-05 records
+- A simple client that resolves NCC-02 then NCC-05 and connects
+
+This appendix is informative only. It does not add new requirements beyond NCC-06.
+
+---
+
+### A.1 Components
+
+#### A.1.1 Relay (NIP-01 only)
+Responsibilities:
+- Accept WebSocket connections
+- Handle `EVENT`, `REQ`, `CLOSE`
+- Emit `EVENT` messages that match filters
+- Emit `EOSE` per subscription
+- Store events and retrieve by filter
+- No NCC resolution, no trust evaluation, no redirect/proxy
+
+Suggested stack:
+- Node.js
+- `ws` for WebSocket server
+- Any storage: in-memory for tests, SQLite/Postgres/LMDB for real use
+
+#### A.1.2 Sidecar Publisher (out of band)
+Responsibilities:
+- Maintain the relay’s self-description as a service identity (npub)
+- Publish:
+  - NCC-02 Service Record (kind 30059) with `d`, `u`, `k`, `exp`
+  - NCC-05 Locator (kind 30058) with `d`, TTL, `updated_at`, endpoint list
+- Optionally publish:
+  - NCC-02 Attestations (30060)
+  - NCC-02 Revocations (30061)
+- Publish to the relay itself first (local-first bootstrap)
+
+Suggested stack:
+- Node.js
+- `nostr-tools` for key handling and event signing
+- Optional: TLS tooling to compute SPKI fingerprint for `k`
+
+#### A.1.3 Simple Client (resolver + connector)
+Responsibilities:
+- Input: relay identity (npub) and service id (for example `relay`)
+- Fetch NCC-02 Service Record for `(npub, d)`
+- Validate:
+  - signature
+  - `exp` freshness
+- Fetch NCC-05 Locator for `(npub, locator d)`
+- Apply TTL freshness
+- Select endpoint by policy:
+  - prefer onion if Tor-capable and policy permits
+  - prefer `wss://` over `ws://` when both exist
+- Connect to selected endpoint using NIP-01
+- Verify endpoint key against NCC-02 `k` when using `wss://`
+
+---
+
+### A.2 Minimal Event Shapes
+
+These examples show representative payloads and tags. Exact tag names and JSON fields should follow your NCC-02 and NCC-05 definitions.
+
+#### A.2.1 NCC-02 Service Record (kind 30059)
+
+Tags:
+- `d`: service identifier, for example `relay`
+- `u`: fallback endpoint URI
+- `k`: endpoint key fingerprint (recommended for `wss://`)
+- `exp`: expiry (unix seconds)
+
+Example:
+```json
+{
+  "kind": 30059,
+  "pubkey": "<SERVICE_PUBKEY_HEX>",
+  "created_at": 1760000000,
+  "tags": [
+    ["d", "relay"],
+    ["u", "wss://203.0.113.10:443"],
+    ["k", "spki:sha256:BASE64_OR_HEX"],
+    ["exp", "1762592000"]
+  ],
+  "content": ""
+}
+
