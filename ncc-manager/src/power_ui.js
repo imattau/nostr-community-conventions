@@ -527,7 +527,7 @@ function renderInspectorHeader() {
         <span>${isEditMode ? "Metadata Editor" : "Inspector"}</span>
         <div style="display: flex; gap: 4px">
             ${actionsHtml}
-            <button class="p-btn-icon" data-action="toggle-inspector" title="Hide Inspector">×</button>
+            <button class="p-btn-icon desktop-only" data-action="toggle-inspector" title="Hide Inspector">×</button>
         </div>
     `;
 }
