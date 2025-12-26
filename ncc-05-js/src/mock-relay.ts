@@ -1,11 +1,13 @@
 import { WebSocketServer, WebSocket } from 'ws';
 
 export class MockRelay {
+    private static instance: MockRelay;
     private wss: WebSocketServer;
     private events: any[] = [];
 
     constructor(port: number = 8080) {
         this.wss = new WebSocketServer({ port });
+        MockRelay.instance = this;
         this.wss.on('connection', (ws: WebSocket) => {
             ws.on('message', (data: string) => {
                 const msg = JSON.parse(data);
@@ -47,5 +49,22 @@ export class MockRelay {
 
     stop() {
         this.wss.close();
+    }
+
+    public static getNostrConnections(): WebSocket[] {
+        if (!MockRelay.instance) {
+            return [];
+        }
+        return Array.from(MockRelay.instance.wss.clients);
+    }
+
+    public static closeAllClientConnections() {
+        if (MockRelay.instance) {
+            MockRelay.instance.wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.close();
+                }
+            });
+        }
     }
 }
