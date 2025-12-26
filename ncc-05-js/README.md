@@ -46,12 +46,10 @@ try {
 }
 ```
 ...
-### 4. Tor & Privacy (Node.js)
+#
 ...
 ```typescript
-const resolver = new NCC05Resolver({
-    websocketImplementation: TorWebSocket
-});
+
 ```
 
 ## Error Handling
@@ -61,6 +59,21 @@ The library exports specific error classes for granular handling:
 - `NCC05TimeoutError`: Operation exceeded the specified timeout.
 - `NCC05DecryptionError`: Failed to decrypt the record (invalid keys).
 - `NCC05ArgumentError`: Invalid arguments provided (e.g. malformed keys).
+
+## 5. Custom WebSocket Implementation
+
+If you need to use a custom WebSocket implementation (e.g., for Node.js environments with the `ws` package, or for connecting via Tor/SOCKS5 proxies), you should configure it globally using `nostr-tools`'s `useWebSocketImplementation` function *before* instantiating any `NCC05Resolver` or `NCC05Publisher` objects.
+
+```typescript
+import { useWebSocketImplementation } from 'nostr-tools/pool';
+import WebSocket from 'ws'; // Example: using the 'ws' package in Node.js
+
+// Set your custom WebSocket implementation globally
+useWebSocketImplementation(WebSocket);
+
+// Now you can instantiate NCC05Resolver or NCC05Publisher, and they will use your custom WebSocket
+// const resolver = new NCC05Resolver();
+```
 
 ## API Reference
 

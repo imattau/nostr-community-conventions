@@ -109,8 +109,6 @@ export interface ResolverOptions {
     bootstrapRelays?: string[];
     /** Timeout for relay queries in milliseconds (default: 10000) */
     timeout?: number;
-    /** Custom WebSocket implementation (e.g., for Tor/SOCKS5 in Node.js) */
-    websocketImplementation?: any;
     /** Existing SimplePool instance to share connections */
     pool?: SimplePool;
 }
@@ -119,8 +117,6 @@ export interface ResolverOptions {
  * Options for configuring the NCC05Publisher.
  */
 export interface PublisherOptions {
-    /** Custom WebSocket implementation */
-    websocketImplementation?: any;
     /** Existing SimplePool instance */
     pool?: SimplePool;
     /** Timeout for publishing in milliseconds (default: 5000) */
@@ -193,17 +189,6 @@ export class NCC05Resolver {
     constructor(options: ResolverOptions = {}) {
         this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
-        
-        if (this._ownPool) {
-            if (options.websocketImplementation) {
-                // @ts-ignore - Patching pool for custom transport
-                this.pool.websocketImplementation = options.websocketImplementation;
-            } else if (typeof WebSocket === 'undefined' && typeof globalThis !== 'undefined' && globalThis.WebSocket) {
-                 // @ts-ignore
-                 this.pool.websocketImplementation = globalThis.WebSocket;
-            }
-        }
-
         this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://nos.lol'];
         this.timeout = options.timeout || 10000;
     }
@@ -377,17 +362,6 @@ export class NCC05Publisher {
     constructor(options: PublisherOptions = {}) {
         this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
-        
-        if (this._ownPool) {
-            if (options.websocketImplementation) {
-                // @ts-ignore
-                this.pool.websocketImplementation = options.websocketImplementation;
-            } else if (typeof WebSocket === 'undefined' && typeof globalThis !== 'undefined' && globalThis.WebSocket) {
-                // @ts-ignore
-                this.pool.websocketImplementation = globalThis.WebSocket;
-            }
-        }
-        
         this.timeout = options.timeout || 5000;
     }
 
