@@ -1,0 +1,13 @@
+{
+  "name": "ncc-02-js",
+  "version": "0.1.0",
+  "description": "Nostr-native service discovery and trust implementation (NCC-02)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test.js"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.10.4"
+  }
+}
