@@ -7,7 +7,8 @@ from nostr_sdk import (
     Keys, Filter, Kind, NostrSigner,
     nip44_decrypt, RelayUrl, PublicKey,
     ClientOptions, GossipOptions, GossipRelayLimits,
-    Connection, ConnectionMode, SecretKey
+    Connection, ConnectionMode, SecretKey,
+    get_publicKey
 )
 
 
@@ -95,25 +96,26 @@ async def resolve(provided_keys=None, target_pk=None,
     # 4. Decrypt or Parse
     try:
         content = latest_event.content()
-        
+
         # Check if it's a "Wrapped" event (JSON with 'wraps' field)
-        if content.startswith('{\"') and '"wraps"' in content:
+        if content.startswith('{\'') and '"wraps"' in content:
             if not keys:
                 print("Error: Event is wrapped for recipients. Use --nsec.")
                 return None
-            
+
             wrapped = json.loads(content)
             my_hex = keys.public_key().to_hex()
             if my_hex not in wrapped['wraps']:
                 print("Error: No wrap found for your pubkey.")
                 return None
-            
+
             # 1. Decrypt the session key
             session_hex = nip44_decrypt(
-                keys.secret_key(), latest_event.author(), wrapped['wraps'][my_hex]
+                keys.secret_key(), latest_event.author(),
+                wrapped['wraps'][my_hex]
             )
             session_sk = SecretKey.from_hex(session_hex)
-            
+
             # 2. Decrypt the ciphertext using session key (self-encrypted)
             content = nip44_decrypt(
                 session_sk, get_publicKey(session_sk), wrapped['ciphertext']

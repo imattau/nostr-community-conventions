@@ -12,6 +12,19 @@ from nostr_sdk import (
 )
 
 
+class NCC05Group:
+    """Helper for generating shared identities for multiple recipients."""
+    @staticmethod
+    def generate():
+        keys = Keys.generate()
+        return {
+            "nsec": keys.secret_key().to_bech32(),
+            "npub": keys.public_key().to_bech32(),
+            "hex": keys.public_key().to_hex(),
+            "keys": keys
+        }
+
+
 def get_local_public_ipv6():
     """Try to find a global IPv6 address on local interfaces."""
     try:
@@ -126,10 +139,11 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         endpoints.append({
             "type": "tcp",
             "uri": f"[{ip}]:8080" if ":" in ip else f"{ip}:8080",
-            "priority": 10, "family": "ipv6" if ":" in ip else "ipv4"
+            "priority": 10,
+            "family": "ipv6" if ":" in ip else "ipv4"
         })
 
-    # 3. Setup Client
+    # 3. Setup Client with Proxy
     from nostr_sdk import ClientBuilder, ClientOptions, Connection, \
         ConnectionMode
     signer = NostrSigner.keys(keys)
@@ -156,19 +170,19 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         # 1. Random session key
         session_sk = generate_secretKey()
         session_pk = get_publicKey(session_sk)
-        session_hex = session_sk.to_hex() 
-        
+        session_hex = session_sk.to_hex()
+
         # 2. Encrypt payload with session key (self-encrypt)
         ciphertext = nip44_encrypt(session_sk, session_pk, content,
                                    Nip44Version.V2)
-        
+
         # 3. Wrap session key for each recipient
         wraps = {}
         for rp in wrap_pks:
             rp_pk = NSPublicKey.parse(rp.strip())
             wraps[rp.strip()] = nip44_encrypt(keys.secret_key(), rp_pk,
                                               session_hex, Nip44Version.V2)
-        
+
         content = json.dumps({"ciphertext": ciphertext, "wraps": wraps})
     elif not publish_public:
         encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \

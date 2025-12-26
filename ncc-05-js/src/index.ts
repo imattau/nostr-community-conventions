@@ -41,6 +41,31 @@ export interface WrappedContent {
     wraps: Record<string, string>;
 }
 
+export class NCC05Group {
+    static createGroupIdentity() {
+        const sk = generateSecretKey();
+        const pk = getPublicKey(sk);
+        return {
+            nsec: nip19.nsecEncode(sk),
+            sk: sk,
+            pk: pk,
+            npub: nip19.npubEncode(pk)
+        };
+    }
+
+    /**
+     * Resolve a record that was published using a group's shared identity.
+     */
+    static async resolveAsGroup(
+        resolver: NCC05Resolver,
+        groupPubkey: string,
+        groupSecretKey: Uint8Array,
+        identifier: string = 'addr'
+    ): Promise<NCC05Payload | null> {
+        return resolver.resolve(groupPubkey, groupSecretKey, identifier);
+    }
+}
+
 export class NCC05Resolver {
     private pool: SimplePool;
     private bootstrapRelays: string[];
@@ -113,17 +138,17 @@ export class NCC05Resolver {
                 const myWrap = wrapped.wraps[myPk];
                 
                 if (myWrap) {
-                    // Decrypt the symmetric key using our conversation with the author
                     const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
-                    const symmetricKeyStr = nip44.decrypt(myWrap, conversationKey);
+                    const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
                     
-                    // In a real implementation, you'd use the symmetricKeyStr to decrypt 'ciphertext'
-                    // For this PoC, we demonstrate the multi-recipient handshake logic.
-                    // We'll treat 'ciphertext' as the encrypted payload for simplicity.
-                    content = nip44.decrypt(wrapped.ciphertext, symmetricKeyStr);
+                    // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
+                    const symmetricKey = new Uint8Array(symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+                    
+                    // The payload was self-encrypted by the publisher with the session key
+                    const sessionConversationKey = nip44.getConversationKey(symmetricKey, getPublicKey(symmetricKey));
+                    content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
                 }
             } else if (secretKey) {
-                // Standard NIP-44 resolution
                 const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                 content = nip44.decrypt(latestEvent.content, conversationKey);
             }
@@ -157,9 +182,6 @@ export class NCC05Publisher {
         }
     }
 
-    /**
-     * Publish for a group of recipients without sharing a private key.
-     */
     async publishWrapped(
         relays: string[],
         secretKey: Uint8Array,
@@ -167,16 +189,12 @@ export class NCC05Publisher {
         payload: NCC05Payload,
         identifier: string = 'addr'
     ): Promise<Event> {
-        // 1. Generate a random symmetric "session" key for this record
         const sessionKey = generateSecretKey();
-        const sessionKeyHex = Buffer.from(sessionKey).toString('hex');
+        const sessionKeyHex = Array.from(sessionKey).map(b => b.toString(16).padStart(2, '0')).join('');
         
-        // 2. Encrypt the payload with the session key
-        // Note: Using NIP-44 as a symmetric cipher by encrypting to oneself with the session key
         const selfConversation = nip44.getConversationKey(sessionKey, getPublicKey(sessionKey));
         const ciphertext = nip44.encrypt(JSON.stringify(payload), selfConversation);
 
-        // 3. Wrap the session key for each recipient
         const wraps: Record<string, string> = {};
         for (const rPk of recipients) {
             const conversationKey = nip44.getConversationKey(secretKey, rPk);
@@ -185,7 +203,6 @@ export class NCC05Publisher {
 
         const wrappedContent: WrappedContent = { ciphertext, wraps };
 
-        // 4. Create the event
         const eventTemplate = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
