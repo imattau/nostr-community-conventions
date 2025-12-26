@@ -71,6 +71,7 @@ export function validateDraftForPublish(draft) {
  * @property {string} d
  * @property {string | null} authoritativeDocId
  * @property {string | null} authoritativeNsrId
+ * @property {string | null} currentSteward
  * @property {string[]} tips
  * @property {Array<{ prevId: string, successors: string[] }>} forkPoints
  * @property {string[]} forkedBranches
@@ -153,6 +154,7 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
     d: targetD,
     authoritativeDocId: null,
     authoritativeNsrId: null,
+    currentSteward: null,
     tips: [],
     forkPoints: [],
     forkedBranches: [],
@@ -207,12 +209,16 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
     return a.id.localeCompare(b.id);
   });
 
-  if (potentialRoots.length === 0) {
-    result.warnings.push("No root document found (all documents supersede something).");
-    return result;
+  let root;
+  if (potentialRoots.length > 0) {
+      root = potentialRoots[0];
+  } else {
+      // Fallback: If root is missing from local fetch, assume oldest known document is the steward
+      // for the purpose of identifying ownership of the current fragment.
+      const sortedDocs = [...parsedDocs].sort((a, b) => a.created_at - b.created_at);
+      root = sortedDocs[0];
+      result.warnings.push(`No root document found for ${targetD} (all known documents supersede something). Falling back to oldest known document ${root.id} by ${root.pubkey}.`);
   }
-
-  const root = potentialRoots[0];
   
   // Track stewardship changes via succession NSRs.
   // Succession NSRs must be signed by the current steward to validly transfer authority.
@@ -225,8 +231,6 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
   for (const nsr of successionNsrs) {
       if (nsr.pubkey === tempSteward) {
           if (nsr.authoritative) {
-               // Attempt to find the event referenced by 'authoritative' to identify the new steward's pubkey.
-               // Matches against any provided valid doc or NSR.
                const target = parsedDocs.find(d => d.id === nsr.authoritative) || parsedNsrs.find(n => n.id === nsr.authoritative);
                if (target) {
                    tempSteward = target.pubkey;
@@ -235,6 +239,7 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
           }
       }
   }
+  result.currentSteward = tempSteward;
 
   // 3. Candidate documents
   // Only documents published by an authorised steward are candidates for authority.

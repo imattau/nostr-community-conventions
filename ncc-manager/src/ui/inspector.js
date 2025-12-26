@@ -181,6 +181,15 @@ function renderActions(container, item, isPublished, isEditMode) {
             publishBtn.dataset.id = item.id;
             container.appendChild(publishBtn);
 
+            const announceWrap = document.createElement("label");
+            announceWrap.className = "p-checkbox-label";
+            announceWrap.style.marginTop = "4px";
+            announceWrap.innerHTML = `
+                <input type="checkbox" id="p-announce-check" />
+                <span>Post Announcement</span>
+            `;
+            container.appendChild(announceWrap);
+
             // DELETE or WITHDRAW logic for draft
             if (!item.event_id) {
                 const deleteBtn = document.createElement("button");

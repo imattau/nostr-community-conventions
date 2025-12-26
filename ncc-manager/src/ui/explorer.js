@@ -340,11 +340,20 @@ function renderExplorerItem(entry, idx, inheritedStatus, currentItemId, state, v
     let extraBadge = html``; // Initialize as empty Lit TemplateResult
     if (validation && item.kind === KINDS.ncc) {
         const itemId = item.event_id || item.id;
-        if (itemId === validation.authoritativeDocId) {
-             extraBadge = html`<span class="p-badge-mini" style="background:var(--accent);color:var(--bg);margin-left:4px" title="Authoritative Revision">AUTH</span>`;
-        } else if (validation.forkedBranches?.includes(itemId)) {
-             extraBadge = html`<span class="p-badge-mini" style="background:var(--warning);color:var(--bg);margin-left:4px" title="Forked / Non-Authoritative Tip">FORK</span>`;
+        const isSteward = state.signerPubkey && validation.currentSteward === state.signerPubkey;
+        
+        const badges = [];
+        if (isSteward) {
+            badges.push(html`<span class="p-badge-mini" style="background:var(--success);color:var(--bg);margin-left:4px" title="You are the current Steward">OWN</span>`);
         }
+        
+        if (itemId === validation.authoritativeDocId) {
+            badges.push(html`<span class="p-badge-mini" style="background:var(--accent);color:var(--bg);margin-left:4px" title="Authoritative Revision">AUTH</span>`);
+        } else if (validation.forkedBranches?.includes(itemId)) {
+            badges.push(html`<span class="p-badge-mini" style="background:var(--warning);color:var(--bg);margin-left:4px" title="Forked / Non-Authoritative Tip">FORK</span>`);
+        }
+        
+        extraBadge = html`${badges}`;
     }
 
     return html`

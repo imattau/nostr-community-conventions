@@ -30,6 +30,7 @@ import {
   buildDraftIdentifier,
   isOnline,
   showToast,
+  waitForNostr,
   incrementVersion,
   suggestNextNccNumber
 } from "./utils.js";
@@ -338,8 +339,18 @@ async function promptSignerConnection(overrideMode) {
   const mode = overrideMode || state.signerMode;
 
   if (mode === "nip07") {
-    if (!window.nostr) {
-      showToast("Install a NIP-07 signer to sign in.", "error");
+    const available = await waitForNostr();
+    if (!available) {
+      const isInsecureIP = window.location.protocol === 'http:' && 
+                           window.location.hostname !== 'localhost' && 
+                           window.location.hostname !== '127.0.0.1' &&
+                           /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(window.location.hostname);
+      
+      if (isInsecureIP) {
+          showToast("Signer blocked on insecure IP. Use localhost or HTTPS.", "error");
+      } else {
+          showToast("Install a NIP-07 signer to sign in.", "error");
+      }
       return;
     }
     try {
@@ -389,10 +400,16 @@ async function refreshSignerProfile() {
 
 async function updateSignerStatus() {
   const state = stateManager.getState();
+  const wasSignedIn = !!state.signerPubkey;
   try {
     const signer = await getSigner(state.signerMode);
     stateManager.updateState({ signerPubkey: signer.pubkey });
     await refreshSignerProfile();
+    
+    if (!wasSignedIn && signer.pubkey) {
+        const name = stateManager.getState().signerProfile?.name || shortenKey(signer.pubkey);
+        showToast(`Signed in as ${name}`, "success");
+    }
   } catch (_error) { // Used _error
     stateManager.updateState({ signerPubkey: null, signerProfile: null });
   }
@@ -493,9 +510,14 @@ function buildRevisionSupersedes(tags, eventId) {
   return [];
 }
 
-function createRevisionDraft(item, localDrafts) {
-  const eventId = item.event_id || item.id;
+function createRevisionDraft(item) {
   const state = stateManager.getState();
+  if (!state.signerPubkey) {
+    showToast("You must be signed in to create a revision.", "error");
+    return null;
+  }
+
+  const eventId = item.event_id || item.id;
   
   // Try to get the raw event from the central store first
       const rawEventSource = state.eventsById.get(eventId);
@@ -519,8 +541,16 @@ function createRevisionDraft(item, localDrafts) {
       };
     }
   
-    // Fallback to local drafts if not found in relay events
-    const baseDraft = (localDrafts || []).find((d) => d.id === item.id);  if (!baseDraft) return null;
+    // Fallback to local drafts
+    const allLocal = [
+      ...(state.nccLocalDrafts || []),
+      ...(state.nsrLocalDrafts || []),
+      ...(state.endorsementLocalDrafts || []),
+      ...(state.supportingLocalDrafts || [])
+    ];
+    const baseDraft = allLocal.find((d) => d.id === item.id);
+    if (!baseDraft) return null;
+
   return {
     ...baseDraft,
     id: crypto.randomUUID(),
@@ -573,13 +603,21 @@ async function persistRelayEvents(events) {
   if (!events?.length) return;
   const state = stateManager.getState();
   const tasks = [];
-  const updatedEventsById = new Map(state.eventsById); // Create a mutable copy
+  const updatedEventsById = new Map(state.eventsById);
+  const updatedNccDocs = [...(state.nccDocs || [])];
+  let docsChanged = false;
 
   for (const event of events) {
     if (!event?.id) continue;
     
     // Always store the full event in eventsById
     updatedEventsById.set(event.id, event);
+
+    // If it's an NCC document, ensure it's in the nccDocs list for validation
+    if (isNccDocument(event) && !updatedNccDocs.includes(event.id)) {
+        updatedNccDocs.push(event.id);
+        docsChanged = true;
+    }
 
     // Only add to persistedRelayEvents for tracking if it's new
     if (state.persistedRelayEvents.has(event.id)) continue;
@@ -596,10 +634,17 @@ async function persistRelayEvents(events) {
     draft.id = event.id; // Use event.id as local draft ID for relay events
     tasks.push(saveDraft(draft));
   }
-  if (!tasks.length) return;
   
-  // Update the central eventsById store
-  stateManager.updateState({ eventsById: updatedEventsById });
+  // Update the central store
+  const stateUpdate = { eventsById: updatedEventsById };
+  if (docsChanged) {
+      stateUpdate.nccDocs = updatedNccDocs;
+  }
+  stateManager.updateState(stateUpdate);
+
+  if (tasks.length) {
+      await Promise.allSettled(tasks);
+  }
 }
 
 async function refreshEndorsementHelpers(forceRefresh = false) {
@@ -737,7 +782,7 @@ async function withdrawDraft(id) {
   }
 }
 
-async function publishDraft(draft, kind) {
+async function publishDraft(draft, kind, shouldAnnounce = false) {
   const state = stateManager.getState();
   try {
     const validationError = validateDraftForPublish(draft);
@@ -761,6 +806,10 @@ async function publishDraft(draft, kind) {
       // raw_event and raw_tags are no longer stored directly in the draft object
       // as the full event is available via state.eventsById.
     };
+    
+    // Add newly published event to central stores so validation can see it immediately
+    await persistRelayEvents([event]);
+    
     await saveDraft(updated);
     await updateAllDrafts();
     refreshUI();
@@ -768,6 +817,10 @@ async function publishDraft(draft, kind) {
     showToast(
       `Published to ${result.accepted}/${result.total} relays.`
     );
+
+    if (shouldAnnounce) {
+        eventBus.emit('open-announcement-modal', { item: updated, eventId: event.id });
+    }
 
     // --- NSR AUTOMATION ---
     if (kind === "ncc" || draft.kind === KINDS.ncc) {
@@ -848,11 +901,10 @@ function setupEventListeners() {
     eventBus.on('delete-item', handlePowerDelete);
     eventBus.on('delete-item-silent', handlePowerDeleteSilent);
     eventBus.on('withdraw-item', withdrawDraft);
-    eventBus.on('publish-item', ({ item, kind }) => publishDraft(item, kind));
+    eventBus.on('publish-item', ({ item, kind, shouldAnnounce }) => publishDraft(item, kind, shouldAnnounce));
     
     eventBus.on('create-revision-draft', (item) => {
-        const state = stateManager.getState();
-        const newDraft = createRevisionDraft(item, state.nccLocalDrafts);
+        const newDraft = createRevisionDraft(item);
         if (newDraft) {
             handlePowerSave(newDraft.id, newDraft.content, newDraft)
                 .then(savedDraft => {
@@ -867,6 +919,26 @@ function setupEventListeners() {
     eventBus.on('export-all', handleExportAllDrafts);
     eventBus.on('clear-cache', () => localStorage.clear());
     eventBus.on('set-config', ({ key, value }) => setConfig(key, value));
+    
+    eventBus.on('post-announcement', async ({ content }) => {
+        const state = stateManager.getState();
+        try {
+            const relays = await getRelays(getConfig);
+            const signer = await getSigner(state.signerMode);
+            const template = {
+                kind: 1,
+                created_at: nowSeconds(),
+                tags: [["t", "ncc"]],
+                content: content
+            };
+            const event = await signer.signEvent(template);
+            const result = await publishEvent(relays, event);
+            showToast(`Announcement posted to ${result.accepted}/${result.total} relays.`);
+        } catch (err) {
+            console.error("Announcement failed:", err);
+            showToast(`Announcement failed: ${err.message}`, "error");
+        }
+    });
 }
 
 async function init() {
