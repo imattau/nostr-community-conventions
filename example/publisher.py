@@ -49,7 +49,7 @@ def get_auto_onion_address(control_port=9051, service_port=8080):
 
 
 async def run(provided_keys=None, manual_ip=None, relay=None,
-              relay_list=None, d_tag="addr"):
+              relay_list=None, d_tag="addr", auto_onion=False):
     # Setup argparse if not called from a test
     if provided_keys is None:
         parser = argparse.ArgumentParser(description="NCC-05 Publisher PoC")
@@ -73,13 +73,16 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         args = parser.parse_args()
         id_tag = args.identifier
         recipient_pk = args.recipient
+        auto_onion_flag = args.auto_onion
     else:
         args = argparse.Namespace(nsec=False, live=False, ip=manual_ip,
-                                  onion=None, auto_onion=False, relay=relay,
+                                  onion=None, auto_onion=auto_onion,
+                                  relay=relay,
                                   relay_list=relay_list,
                                   proxy=None, recipient=None)
         id_tag = d_tag
         recipient_pk = None
+        auto_onion_flag = auto_onion
 
     # 1. Setup Keys
     if args.nsec:
@@ -106,7 +109,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         print(f"Adding Onion endpoint: {args.onion}")
 
     # Auto Onion
-    if args.auto_onion:
+    if auto_onion_flag:
         print("Attempting to create Tor Hidden Service...")
         onion_addr = get_auto_onion_address()
         if onion_addr:

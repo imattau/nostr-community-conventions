@@ -1,4 +1,4 @@
-import { NCC05Publisher, NCC05Resolver, NCC05Payload } from './index.js';
+import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group } from './index.js';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
 
 async function test() {
@@ -97,13 +97,23 @@ async function test() {
     console.log('User A publishing for User B...');
     await publisher.publish(relays, skA, payloadFriend, 'friend-test', pkB);
 
-    // User B resolves User A's record
-    console.log('User B resolving User A...');
-    const friendResult = await resolver.resolve(pkA, skB, 'friend-test');
-    if (friendResult && friendResult.endpoints[0].uri === 'friend:7777') {
-        console.log('Friend-to-Friend resolution successful.');
+    // Test Group Resolution Utility
+    console.log('Testing NCC05Group utility...');
+    const groupIdentity = NCC05Group.createGroupIdentity();
+    const payloadGroup: NCC05Payload = {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', uri: 'group-service:8888', priority: 1, family: 'ipv4' }]
+    };
+
+    console.log('Publishing as Group...');
+    await publisher.publish(relays, groupIdentity.sk, payloadGroup, 'group-test');
+
+    console.log('Resolving as Group Member...');
+    const groupResult = await NCC05Group.resolveAsGroup(resolver, groupIdentity.pk, groupIdentity.sk, 'group-test');
+    if (groupResult && groupResult.endpoints[0].uri === 'group-service:8888') {
+        console.log('NCC05Group resolution successful.');
     } else {
-        console.error('FAILED: Friend-to-Friend resolution.');
+        console.error('FAILED: NCC05Group resolution.');
         process.exit(1);
     }
 

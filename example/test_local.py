@@ -77,8 +77,29 @@ class TestNCC05Local(unittest.TestCase):
                             for ep in payload['endpoints']))
             print("[Local Gossip] Success!")
 
-        asyncio.run(run_test())
+    def test_auto_onion_mock(self):
+        """Test the --auto-onion logic by mocking the Tor controller."""
+        from unittest.mock import patch, MagicMock
+        async def run_test():
+            keys = Keys.generate()
+            unique_d = f"local-onion-{int(time.time())}"
+            
+            # Mock the Tor controller response
+            mock_response = MagicMock()
+            mock_response.service_id = "mockedaddress"
+            
+            with patch("publisher.get_auto_onion_address", return_value="mockedaddress.onion"):
+                print("\n[Local Auto-Onion] Publishing with mock Tor...")
+                await publish_run(provided_keys=keys, relay=self.mock_relay, d_tag=unique_d, auto_onion=True)
+                
+                print("[Local Auto-Onion] Resolving...")
+                payload = await resolve_run(provided_keys=keys, target_pk=keys.public_key().to_hex(), bootstrap_relay=self.mock_relay, identifier=unique_d)
+                
+                self.assertIsNotNone(payload)
+                self.assertTrue(any("mockedaddress.onion" in ep['uri'] for ep in payload['endpoints']))
+                print("[Local Auto-Onion] Success! Corrected published onion via mock.")
 
+        asyncio.run(run_test())
 
 if __name__ == "__main__":
     unittest.main()
