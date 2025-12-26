@@ -1,4 +1,5 @@
 import { finalizeEvent, verifyEvent, getPublicKey } from 'nostr-tools/pure';
+import { hexToBytes } from 'nostr-tools/utils';
 
 /**
  * NCC-02 Nostr Event Kinds
@@ -14,15 +15,19 @@ export const KINDS = {
  */
 export class NCC02Builder {
   /**
-   * @param {Uint8Array} privateKey - The private key to sign events with.
+   * @param {string | Uint8Array} privateKey - The private key to sign events with.
    */
   constructor(privateKey) {
-    this.sk = privateKey;
-    this.pk = getPublicKey(privateKey);
+    this.sk = typeof privateKey === 'string' ? hexToBytes(privateKey) : privateKey;
+    this.pk = getPublicKey(this.sk);
   }
 
   /**
    * Creates a signed Service Record (Kind 30059).
+   * @param {string} serviceId
+   * @param {string} endpoint
+   * @param {string} fingerprint
+   * @param {number} [expiryDays=14]
    */
   createServiceRecord(serviceId, endpoint, fingerprint, expiryDays = 14) {
     const expiry = Math.floor(Date.now() / 1000) + (expiryDays * 24 * 60 * 60);
@@ -43,6 +48,11 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Certificate Attestation (Kind 30060).
+   * @param {string} subjectPubkey
+   * @param {string} serviceId
+   * @param {string} serviceEventId
+   * @param {string} [level='verified']
+   * @param {number} [validDays=30]
    */
   createAttestation(subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30) {
     const now = Math.floor(Date.now() / 1000);
@@ -67,6 +77,8 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Revocation (Kind 30061).
+   * @param {string} attestationId
+   * @param {string} [reason='']
    */
   createRevocation(attestationId, reason = '') {
     const tags = [['e', attestationId]];
@@ -85,6 +97,7 @@ export class NCC02Builder {
 
 /**
  * Verifies a Nostr event signature.
+ * @param {any} event
  */
 export function verifyNCC02Event(event) {
   return verifyEvent(event);

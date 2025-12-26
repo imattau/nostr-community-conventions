@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "test": "node tests/test.js",
-    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.js && esbuild src/index.js --bundle --platform=node --format=esm --outfile=dist/index.mjs"
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.js && esbuild src/index.js --bundle --platform=node --format=esm --outfile=dist/index.mjs",
+    "lint": "eslint src/**/*.js",
+    "type-check": "tsc -p jsconfig.json"
   },
   "keywords": [
     "nostr",
@@ -22,7 +24,11 @@
     "nostr-tools": "^2.10.4"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.21.0",
+    "typescript": "^5.8.2"
   },
   "files": [
     "dist",

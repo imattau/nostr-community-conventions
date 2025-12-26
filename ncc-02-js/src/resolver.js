@@ -5,6 +5,10 @@ import { KINDS } from './models.js';
  * Custom error class for NCC-02 specific failures.
  */
 export class NCC02Error extends Error {
+  /**
+   * @param {string} code 
+   * @param {string} message 
+   */
   constructor(code, message) {
     super(message);
     this.code = code;
@@ -12,12 +16,22 @@ export class NCC02Error extends Error {
 }
 
 /**
+ * @typedef {Object} ResolvedService
+ * @property {string} endpoint
+ * @property {string} fingerprint
+ * @property {number} expiry
+ * @property {any[]} attestations
+ * @property {string} eventId
+ * @property {string} pubkey
+ */
+
+/**
  * Resolver for NCC-02 Service Records.
  * Implements the client-side resolution and trust verification algorithm.
  */
 export class NCC02Resolver {
   /**
-   * @param {Object} relay - A relay client providing a `query` method.
+   * @param {any} relay - A relay client providing a `query` method.
    * @param {string[]} [trustedCAPubkeys=[]] - List of CA pubkeys trusted by this client.
    */
   constructor(relay, trustedCAPubkeys = []) {
@@ -35,7 +49,7 @@ export class NCC02Resolver {
    * @param {string} [options.minLevel=null] - Minimum trust level ('self', 'verified', 'hardened').
    * @param {string} [options.standard='nostr-service-trust-v0.1'] - Expected trust standard.
    * @throws {NCC02Error} If verification or policy checks fail.
-   * @returns {Promise<Object>} The verified service details.
+   * @returns {Promise<ResolvedService>} The verified service details.
    */
   async resolve(pubkey, serviceId, options = {}) {
     const { 
@@ -54,7 +68,7 @@ export class NCC02Resolver {
       throw new NCC02Error('NOT_FOUND', `No service record found for ${serviceId}`);
     }
 
-    const serviceEvent = serviceEvents.sort((a, b) => b.created_at - a.created_at)[0];
+    const serviceEvent = serviceEvents.sort((/** @type {any} */ a, /** @type {any} */ b) => b.created_at - a.created_at)[0];
 
     if (!verifyEvent(serviceEvent)) {
       throw new NCC02Error('INVALID_SIGNATURE', 'Service record signature verification failed');
@@ -113,11 +127,23 @@ export class NCC02Resolver {
     };
   }
 
+  /**
+   * @param {string | undefined} actual 
+   * @param {string} required 
+   */
   _isLevelSufficient(actual, required) {
+    /** @type {Record<string, number>} */
     const levels = { 'self': 0, 'verified': 1, 'hardened': 2 };
-    return (levels[actual] ?? -1) >= (levels[required] ?? 0);
+    const actualVal = actual ? (levels[actual] ?? -1) : -1;
+    const requiredVal = levels[required] ?? 0;
+    return actualVal >= requiredVal;
   }
 
+  /**
+   * @param {any} att 
+   * @param {any} tags 
+   * @param {any[]} revocations 
+   */
   _isAttestationValid(att, tags, revocations) {
     if (!verifyEvent(att)) return false;
 
@@ -135,7 +161,7 @@ export class NCC02Resolver {
    * Verifies that the actual fingerprint found during transport-level connection
    * matches the one declared in the signed service record.
    * 
-   * @param {Object} resolved - The object returned by resolve().
+   * @param {ResolvedService} resolved - The object returned by resolve().
    * @param {string} actualFingerprint - The fingerprint obtained from the service.
    * @returns {boolean}
    */
