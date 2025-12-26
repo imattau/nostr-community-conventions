@@ -1,0 +1,21 @@
+{
+  "name": "ncc-06-example",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm --prefix ncc06-relay test",
+    "relay": "npm --prefix ncc06-relay run relay",
+    "sidecar": "npm --prefix ncc06-relay run sidecar:publish",
+    "sidecar:publish": "npm --prefix ncc06-relay run sidecar:publish",
+    "client": "npm --prefix ncc06-relay run client:resolve-connect",
+    "start": "npm-run-all --parallel relay sidecar"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}

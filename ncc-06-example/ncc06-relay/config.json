@@ -1,0 +1,7 @@
+{
+  "relayPort": 7000,
+  "relayUrl": "ws://127.0.0.1:7000",
+  "relayHost": "127.0.0.1",
+  "relayWssUrl": "wss://127.0.0.1:7001",
+  "logLevel": "info"
+}
