@@ -94,6 +94,8 @@ A Service Record is a parameterised replaceable event published by the service o
 
 Bind a pubkey to a reachable endpoint and its transport-level key.
 
+**Kind: 30059**
+
 #### Required tags
 
 - `d` – service identifier (for example `api`, `media`, `wallet`)  
@@ -116,6 +118,8 @@ A Certificate Attestation is a signed statement by a certifier pubkey asserting 
 #### Purpose
 
 Provide assurance beyond self-assertion.
+
+**Kind: 30060**
 
 #### Required tags
 
@@ -140,6 +144,8 @@ Clients decide:
 ### 3. Revocation
 
 A Revocation is a signed event published by a certifier revoking a previously issued Certificate Attestation.
+
+**Kind: 30061**
 
 #### Required tags
 
