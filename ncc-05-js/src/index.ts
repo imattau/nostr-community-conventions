@@ -5,7 +5,8 @@ import {
     finalizeEvent, 
     verifyEvent, 
     Event, 
-    getPublicKey
+    getPublicKey,
+    generateSecretKey
 } from 'nostr-tools';
 
 export interface NCC05Endpoint {
@@ -28,6 +29,38 @@ export interface ResolverOptions {
     bootstrapRelays?: string[];
     timeout?: number;
     websocketImplementation?: any; // To support Tor/SOCKS5 proxies in Node.js
+}
+
+/**
+ * Utility for managing shared group access to NCC-05 records.
+ */
+export class NCC05Group {
+    /**
+     * Generate a new shared identity for a group.
+     * The nsec should be shared with all authorized members.
+     */
+    static createGroupIdentity() {
+        const sk = generateSecretKey();
+        return {
+            nsec: nip19.nsecEncode(sk),
+            sk: sk,
+            pk: getPublicKey(sk)
+        };
+    }
+
+    /**
+     * Resolve a record that was published using a group's shared identity.
+     */
+    static async resolveAsGroup(
+        resolver: NCC05Resolver,
+        groupPubkey: string,
+        groupSecretKey: Uint8Array,
+        identifier: string = 'addr'
+    ): Promise<NCC05Payload | null> {
+        // In group mode, we use the group's SK to decrypt a record 
+        // that was self-encrypted by the group's PK.
+        return resolver.resolve(groupPubkey, groupSecretKey, identifier);
+    }
 }
 
 export class NCC05Resolver {

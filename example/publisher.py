@@ -33,6 +33,21 @@ def get_public_ip_external():
         return None
 
 
+def get_auto_onion_address(control_port=9051, service_port=8080):
+    """Automatically create an ephemeral hidden service and get address."""
+    try:
+        from stem.control import Controller
+        with Controller.from_port(port=control_port) as controller:
+            controller.authenticate()  # Assumes cookie or no password
+            response = controller.create_ephemeral_hidden_service(
+                {service_port: 8080}, await_publication=True
+            )
+            return response.service_id + ".onion"
+    except Exception as e:
+        print(f"Tor Automation Error: {e}")
+        return None
+
+
 async def run(provided_keys=None, manual_ip=None, relay=None,
               relay_list=None, d_tag="addr"):
     # Setup argparse if not called from a test
@@ -44,6 +59,8 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
                             help="Use real IP and real relays")
         parser.add_argument("--ip", help="Manually specify the public IP")
         parser.add_argument("--onion", help="Add a Tor .onion address")
+        parser.add_argument("--auto-onion", action="store_true",
+                            help="Automatically create a Tor hidden service")
         parser.add_argument("--relay", help="Set a specific relay")
         parser.add_argument("--relay-list", help="Comma-separated NIP-65 "
                             "relays")
@@ -58,27 +75,13 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         recipient_pk = args.recipient
     else:
         args = argparse.Namespace(nsec=False, live=False, ip=manual_ip,
-                                  onion=None, relay=relay,
+                                  onion=None, auto_onion=False, relay=relay,
                                   relay_list=relay_list,
                                   proxy=None, recipient=None)
         id_tag = d_tag
         recipient_pk = None
 
     # 1. Setup Keys
-@@ -126,10 +130,14 @@
-     content = json.dumps(payload)
-
-     # 4. Encrypt (NIP-44)
-+    from nostr_sdk import PublicKey as NSPublicKey
-+    encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
-+        else keys.public_key()
-+
-     encrypted_content = nip44_encrypt(
--        keys.secret_key(), keys.public_key(),
-+        keys.secret_key(), encryption_target,
-         json.dumps(payload), Nip44Version.V2
-     )
-
     if args.nsec:
         nsec_input = getpass.getpass("Enter your nsec: ")
         keys = Keys.parse(nsec_input)
@@ -91,6 +94,8 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
 
     # 2. Determine IP/Onion
     endpoints = []
+    
+    # Manual Onion
     if args.onion:
         endpoints.append({
             "type": "tcp",
@@ -99,6 +104,19 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             "family": "onion"
         })
         print(f"Adding Onion endpoint: {args.onion}")
+
+    # Auto Onion
+    if args.auto_onion:
+        print("Attempting to create Tor Hidden Service...")
+        onion_addr = get_auto_onion_address()
+        if onion_addr:
+            endpoints.append({
+                "type": "tcp",
+                "uri": f"{onion_addr}:8080",
+                "priority": 1, # Prefer auto-onion
+                "family": "onion"
+            })
+            print(f"Created ephemeral Onion: {onion_addr}")
 
     if args.ip:
         ip = args.ip
@@ -151,12 +169,19 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         "ttl": 600,
         "updated_at": int(time.time()),
         "endpoints": endpoints,
-        "notes": "NCC-05 Tor PoC"
+        "notes": "NCC-05 Tor Auto PoC"
     }
+    
+    # Encrypt (NIP-44)
+    from nostr_sdk import PublicKey as NSPublicKey
+    encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
+        else keys.public_key()
+
     encrypted_content = nip44_encrypt(
-        keys.secret_key(), keys.public_key(),
+        keys.secret_key(), encryption_target,
         json.dumps(payload), Nip44Version.V2
     )
+    
     event = (EventBuilder(Kind(30058), encrypted_content)
              .tags([Tag.parse(["d", id_tag])])
              .sign_with_keys(keys))
