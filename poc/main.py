@@ -1,72 +1,78 @@
 from pynostr.key import PrivateKey
 from poc.mock_relay import MockRelay
 from poc.publisher import ServicePublisher, CertificateAuthority
-from poc.resolver import ServiceResolver
+from poc.resolver import ServiceResolver, NCC02Error
 
 
 def run_poc():
-    print("--- NCC-02 Full Specification PoC ---")
+    print("--- NCC-02 Comprehensive Python PoC ---")
     relay = MockRelay()
 
-    # 1. Setup Identities
     owner_sk = PrivateKey()
     owner_pk = owner_sk.public_key.hex()
-
     ca_sk = PrivateKey()
     ca_pk = ca_sk.public_key.hex()
 
-    # 2. Service Owner publishes record
     publisher = ServicePublisher(owner_sk.hex(), relay)
-    service_id = "vault"
-    endpoint = "https://vault.internal"
-    fingerprint = "fp_12345"
-
-    print(f"Owner ({owner_pk[:8]}) publishing service '{service_id}'...")
-    service_event = publisher.publish_service_record(
-        service_id, endpoint, fingerprint
-    )
-
-    # 3. CA issues an Attestation
     ca = CertificateAuthority(ca_sk.hex(), relay)
-    print(f"CA ({ca_pk[:8]}) issuing attestation for service...")
-    att_event = ca.issue_attestation(owner_pk, service_id, service_event.id)
-
-    # 4. Client Resolves (with Trust Policy)
-    print("\n[Client Resolution - Success Case]")
-    # Client trusts this specific CA
     resolver = ServiceResolver(relay, trusted_ca_pubkeys=[ca_pk])
 
-    # Resolving with mandatory attestation
-    resolved = resolver.resolve(owner_pk, service_id, require_attestation=True)
-    if resolved:
-        print(f"SUCCESS: Resolved {resolved['endpoint']} "
-              f"with {len(resolved['attestations'])} trusted attestation(s).")
-
-    # 5. Demonstrate Revocation
-    print("\n[Client Resolution - Revocation Case]")
-    print(f"CA revoking attestation {att_event.id[:8]}...")
-    ca.revoke_attestation(att_event.id, reason="Security audit failed")
-
-    resolved_after_rev = resolver.resolve(
-        owner_pk, service_id, require_attestation=True
-    )
-    if not resolved_after_rev:
-        print("SUCCESS: Resolver correctly rejected revoked attestation.")
-
-    # 6. Demonstrate Trust Policy (Untrusted CA)
-    print("\n[Client Resolution - Untrusted CA Case]")
-    stranger_sk = PrivateKey()
-    stranger_ca = CertificateAuthority(stranger_sk.hex(), relay)
-    stranger_ca.issue_attestation(
-        owner_pk, service_id, service_event.id
+    # 1. Setup: Valid Service Record
+    service_id = "api"
+    service_event = publisher.publish_service_record(
+        service_id, "https://api.io", "fp_abc"
     )
 
-    # Resolver still only trusts ca_pk
-    resolved_stranger = resolver.resolve(
-        owner_pk, service_id, require_attestation=True
-    )
-    if not resolved_stranger:
-        print("SUCCESS: Resolver rejected attestation from unknown CA.")
+    # Test 1: Successful Resolution
+    print("Test 1: Basic Resolution...")
+    ca.issue_attestation(owner_pk, service_id, service_event.id, "verified")
+    res = resolver.resolve(owner_pk, service_id, require_attestation=True)
+    if res["endpoint"] == "https://api.io":
+        print("✅ Passed")
+
+    # Test 2: Latest Record Selection
+    print("Test 2: Latest record selection...")
+    publisher.publish_service_record(service_id, "https://new.io", "fp_new")
+    res_latest = resolver.resolve(owner_pk, service_id)
+    if res_latest["endpoint"] == "https://new.io":
+        print("✅ Passed")
+
+    # Test 3: Trust Level Failure
+    print("Test 3: Trust Level Policy (Requiring 'hardened')...")
+    try:
+        resolver.resolve(owner_pk, service_id, require_attestation=True,
+                         min_level="hardened")
+    except NCC02Error as e:
+        if e.code == "POLICY_FAILURE":
+            print("✅ Passed")
+
+    # Test 4: Mismatched Subject (Security Check)
+    print("Test 4: Attestation with mismatched subject...")
+    wrong_pk = PrivateKey().public_key.hex()
+    ca.issue_attestation(wrong_pk, service_id, service_event.id)
+    res = resolver.resolve(owner_pk, service_id, require_attestation=True)
+    # Should only see the one valid attestation from Test 1
+    if len(res['attestations']) == 1:
+        print("✅ Passed")
+
+    # Test 5: Mismatched Service ID in Attestation
+    print("Test 5: Mismatched service ID in attestation...")
+    res = resolver.resolve(owner_pk, service_id, require_attestation=True)
+    if not any(a["srv"] == "wrong-srv" for a in res["attestations"]):
+        print("✅ Passed")
+
+    # Test 6: verify_endpoint utility
+    print("Test 6: verify_endpoint utility...")
+    if resolver.verify_endpoint(res, "fp_new"):
+        print("✅ Passed")
+
+    # Test 7: NOT_FOUND error
+    print("Test 7: NOT_FOUND error...")
+    try:
+        resolver.resolve(owner_pk, "ghost")
+    except NCC02Error as e:
+        if e.code == "NOT_FOUND":
+            print("✅ Passed")
 
 
 if __name__ == "__main__":

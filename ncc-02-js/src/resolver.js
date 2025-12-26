@@ -8,10 +8,12 @@ export class NCC02Error extends Error {
   /**
    * @param {string} code 
    * @param {string} message 
+   * @param {any} [cause]
    */
-  constructor(code, message) {
+  constructor(code, message, cause) {
     super(message);
     this.code = code;
+    if (cause) this.cause = cause;
   }
 }
 
@@ -58,17 +60,26 @@ export class NCC02Resolver {
       standard = 'nostr-service-trust-v0.1'
     } = options;
 
-    const serviceEvents = await this.relay.query({
-      kinds: [KINDS.SERVICE_RECORD],
-      authors: [pubkey],
-      '#d': [serviceId]
-    });
+    let serviceEvents;
+    try {
+      serviceEvents = await this.relay.query({
+        kinds: [KINDS.SERVICE_RECORD],
+        authors: [pubkey],
+        '#d': [serviceId]
+      });
+    } catch (err) {
+      throw new NCC02Error('RELAY_ERROR', `Failed to query relay for ${serviceId}`, err);
+    }
 
-    if (!serviceEvents.length) {
+    if (!serviceEvents || !serviceEvents.length) {
       throw new NCC02Error('NOT_FOUND', `No service record found for ${serviceId}`);
     }
 
-    const serviceEvent = serviceEvents.sort((/** @type {any} */ a, /** @type {any} */ b) => b.created_at - a.created_at)[0];
+    // Stable tie-breaking: Sort by created_at DESC, then ID ASC
+    const serviceEvent = serviceEvents.sort((/** @type {any} */ a, /** @type {any} */ b) => {
+      if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+      return a.id.localeCompare(b.id);
+    })[0];
 
     if (!verifyEvent(serviceEvent)) {
       throw new NCC02Error('INVALID_SIGNATURE', 'Service record signature verification failed');
@@ -77,18 +88,29 @@ export class NCC02Resolver {
     const serviceTags = Object.fromEntries(serviceEvent.tags);
     const now = Math.floor(Date.now() / 1000);
 
-    if (serviceTags.exp && parseInt(serviceTags.exp) < now) {
+    // Security Fix: exp is REQUIRED by NCC-02 spec
+    if (!serviceTags.u || !serviceTags.k || !serviceTags.exp) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record is missing required tags (u, k, or exp)');
+    }
+
+    const exp = parseInt(serviceTags.exp);
+    if (isNaN(exp)) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record expiry tag is not a valid number');
+    }
+    if (exp < now) {
       throw new NCC02Error('EXPIRED', 'Service record has expired');
     }
 
-    const attestations = await this.relay.query({
-      kinds: [KINDS.ATTESTATION],
-      '#e': [serviceEvent.id]
-    });
-
-    const revocations = await this.relay.query({
-      kinds: [KINDS.REVOCATION]
-    });
+    let attestations;
+    let revocations;
+    try {
+      [attestations, revocations] = await Promise.all([
+        this.relay.query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
+        this.relay.query({ kinds: [KINDS.REVOCATION] })
+      ]);
+    } catch (err) {
+      throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
+    }
 
     const validAttestations = [];
     for (const att of attestations) {
@@ -120,7 +142,7 @@ export class NCC02Resolver {
     return {
       endpoint: serviceTags.u,
       fingerprint: serviceTags.k,
-      expiry: parseInt(serviceTags.exp),
+      expiry: exp,
       attestations: validAttestations,
       eventId: serviceEvent.id,
       pubkey: serviceEvent.pubkey
@@ -145,16 +167,35 @@ export class NCC02Resolver {
    * @param {any[]} revocations 
    */
   _isAttestationValid(att, tags, revocations) {
+    // 1. Verify Attestation signature
     if (!verifyEvent(att)) return false;
 
     const now = Math.floor(Date.now() / 1000);
-    if (tags.nbf && parseInt(tags.nbf) > now) return false;
-    if (tags.exp && parseInt(tags.exp) < now) return false;
+    
+    // 2. NBF validation
+    if (tags.nbf) {
+      const nbf = parseInt(tags.nbf);
+      if (isNaN(nbf) || nbf > now) return false;
+    }
 
-    return !revocations.some(rev => {
+    // 3. EXP validation
+    if (tags.exp) {
+      const exp = parseInt(tags.exp);
+      if (isNaN(exp) || exp < now) return false;
+    }
+
+    // 4. Revocation validation
+    // A revocation is valid only if it matches the attestation ID, is from the same CA, AND has a valid signature.
+    for (const rev of revocations) {
       const revTags = Object.fromEntries(rev.tags);
-      return revTags.e === att.id && rev.pubkey === att.pubkey;
-    });
+      if (revTags.e === att.id && rev.pubkey === att.pubkey) {
+        if (verifyEvent(rev)) {
+          return false; // Valid revocation found
+        }
+      }
+    }
+
+    return true; // No valid revocation found
   }
 
   /**

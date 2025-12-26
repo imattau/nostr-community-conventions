@@ -3,6 +3,12 @@ from typing import Optional, Dict, List
 from .mock_relay import MockRelay
 
 
+class NCC02Error(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 class ServiceResolver:
     def __init__(self, relay: MockRelay, trusted_ca_pubkeys: List[str] = None):
         self.relay = relay
@@ -11,39 +17,53 @@ class ServiceResolver:
     def resolve(self,
                 pubkey: str,
                 service_id: str,
-                require_attestation: bool = False) -> Optional[Dict]:
+                require_attestation: bool = False,
+                min_level: Optional[str] = None,
+                standard: str = "nostr-service-trust-v0.1") -> Dict:
         # 1. Query relay for the current Service Record
         events = self.relay.query(pubkey, 30059, service_id)
         if not events:
-            return None
+            raise NCC02Error("NOT_FOUND", f"No record for {service_id}")
 
         # 2. Verify signature and expiry
         service_event = events[0]
         if not service_event.verify():
-            return None
+            raise NCC02Error("INVALID_SIGNATURE", "Service record invalid")
 
         service_tags = {tag[0]: tag[1] for tag in service_event.tags}
         exp = service_tags.get("exp")
         if exp and int(exp) < int(time.time()):
-            return None
+            raise NCC02Error("EXPIRED", "Service record expired")
 
-        # 3. Fetch Certificate Attestations referencing that record
+        # 3. Fetch and Cross-Validate Attestations
         attestations = self.relay.query(kind=30060)
+        revocations = self.relay.query(kind=30061)
         valid_attestations = []
 
         for att in attestations:
-            att_tags = {tag[0]: tag[1] for tag in att.tags}
-            # 4. Filter attestations by trusted certifier pubkeys and validity
-            if (att_tags.get("e") == service_event.id and
-                    att.pubkey in self.trusted_ca_pubkeys):
+            if att.pubkey in self.trusted_ca_pubkeys:
+                att_tags = {tag[0]: tag[1] for tag in att.tags}
 
-                if self._is_attestation_valid(att, att_tags):
+                # Refinement: Cross-validate subj, srv, and std
+                if att_tags.get("subj") != pubkey:
+                    continue
+                if att_tags.get("srv") != service_id:
+                    continue
+                if standard and att_tags.get("std") != standard:
+                    continue
+
+                # Refinement: Trust Level Filtering
+                if min_level and not self._is_level_sufficient(
+                    att_tags.get("lvl"), min_level
+                ):
+                    continue
+
+                if self._is_attestation_valid(att, att_tags, revocations):
                     valid_attestations.append(att_tags)
 
         # 5. Apply local policy requirements
         if require_attestation and not valid_attestations:
-            print(f"Policy Failure: No trusted attestations for {service_id}")
-            return None
+            raise NCC02Error("POLICY_FAILURE", "No trusted attestations found")
 
         return {
             "endpoint": service_tags.get("u"),
@@ -52,30 +72,26 @@ class ServiceResolver:
             "event_id": service_event.id
         }
 
-    def _is_attestation_valid(self, event, tags) -> bool:
-        now = int(time.time())
+    def _is_level_sufficient(self, actual: Optional[str],
+                             required: str) -> bool:
+        levels = {"self": 0, "verified": 1, "hardened": 2}
+        return levels.get(actual or "", -1) >= levels.get(required, 0)
 
-        # Check signatures
+    def _is_attestation_valid(self, event, tags, revocations) -> bool:
+        now = int(time.time())
         if not event.verify():
             return False
-
-        # Check nbf (not before) and exp (expiry)
         if "nbf" in tags and int(tags["nbf"]) > now:
             return False
         if "exp" in tags and int(tags["exp"]) < now:
             return False
 
-        # Check for Revocations (Kind 30061)
-        revocations = self.relay.query(kind=30061)
         for rev in revocations:
             rev_tags = {tag[0]: tag[1] for tag in rev.tags}
             if rev_tags.get("e") == event.id and rev.pubkey == event.pubkey:
-                print(f"Attestation {event.id[:8]} revoked by CA")
                 return False
-
         return True
 
-    def verify_endpoint(self,
-                        resolved_service: Dict,
+    def verify_endpoint(self, resolved_service: Dict,
                         actual_fingerprint: str) -> bool:
         return resolved_service["fingerprint"] == actual_fingerprint

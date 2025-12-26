@@ -18,6 +18,7 @@ export class NCC02Builder {
    * @param {string | Uint8Array} privateKey - The private key to sign events with.
    */
   constructor(privateKey) {
+    if (!privateKey) throw new Error('Private key is required');
     this.sk = typeof privateKey === 'string' ? hexToBytes(privateKey) : privateKey;
     this.pk = getPublicKey(this.sk);
   }
@@ -30,6 +31,10 @@ export class NCC02Builder {
    * @param {number} [expiryDays=14]
    */
   createServiceRecord(serviceId, endpoint, fingerprint, expiryDays = 14) {
+    if (!serviceId) throw new Error('serviceId (d tag) is required');
+    if (!endpoint) throw new Error('endpoint (u tag) is required');
+    if (!fingerprint) throw new Error('fingerprint (k tag) is required');
+
     const expiry = Math.floor(Date.now() / 1000) + (expiryDays * 24 * 60 * 60);
     const event = {
       kind: KINDS.SERVICE_RECORD,
@@ -55,6 +60,10 @@ export class NCC02Builder {
    * @param {number} [validDays=30]
    */
   createAttestation(subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30) {
+    if (!subjectPubkey) throw new Error('subjectPubkey is required');
+    if (!serviceId) throw new Error('serviceId is required');
+    if (!serviceEventId) throw new Error('serviceEventId (e tag) is required');
+
     const now = Math.floor(Date.now() / 1000);
     const expiry = now + (validDays * 24 * 60 * 60);
     const event = {
@@ -81,6 +90,8 @@ export class NCC02Builder {
    * @param {string} [reason='']
    */
   createRevocation(attestationId, reason = '') {
+    if (!attestationId) throw new Error('attestationId (e tag) is required');
+
     const tags = [['e', attestationId]];
     if (reason) tags.push(['reason', reason]);
     
