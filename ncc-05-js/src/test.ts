@@ -126,6 +126,36 @@ async function test() {
         process.exit(1);
     }
 
+    // Test Group Wrapping (NIP-59 style Multi-Recipient)
+    console.log('Testing Group Wrapping (Multi-Recipient)...');
+    const skAlice = generateSecretKey();
+    const pkAlice = getPublicKey(skAlice);
+    const skBob = generateSecretKey();
+    const pkBob = getPublicKey(skBob);
+    const skCharlie = generateSecretKey();
+    const pkCharlie = getPublicKey(skCharlie);
+
+    const payloadWrap: NCC05Payload = {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', uri: 'multi-recipient:9999', priority: 1, family: 'ipv4' }]
+    };
+
+    console.log('Alice publishing wrapped record for Bob and Charlie...');
+    await publisher.publishWrapped(relays, skAlice, [pkBob, pkCharlie], payloadWrap, 'wrap-test');
+
+    console.log('Bob resolving Alice...');
+    const bobResult = await resolver.resolve(pkAlice, skBob, 'wrap-test');
+    
+    console.log('Charlie resolving Alice...');
+    const charlieResult = await resolver.resolve(pkAlice, skCharlie, 'wrap-test');
+
+    if (bobResult && charlieResult && bobResult.endpoints[0].uri === 'multi-recipient:9999') {
+        console.log('Group Wrapping successful! Both recipients resolved Alice.');
+    } else {
+        console.error('FAILED: Group Wrapping resolution.');
+        process.exit(1);
+    }
+
     publisher.close(relays);
     resolver.close();
     process.exit(0);

@@ -31,29 +31,14 @@ export interface ResolverOptions {
     websocketImplementation?: any;
 }
 
-export class NCC05Group {
-    static createGroupIdentity() {
-        const sk = generateSecretKey();
-        const pk = getPublicKey(sk);
-        return {
-            nsec: nip19.nsecEncode(sk),
-            sk: sk,
-            pk: pk,
-            npub: nip19.npubEncode(pk)
-        };
-    }
-
-    /**
-     * Resolve a record that was published using a group's shared identity.
-     */
-    static async resolveAsGroup(
-        resolver: NCC05Resolver,
-        groupPubkey: string,
-        groupSecretKey: Uint8Array,
-        identifier: string = 'addr'
-    ): Promise<NCC05Payload | null> {
-        return resolver.resolve(groupPubkey, groupSecretKey, identifier);
-    }
+/**
+ * Advanced multi-recipient "wrapping" structure.
+ */
+export interface WrappedContent {
+    /** The actual payload encrypted with a random symmetric key */
+    ciphertext: string;
+    /** Map of recipient pubkey -> wrapped symmetric key */
+    wraps: Record<string, string>;
 }
 
 export class NCC05Resolver {
@@ -120,7 +105,25 @@ export class NCC05Resolver {
 
         try {
             let content = latestEvent.content;
-            if (secretKey) {
+            
+            // 1. Try to detect if it's a "Wrapped" multi-recipient event
+            if (content.includes('"wraps"') && secretKey) {
+                const wrapped = JSON.parse(content) as WrappedContent;
+                const myPk = getPublicKey(secretKey);
+                const myWrap = wrapped.wraps[myPk];
+                
+                if (myWrap) {
+                    // Decrypt the symmetric key using our conversation with the author
+                    const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
+                    const symmetricKeyStr = nip44.decrypt(myWrap, conversationKey);
+                    
+                    // In a real implementation, you'd use the symmetricKeyStr to decrypt 'ciphertext'
+                    // For this PoC, we demonstrate the multi-recipient handshake logic.
+                    // We'll treat 'ciphertext' as the encrypted payload for simplicity.
+                    content = nip44.decrypt(wrapped.ciphertext, symmetricKeyStr);
+                }
+            } else if (secretKey) {
+                // Standard NIP-44 resolution
                 const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                 content = nip44.decrypt(latestEvent.content, conversationKey);
             }
@@ -152,6 +155,47 @@ export class NCC05Publisher {
             // @ts-ignore
             this.pool.websocketImplementation = options.websocketImplementation;
         }
+    }
+
+    /**
+     * Publish for a group of recipients without sharing a private key.
+     */
+    async publishWrapped(
+        relays: string[],
+        secretKey: Uint8Array,
+        recipients: string[],
+        payload: NCC05Payload,
+        identifier: string = 'addr'
+    ): Promise<Event> {
+        // 1. Generate a random symmetric "session" key for this record
+        const sessionKey = generateSecretKey();
+        const sessionKeyHex = Buffer.from(sessionKey).toString('hex');
+        
+        // 2. Encrypt the payload with the session key
+        // Note: Using NIP-44 as a symmetric cipher by encrypting to oneself with the session key
+        const selfConversation = nip44.getConversationKey(sessionKey, getPublicKey(sessionKey));
+        const ciphertext = nip44.encrypt(JSON.stringify(payload), selfConversation);
+
+        // 3. Wrap the session key for each recipient
+        const wraps: Record<string, string> = {};
+        for (const rPk of recipients) {
+            const conversationKey = nip44.getConversationKey(secretKey, rPk);
+            wraps[rPk] = nip44.encrypt(sessionKeyHex, conversationKey);
+        }
+
+        const wrappedContent: WrappedContent = { ciphertext, wraps };
+
+        // 4. Create the event
+        const eventTemplate = {
+            kind: 30058,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['d', identifier]],
+            content: JSON.stringify(wrappedContent),
+        };
+
+        const signedEvent = finalizeEvent(eventTemplate, secretKey);
+        await Promise.all(this.pool.publish(relays, signedEvent));
+        return signedEvent;
     }
 
     async publish(
