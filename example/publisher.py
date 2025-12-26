@@ -7,8 +7,7 @@ import getpass
 import requests
 from nostr_sdk import (
     Keys, EventBuilder, Tag, Kind,
-    NostrSigner, nip44_encrypt, Nip44Version, RelayUrl,
-    get_publicKey, generate_secretKey
+    NostrSigner, nip44_encrypt, Nip44Version, RelayUrl
 )
 
 
@@ -153,12 +152,21 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         builder = builder.opts(ClientOptions().connection(conn))
 
     client = builder.build()
-    relay_url = args.relay or ("wss://relay.damus.io" if args.live
-                               else "ws://localhost:8080")
+    relay_url = args.relay if args.relay else \
+        ("wss://relay.damus.io" if args.live else "ws://localhost:8080")
     await client.add_relay(RelayUrl.parse(relay_url))
     await client.connect()
 
-    # 4. Payload
+    # 4. Optional: NIP-65
+    if args.relay_list:
+        print(f"Publishing relay list: {args.relay_list}")
+        relay_map = {RelayUrl.parse(r.strip()): None
+                     for r in args.relay_list.split(",")}
+        await client.send_event(
+            EventBuilder.relay_list(relay_map).sign_with_keys(keys)
+        )
+
+    # 5. Payload
     payload = {"v": 1, "ttl": 600, "updated_at": int(time.time()),
                "endpoints": endpoints, "notes": "NCC-05 Multi-Recipient PoC"}
     content = json.dumps(payload)
@@ -168,8 +176,9 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
     if wrap_pks:
         print(f"Group Wrapping for {len(wrap_pks)} recipients...")
         # 1. Random session key
-        session_sk = generate_secretKey()
-        session_pk = get_publicKey(session_sk)
+        session_keys = Keys.generate()
+        session_sk = session_keys.secret_key()
+        session_pk = session_keys.public_key()
         session_hex = session_sk.to_hex()
 
         # 2. Encrypt payload with session key (self-encrypt)
@@ -190,10 +199,9 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         content = nip44_encrypt(keys.secret_key(), encryption_target,
                                 content, Nip44Version.V2)
 
-    event = (
-        EventBuilder(Kind(30058), content)
-        .tags([Tag.parse(["d", id_tag])])
-        .sign_with_keys(keys))
+    event = (EventBuilder(Kind(30058), content)
+             .tags([Tag.parse(["d", id_tag])])
+             .sign_with_keys(keys))
 
     print(f"Publishing event {event.id().to_hex()}...")
     await client.send_event(event)

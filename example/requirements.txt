@@ -1,4 +1,4 @@
-nostr-sdk>=0.37.0
-requests
-websockets
-stem
+nostr-sdk>=0.44.0
+requests>=2.32.5
+websockets>=15.0.1
+stem>=1.8.2

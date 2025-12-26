@@ -7,8 +7,7 @@ from nostr_sdk import (
     Keys, Filter, Kind, NostrSigner,
     nip44_decrypt, RelayUrl, PublicKey,
     ClientOptions, GossipOptions, GossipRelayLimits,
-    Connection, ConnectionMode, SecretKey,
-    get_publicKey
+    Connection, ConnectionMode
 )
 
 
