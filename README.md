@@ -48,8 +48,6 @@ This convention specifies:
 - Required and recommended relay behaviours using existing Nostr primitives
 - Clear responsibility boundaries between relays, sidecars, and clients
 
-
-
 ### Identity-First Addressing
 
 Relays conforming to this profile are addressed by **Nostr identity**, not by DNS hostnames.
@@ -59,8 +57,6 @@ Clients are expected to refer to such relays using identity-based URIs (for exam
 These identity-based URIs MUST NOT be dereferenced directly. Clients MUST resolve them via NCC-02 and NCC-05 before establishing a network connection.
 
 Relays MUST NOT accept, interpret, or resolve identity-based URIs.
-
-
 
 This convention does not specify:
 
@@ -196,6 +192,47 @@ The sidecar MUST NOT assume relay-side or client-side trust acceptance.
 - For `wss://` endpoints, the NCC-02 `k` tag SHOULD be a TLS public key fingerprint suitable for pinning
 - For `ws://` endpoints, the `k` tag MAY be omitted unless a verifiable non-TLS key identity is defined and supported by the client
 - Clients MUST treat `k` as an assertion and verify it independently
+
+---
+
+### Onion Endpoints (Informative)
+
+NCC-06 supports onion endpoints as a first-class deployment option to enable DNS-optional and location-hiding relay access.
+
+#### Publishing onion endpoints
+
+A service MAY publish one or more onion endpoints in its NCC-05 Locator (kind 30058) `endpoints` list.
+
+Typical forms include:
+
+- `ws://<onion>.onion:<port>` (common)
+- `wss://<onion>.onion:<port>` (optional defence-in-depth)
+
+Onion endpoints SHOULD be published via NCC-05 (dynamic locator) rather than being assumed stable or discoverable out of band.
+
+#### Transport and trust considerations
+
+- Onion endpoints using `ws://` rely on Tor’s security properties for confidentiality and endpoint authentication.
+- The NCC-02 `k` tag binds the service identity to the key presented by the transport endpoint and therefore applies to `wss://` endpoints only.
+- Clients SHOULD NOT require `k` verification for `ws://` onion endpoints.
+- Clients MAY apply additional local policy, such as preferring onion endpoints when Tor is available.
+
+#### Operational model
+
+An onion endpoint MAY be:
+
+- Managed by the relay operator externally, or
+- Managed by an administrative sidecar that creates and maintains the hidden service and republishes NCC-05 when endpoints change.
+
+Relays remain protocol-dumb and do not participate in endpoint discovery or onion service management.
+
+#### Endpoint selection guidance (client policy)
+
+Clients MAY implement policy such as:
+
+- Prefer onion endpoints when Tor-capable and user policy prefers privacy
+- Otherwise prefer `wss://` clearnet endpoints
+- Fall back to NCC-02 `u` only when NCC-05 is missing, expired, or unavailable
 
 ---
 
