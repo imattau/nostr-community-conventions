@@ -7,7 +7,7 @@ Nostr Community Convention 05 - Identity-Bound Service Locator Resolution
 You can install this library using npm:
 
 ```bash
-npm install @gemini-testing/ncc-05
+npm install ncc-05
 ```
 
 ## Configuration
@@ -17,7 +17,7 @@ npm install @gemini-testing/ncc-05
 The `NCC05Resolver` uses a set of bootstrap relays to discover service locators. By default, it uses `['wss://relay.damus.io', 'wss://nos.lol']`. You can provide your own list of relays during initialization:
 
 ```typescript
-import { NCC05Resolver } from '@gemini-testing/ncc-05';
+import { NCC05Resolver } from 'ncc-05';
 
 const customRelays = ['wss://relay.example.com', 'wss://another.relay.io'];
 const resolver = new NCC05Resolver({ bootstrapRelays: customRelays });
@@ -26,7 +26,7 @@ const resolver = new NCC05Resolver({ bootstrapRelays: customRelays });
 The `NCC05Publisher` requires you to specify the relays to which you want to publish events for each `publish` or `publishWrapped` call:
 
 ```typescript
-import { NCC05Publisher } from '@gemini-testing/ncc-05';
+import { NCC05Publisher } from 'ncc-05';
 
 const publisher = new NCC05Publisher();
 const relaysToPublishTo = ['wss://relay.example.com'];
@@ -39,7 +39,7 @@ Both `NCC05Resolver` and `NCC05Publisher` can optionally share a `nostr-tools` `
 
 ```typescript
 import { SimplePool } from 'nostr-tools';
-import { NCC05Resolver, NCC05Publisher } from '@gemini-testing/ncc-05';
+import { NCC05Resolver, NCC05Publisher } from 'ncc-05';
 
 const pool = new SimplePool();
 
@@ -59,7 +59,7 @@ This library is designed for both resolving and publishing identity-bound servic
 You can resolve a service locator for a user's identity using the `NCC05Resolver`. This involves specifying the target user's public key, your (optional) secret key for decryption, and a service identifier.
 
 ```typescript
-import { NCC05Resolver, NCC05Payload, NCC05TimeoutError } from '@gemini-testing/ncc-05';
+import { NCC05Resolver, NCC05Payload, NCC05TimeoutError } from 'ncc-05';
 import { SimplePool } from 'nostr-tools';
 
 // Optional: Share an existing connection pool to manage relay connections
@@ -123,7 +123,7 @@ try {
 You can publish a service locator using the `NCC05Publisher`. This allows you to broadcast your service's endpoints to the Nostr network, either publicly, encrypted for yourself, or encrypted for a specific recipient.
 
 ```typescript
-import { NCC05Publisher, NCC05Payload } from '@gemini-testing/ncc-05';
+import { NCC05Publisher, NCC05Payload } from 'ncc-05';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
 
 const publisher = new NCC05Publisher();
