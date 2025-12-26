@@ -13,16 +13,12 @@ This example demonstrates the implementation of **NCC-05: Identity-Bound Service
   - Route Nostr traffic through Tor (SOCKS5) to hide your IP from relays.
 - **NIP-65 Gossip Support**: 
 ...
-### 4. Tor & Privacy
-**Publish an Onion service anonymously:**
+### 5. Automated Testing
+You can run a full functional test (Publish -> Wait -> Resolve) using:
 ```bash
-python3 publisher.py --nsec --onion xyz.onion --proxy 127.0.0.1:9050 --live
+python3 test_ncc05.py
 ```
-
-**Resolve anonymously:**
-```bash
-python3 resolver.py --nsec --pubkey <hex> --proxy 127.0.0.1:9050 --live
-```
+This test uses unique keys and a public relay to verify the entire flow.
 
 ## Flags
 ...

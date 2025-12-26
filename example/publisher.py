@@ -34,24 +34,32 @@ def get_public_ip_external():
         return None
 
 
-async def run():
-    parser = argparse.ArgumentParser(description="NCC-05 Publisher PoC")
-    parser.add_argument("--nsec", action="store_true",
-                        help="Use existing nsec (interactive)")
-    parser.add_argument("--live", action="store_true",
-                        help="Use real IP and real relays")
-    parser.add_argument("--ip", help="Manually specify the public IP")
-    parser.add_argument("--onion", help="Add a Tor .onion address")
-    parser.add_argument("--relay", help="Set a specific relay")
-    parser.add_argument("--relay-list", help="Comma-separated NIP-65 relays")
-    parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. 127.0.0.1:9050)")
-    args = parser.parse_args()
+async def run(provided_keys=None, manual_ip=None, relay=None):
+    # Setup argparse if not called from a test
+    if provided_keys is None:
+        parser = argparse.ArgumentParser(description="NCC-05 Publisher PoC")
+        parser.add_argument("--nsec", action="store_true",
+                            help="Use existing nsec (interactive)")
+        parser.add_argument("--live", action="store_true",
+                            help="Use real IP and real relays")
+        parser.add_argument("--ip", help="Manually specify the public IP")
+        parser.add_argument("--onion", help="Add a Tor .onion address")
+        parser.add_argument("--relay", help="Set a specific relay")
+        parser.add_argument("--relay-list", help="Comma-separated NIP-65 relays")
+        parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. 127.0.0.1:9050)")
+        args = parser.parse_args()
+    else:
+        args = argparse.Namespace(nsec=False, live=False, ip=manual_ip, 
+                                  onion=None, relay=relay, relay_list=None, 
+                                  proxy=None)
 
     # 1. Setup Keys
     if args.nsec:
         nsec_input = getpass.getpass("Enter your nsec: ")
         keys = Keys.parse(nsec_input)
         print(f"Using keys for pubkey: {keys.public_key().to_hex()}")
+    elif provided_keys:
+        keys = provided_keys
     else:
         keys = Keys.generate()
         print(f"Generated Keys: {keys.public_key().to_hex()}")
@@ -84,14 +92,17 @@ async def run():
         print(f"Adding IP endpoint: {ip}")
 
     # 3. Setup Client with Proxy
-    opts = ClientOptions()
+    from nostr_sdk import ClientBuilder
+    signer = NostrSigner.keys(keys)
+    builder = ClientBuilder().signer(signer)
+    
     if args.proxy:
         print(f"Routing through proxy: {args.proxy}")
         conn = Connection().mode(ConnectionMode.PROXY).addr(args.proxy)
-        opts = opts.connection(conn)
+        opts = ClientOptions().connection(conn)
+        builder = builder.opts(opts)
 
-    signer = NostrSigner.keys(keys)
-    client = Client(signer, opts)
+    client = builder.build()
 
     relay_url = args.relay if args.relay else \
         ("wss://relay.damus.io" if args.live else "ws://localhost:8080")

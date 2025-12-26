@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+example/__pycache__/
+ncc-05-js/node_modules/
+ncc-05-js/dist/
