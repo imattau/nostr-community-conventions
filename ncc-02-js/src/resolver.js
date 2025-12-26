@@ -1,52 +1,94 @@
 import { verifyEvent } from 'nostr-tools/pure';
 import { KINDS } from './models.js';
 
+/**
+ * Custom error class for NCC-02 specific failures.
+ */
+export class NCC02Error extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/**
+ * Resolver for NCC-02 Service Records.
+ * Implements the client-side resolution and trust verification algorithm.
+ */
 export class NCC02Resolver {
+  /**
+   * @param {Object} relay - A relay client providing a `query` method.
+   * @param {string[]} [trustedCAPubkeys=[]] - List of CA pubkeys trusted by this client.
+   */
   constructor(relay, trustedCAPubkeys = []) {
-    this.relay = relay; // Expected to be a mock or real relay client with a query method
+    this.relay = relay;
     this.trustedCAPubkeys = new Set(trustedCAPubkeys);
   }
 
+  /**
+   * Resolves a service for a given pubkey and service identifier.
+   * 
+   * @param {string} pubkey - The pubkey of the service owner.
+   * @param {string} serviceId - The 'd' tag identifier of the service (e.g., 'api').
+   * @param {Object} [options={}] - Policy options.
+   * @param {boolean} [options.requireAttestation=false] - If true, fails if no trusted attestation is found.
+   * @param {string} [options.minLevel=null] - Minimum trust level ('self', 'verified', 'hardened').
+   * @param {string} [options.standard='nostr-service-trust-v0.1'] - Expected trust standard.
+   * @throws {NCC02Error} If verification or policy checks fail.
+   * @returns {Promise<Object>} The verified service details.
+   */
   async resolve(pubkey, serviceId, options = {}) {
-    const { requireAttestation = false } = options;
+    const { 
+      requireAttestation = false, 
+      minLevel = null,
+      standard = 'nostr-service-trust-v0.1'
+    } = options;
 
-    // 1. Query for Service Record
     const serviceEvents = await this.relay.query({
       kinds: [KINDS.SERVICE_RECORD],
       authors: [pubkey],
       '#d': [serviceId]
     });
 
-    if (!serviceEvents.length) return null;
-
-    // Sort by created_at descending (latest first)
-    const serviceEvent = serviceEvents.sort((a, b) => b.created_at - a.created_at)[0];
-
-    // 2. Verify signature and expiry
-    if (!verifyEvent(serviceEvent)) return null;
-
-    const tags = Object.fromEntries(serviceEvent.tags);
-    const now = Math.floor(Date.now() / 1000);
-
-    if (tags.exp && parseInt(tags.exp) < now) {
-      return null;
+    if (!serviceEvents.length) {
+      throw new NCC02Error('NOT_FOUND', `No service record found for ${serviceId}`);
     }
 
-    // 3. Fetch Certificate Attestations
+    const serviceEvent = serviceEvents.sort((a, b) => b.created_at - a.created_at)[0];
+
+    if (!verifyEvent(serviceEvent)) {
+      throw new NCC02Error('INVALID_SIGNATURE', 'Service record signature verification failed');
+    }
+
+    const serviceTags = Object.fromEntries(serviceEvent.tags);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (serviceTags.exp && parseInt(serviceTags.exp) < now) {
+      throw new NCC02Error('EXPIRED', 'Service record has expired');
+    }
+
     const attestations = await this.relay.query({
       kinds: [KINDS.ATTESTATION],
       '#e': [serviceEvent.id]
     });
 
-    // 4. Filter and Verify Attestations
-    const validAttestations = [];
     const revocations = await this.relay.query({
       kinds: [KINDS.REVOCATION]
     });
 
+    const validAttestations = [];
     for (const att of attestations) {
       if (this.trustedCAPubkeys.has(att.pubkey)) {
         const attTags = Object.fromEntries(att.tags);
+        
+        // Cross-validate subject, service ID, and standard
+        if (attTags.subj !== pubkey) continue;
+        if (attTags.srv !== serviceId) continue;
+        if (standard && attTags.std !== standard) continue;
+        
+        // Trust Level Filtering
+        if (minLevel && !this._isLevelSufficient(attTags.lvl, minLevel)) continue;
+
         if (this._isAttestationValid(att, attTags, revocations)) {
           validAttestations.push({
             pubkey: att.pubkey,
@@ -57,19 +99,23 @@ export class NCC02Resolver {
       }
     }
 
-    // 5. Apply local policy
     if (requireAttestation && validAttestations.length === 0) {
-      return null;
+      throw new NCC02Error('POLICY_FAILURE', `No trusted attestations meet the required policy for ${serviceId}`);
     }
 
     return {
-      endpoint: tags.u,
-      fingerprint: tags.k,
-      expiry: parseInt(tags.exp),
+      endpoint: serviceTags.u,
+      fingerprint: serviceTags.k,
+      expiry: parseInt(serviceTags.exp),
       attestations: validAttestations,
       eventId: serviceEvent.id,
       pubkey: serviceEvent.pubkey
     };
+  }
+
+  _isLevelSufficient(actual, required) {
+    const levels = { 'self': 0, 'verified': 1, 'hardened': 2 };
+    return (levels[actual] ?? -1) >= (levels[required] ?? 0);
   }
 
   _isAttestationValid(att, tags, revocations) {
@@ -79,15 +125,20 @@ export class NCC02Resolver {
     if (tags.nbf && parseInt(tags.nbf) > now) return false;
     if (tags.exp && parseInt(tags.exp) < now) return false;
 
-    // Check for revocations by the same CA
-    const isRevoked = revocations.some(rev => {
+    return !revocations.some(rev => {
       const revTags = Object.fromEntries(rev.tags);
       return revTags.e === att.id && rev.pubkey === att.pubkey;
     });
-
-    return !isRevoked;
   }
 
+  /**
+   * Verifies that the actual fingerprint found during transport-level connection
+   * matches the one declared in the signed service record.
+   * 
+   * @param {Object} resolved - The object returned by resolve().
+   * @param {string} actualFingerprint - The fingerprint obtained from the service.
+   * @returns {boolean}
+   */
   verifyEndpoint(resolved, actualFingerprint) {
     return resolved.fingerprint === actualFingerprint;
   }
