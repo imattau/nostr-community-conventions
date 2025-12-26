@@ -81,6 +81,32 @@ async function test() {
         process.exit(1);
     }
 
+    // Test Friend-to-Friend resolution
+    console.log('Testing Friend-to-Friend resolution...');
+    const skA = generateSecretKey();
+    const pkA = getPublicKey(skA);
+    const skB = generateSecretKey();
+    const pkB = getPublicKey(skB);
+
+    const payloadFriend: NCC05Payload = {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', uri: 'friend:7777', priority: 1, family: 'ipv4' }]
+    };
+
+    // User A publishes for User B
+    console.log('User A publishing for User B...');
+    await publisher.publish(relays, skA, payloadFriend, 'friend-test', pkB);
+
+    // User B resolves User A's record
+    console.log('User B resolving User A...');
+    const friendResult = await resolver.resolve(pkA, skB, 'friend-test');
+    if (friendResult && friendResult.endpoints[0].uri === 'friend:7777') {
+        console.log('Friend-to-Friend resolution successful.');
+    } else {
+        console.error('FAILED: Friend-to-Friend resolution.');
+        process.exit(1);
+    }
+
     publisher.close(relays);
     resolver.close();
     process.exit(0);

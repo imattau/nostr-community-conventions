@@ -49,18 +49,36 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
                             "relays")
         parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. "
                             "127.0.0.1:9050)")
+        parser.add_argument("--recipient", help="Hex pubkey of the recipient "
+                            "(optional, defaults to self)")
         parser.add_argument("--identifier", default="addr",
                             help="The 'd' tag identifier")
         args = parser.parse_args()
         id_tag = args.identifier
+        recipient_pk = args.recipient
     else:
         args = argparse.Namespace(nsec=False, live=False, ip=manual_ip,
                                   onion=None, relay=relay,
                                   relay_list=relay_list,
-                                  proxy=None)
+                                  proxy=None, recipient=None)
         id_tag = d_tag
+        recipient_pk = None
 
     # 1. Setup Keys
+@@ -126,10 +130,14 @@
+     content = json.dumps(payload)
+
+     # 4. Encrypt (NIP-44)
++    from nostr_sdk import PublicKey as NSPublicKey
++    encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
++        else keys.public_key()
++
+     encrypted_content = nip44_encrypt(
+-        keys.secret_key(), keys.public_key(),
++        keys.secret_key(), encryption_target,
+         json.dumps(payload), Nip44Version.V2
+     )
+
     if args.nsec:
         nsec_input = getpass.getpass("Enter your nsec: ")
         keys = Keys.parse(nsec_input)

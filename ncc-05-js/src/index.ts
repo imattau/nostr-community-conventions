@@ -151,23 +151,27 @@ export class NCC05Publisher {
 
     /**
      * Create and publish a locator record.
+     * @param recipientPubkey Optional hex pubkey of the recipient. If omitted, self-encrypts.
      */
     async publish(
         relays: string[],
         secretKey: Uint8Array,
         payload: NCC05Payload,
-        identifier: string = 'addr'
+        identifier: string = 'addr',
+        recipientPubkey?: string
     ): Promise<Event> {
-        const pubkey = getPublicKey(secretKey);
+        const myPubkey = getPublicKey(secretKey);
+        const encryptionTarget = recipientPubkey || myPubkey;
         
         // 1. Encrypt
-        const conversationKey = nip44.getConversationKey(secretKey, pubkey);
+        const conversationKey = nip44.getConversationKey(secretKey, encryptionTarget);
         const encryptedContent = nip44.encrypt(JSON.stringify(payload), conversationKey);
 
         // 2. Create and Finalize Event
         const eventTemplate = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
+            pubkey: myPubkey,
             tags: [['d', identifier]],
             content: encryptedContent,
         };
