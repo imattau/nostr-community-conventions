@@ -166,7 +166,8 @@ export class NCC05Resolver {
                 authors: [hexPubkey],
                 kinds: [10002]
             });
-            if (relayListEvent) {
+            // Security: Verify NIP-65 event signature and author
+            if (relayListEvent && verifyEvent(relayListEvent) && relayListEvent.pubkey === hexPubkey) {
                 const discoveredRelays = relayListEvent.tags
                     .filter(t => t[0] === 'r')
                     .map(t => t[1]);
@@ -189,8 +190,9 @@ export class NCC05Resolver {
         
         if (!result || (Array.isArray(result) && result.length === 0)) return null;
         
+        // 2. Filter for valid signatures, correct author, and sort by created_at
         const validEvents = (result as Event[])
-            .filter(e => verifyEvent(e))
+            .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
             .sort((a, b) => b.created_at - a.created_at);
 
         if (validEvents.length === 0) return null;
@@ -199,8 +201,12 @@ export class NCC05Resolver {
         try {
             let content = latestEvent.content;
             
-            // Handle "Wrapped" multi-recipient content
-            if (content.includes('"wraps"') && secretKey) {
+            // Security: Robust multi-recipient detection
+            const isWrapped = content.includes('"wraps"') && 
+                             content.includes('"ciphertext"') && 
+                             content.startsWith('{');
+
+            if (isWrapped && secretKey) {
                 const wrapped = JSON.parse(content) as WrappedContent;
                 const myPk = getPublicKey(secretKey);
                 const myWrap = wrapped.wraps[myPk];
@@ -208,30 +214,41 @@ export class NCC05Resolver {
                 if (myWrap) {
                     const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                     const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
-                    const symmetricKey = new Uint8Array(symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
                     
-                    const sessionConversationKey = nip44.getConversationKey(symmetricKey, getPublicKey(symmetricKey));
+                    // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
+                    const symmetricKey = new Uint8Array(
+                        symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+                    );
+                    
+                    const sessionConversationKey = nip44.getConversationKey(
+                        symmetricKey, getPublicKey(symmetricKey)
+                    );
                     content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
+                } else {
+                    return null; // Not intended for us
                 }
-            } else if (secretKey) {
-                // Standard NIP-44
+            } else if (secretKey && !content.startsWith('{')) {
+                // Standard NIP-44 (likely encrypted if not starting with {)
                 const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                 content = nip44.decrypt(latestEvent.content, conversationKey);
             }
 
+            // Security: Safe JSON parsing
             const payload = JSON.parse(content) as NCC05Payload;
-            if (!payload.endpoints) return null;
+            if (!payload || !payload.endpoints || !Array.isArray(payload.endpoints)) {
+                return null;
+            }
 
             // Freshness validation
             const now = Math.floor(Date.now() / 1000);
             if (now > payload.updated_at + payload.ttl) {
                 if (options.strict) return null;
-                console.warn('NCC-05 record has expired');
+                console.warn('NCC-05 record expired');
             }
 
             return payload;
         } catch (e) {
-            return null;
+            return null; // Decryption or parsing failed
         }
     }
 
