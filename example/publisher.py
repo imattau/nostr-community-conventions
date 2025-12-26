@@ -34,7 +34,8 @@ def get_public_ip_external():
         return None
 
 
-async def run(provided_keys=None, manual_ip=None, relay=None):
+async def run(provided_keys=None, manual_ip=None, relay=None,
+              relay_list=None, d_tag="addr"):
     # Setup argparse if not called from a test
     if provided_keys is None:
         parser = argparse.ArgumentParser(description="NCC-05 Publisher PoC")
@@ -47,11 +48,16 @@ async def run(provided_keys=None, manual_ip=None, relay=None):
         parser.add_argument("--relay", help="Set a specific relay")
         parser.add_argument("--relay-list", help="Comma-separated NIP-65 relays")
         parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. 127.0.0.1:9050)")
+        parser.add_argument("--identifier", default="addr",
+                            help="The 'd' tag identifier")
         args = parser.parse_args()
+        id_tag = args.identifier
     else:
-        args = argparse.Namespace(nsec=False, live=False, ip=manual_ip, 
-                                  onion=None, relay=relay, relay_list=None, 
+        args = argparse.Namespace(nsec=False, live=False, ip=manual_ip,
+                                  onion=None, relay=relay,
+                                  relay_list=relay_list,
                                   proxy=None)
+        id_tag = d_tag
 
     # 1. Setup Keys
     if args.nsec:
@@ -81,7 +87,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None):
         ip = get_local_public_ipv6()
         if not ip and args.live:
             ip = get_public_ip_external()
-    
+
     if ip:
         endpoints.append({
             "type": "tcp",
@@ -95,7 +101,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None):
     from nostr_sdk import ClientBuilder
     signer = NostrSigner.keys(keys)
     builder = ClientBuilder().signer(signer)
-    
+
     if args.proxy:
         print(f"Routing through proxy: {args.proxy}")
         conn = Connection().mode(ConnectionMode.PROXY).addr(args.proxy)
@@ -112,9 +118,12 @@ async def run(provided_keys=None, manual_ip=None, relay=None):
 
     # 4. Optional: NIP-65
     if args.relay_list:
-        relay_map = {RelayUrl.parse(r.strip()): RelayMetadata.READ_WRITE 
+        print(f"Publishing relay list: {args.relay_list}")
+        relay_map = {RelayUrl.parse(r.strip()): None
                      for r in args.relay_list.split(",")}
-        await client.send_event(EventBuilder.relay_list(relay_map).sign_with_keys(keys))
+        await client.send_event(
+            EventBuilder.relay_list(relay_map).sign_with_keys(keys)
+        )
 
     # 5. Payload & Publish
     payload = {
@@ -125,10 +134,11 @@ async def run(provided_keys=None, manual_ip=None, relay=None):
         "notes": "NCC-05 Tor PoC"
     }
     encrypted_content = nip44_encrypt(
-        keys.secret_key(), keys.public_key(), json.dumps(payload), Nip44Version.V2
+        keys.secret_key(), keys.public_key(),
+        json.dumps(payload), Nip44Version.V2
     )
     event = (EventBuilder(Kind(30058), encrypted_content)
-             .tags([Tag.parse(["d", "addr"])])
+             .tags([Tag.parse(["d", id_tag])])
              .sign_with_keys(keys))
 
     print(f"Publishing event {event.id().to_hex()}...")
