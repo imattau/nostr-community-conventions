@@ -325,6 +325,17 @@ body.mode-power {
   background: rgba(255,255,255,0.02);
 }
 
+.p-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.p-checkbox-label input { cursor: pointer; }
+
 .p-inspector-actions { display: grid; gap: 8px; }
 
 /* 8. Status Bar (Fixed) */

@@ -21,7 +21,6 @@ async function publishToRelays(event) {
     const promises = pool.publish(connectionRelays, event);
     // Catch errors on individual relay promises to avoid unhandled rejections
     promises.forEach(p => p.catch(err => console.warn("[NIP-46] Publish failed on a relay:", err)));
-    // We don't await here as we want sendRequest to manage its own timeout/response logic
   } catch (err) {
     console.error("[NIP-46] Error calling pool.publish:", err);
   }
@@ -39,14 +38,13 @@ async function decrypt(privKeyHex, pubKeyHex, content) {
   if (content.includes('?iv=')) {
     return nip04.decrypt(privKeyHex, pubKeyHex, content);
   }
-  // Fallback to NIP-44 if no IV present
   const conversationKey = nip44.getConversationKey(privKeyHex, pubKeyHex);
   return nip44.decrypt(content, conversationKey);
 }
 
 async function sendRequest(method, params) {
   return new Promise((resolve, reject) => {
-    (async () => { // Async IIFE to allow await inside
+    (async () => {
       if (!remotePubkey || !connectionRelays.length) {
         return reject(new Error("NIP-46 not connected."));
       }
@@ -54,12 +52,7 @@ async function sendRequest(method, params) {
       const id = Math.random().toString().slice(2);
       requests.set(id, { resolve, reject });
 
-      const payload = {
-        id,
-        method,
-        params,
-      };
-
+      const payload = { id, method, params };
       const privKeyHex = toHex(secretKey);
       const encryptedPayload = await encrypt(privKeyHex, remotePubkey, JSON.stringify(payload));
       
@@ -72,10 +65,6 @@ async function sendRequest(method, params) {
       };
 
       const event = finalizeEvent(eventTemplate, secretKey);
-      
-      console.log("[NIP-46] Signed event to publish:", event);
-      if (!event.id) console.error("[NIP-46] Critical: Event ID missing after finalizeEvent");
-
       publishToRelays(event);
 
       // Timeout after 30 seconds
@@ -85,40 +74,27 @@ async function sendRequest(method, params) {
           requests.delete(id);
         }
       }, 30000);
-    })(); // Immediately invoke the async function
+    })();
   });
 }
 
 async function handleEvent(event) {
-  console.log("[NIP-46] Received event", event.id, "from", event.pubkey);
   try {
-    // If we have a remotePubkey, ignore events from others
-    if (remotePubkey && event.pubkey !== remotePubkey) {
-        console.log("[NIP-46] Ignoring event from unknown pubkey", event.pubkey, "expected", remotePubkey);
-        return;
-    }
+    if (remotePubkey && event.pubkey !== remotePubkey) return;
 
-    // Use sender's pubkey for decryption
     const senderPubkey = event.pubkey;
     let decrypted;
     try {
         const privKeyHex = toHex(secretKey);
         
-        // Detect and potentially switch encryption mode
+        // Detect and switch encryption mode if needed
         if (!event.content.includes('?iv=')) {
-            if (encryptionMode !== 'nip44') {
-                console.log("[NIP-46] Switching to NIP-44 mode based on incoming event content.");
-                encryptionMode = 'nip44';
-            }
+            encryptionMode = 'nip44';
         } else {
-            if (encryptionMode !== 'nip04') {
-                console.log("[NIP-46] Switching to NIP-04 mode based on incoming event content.");
-                encryptionMode = 'nip04';
-            }
+            encryptionMode = 'nip04';
         }
 
         decrypted = await decrypt(privKeyHex, senderPubkey, event.content);
-        console.log("[NIP-46] Decrypted payload:", decrypted);
     } catch (err) {
         console.error("[NIP-46] Decryption failed:", err);
         return;
@@ -128,7 +104,6 @@ async function handleEvent(event) {
 
     // Case 1: Response to our request
     if (payload.id && requests.has(payload.id)) {
-      console.log("[NIP-46] Handling response for req", payload.id);
       const { resolve, reject } = requests.get(payload.id);
       if (payload.error) {
         reject(new Error(payload.error));
@@ -139,21 +114,13 @@ async function handleEvent(event) {
       return;
     }
 
-    // Case 2: Handshake (connect request from signer) or Implicit Connect
-    // If we haven't established remotePubkey yet, or re-confirming same
+    // Case 2: Handshake or Implicit Connect
     if (!remotePubkey || remotePubkey === senderPubkey) {
         if (payload.method === 'connect') {
-            console.log("[NIP-46] Received CONNECT request from", senderPubkey);
             remotePubkey = senderPubkey;
-            console.log("[NIP-46] Establishing connection with", remotePubkey);
             
             // Send ACK
-            const response = {
-                id: payload.id,
-                result: "ack",
-                error: null
-            };
-            
+            const response = { id: payload.id, result: "ack", error: null };
             const privKeyHex = toHex(secretKey);
             const respEnc = await encrypt(privKeyHex, remotePubkey, JSON.stringify(response));
             const replyTemplate = {
@@ -165,18 +132,14 @@ async function handleEvent(event) {
             };
             const replyEvent = finalizeEvent(replyTemplate, secretKey);
             publishToRelays(replyEvent);
-            console.log("[NIP-46] Sent ACK using mode:", encryptionMode);
 
             if (onConnectCallback) {
                 onConnectCallback(remotePubkey);
                 onConnectCallback = null;
             }
-        } else {
-            // Implicit connect: We received a valid decrypted message that wasn't a response to our request
-            // This implies the signer has our key and is communicating.
-            console.log("[NIP-46] Received implicit connect payload from", senderPubkey, payload);
+        } else if (payload.result) {
+            // Implicit connect from valid decrypted payload
             remotePubkey = senderPubkey;
-            
             if (onConnectCallback) {
                 onConnectCallback(remotePubkey);
                 onConnectCallback = null;
@@ -191,9 +154,8 @@ async function handleEvent(event) {
 async function connectBunker(bunkerUrl) {
     try {
         const url = new URL(bunkerUrl);
-        remotePubkey = url.pathname.substring(2); // remove //
+        remotePubkey = url.pathname.substring(2);
         
-        // Handle multiple relay params
         const relays = url.searchParams.getAll('relay');
         connectionRelays = relays.length > 0 ? relays : [url.searchParams.get('relay')].filter(Boolean);
 
@@ -225,7 +187,7 @@ const self = {
     onConnectCallback = onConnect;
     secretKey = generateSecretKey();
     publicKey = getPublicKey(secretKey);
-    encryptionMode = 'nip04'; // Reset to default for new connection
+    encryptionMode = 'nip04';
 
     if (bunkerUrl) {
         await connectBunker(bunkerUrl);
@@ -234,10 +196,6 @@ const self = {
         const defaultRelays = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
         connectionRelays = defaultRelays;
         
-        console.log("[NIP-46] Listening for incoming connections on", connectionRelays, "for my pubkey", publicKey);
-
-        // Subscribe for incoming connections
-        // Note: No 'authors' filter because we don't know the signer yet
         sub = pool.subscribe(connectionRelays, {
             kinds: [24133],
             '#p': [publicKey],

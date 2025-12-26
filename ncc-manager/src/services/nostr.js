@@ -1,5 +1,5 @@
 import { SimplePool } from "nostr-tools/pool";
-import { finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
+import { waitForNostr } from "../utils.js";
 import nip46 from './nip46.js';
 
 export const pool = new SimplePool();
@@ -172,7 +172,8 @@ export function payloadToDraft(payload) {
 
 export async function getSigner(mode) {
   if (mode === "nip07") {
-    if (!window.nostr) throw new Error("NIP-07 signer not available");
+    const available = await waitForNostr();
+    if (!available) throw new Error("NIP-07 signer not available");
     const pubkey = await window.nostr.getPublicKey();
     return {
       type: "nip07",

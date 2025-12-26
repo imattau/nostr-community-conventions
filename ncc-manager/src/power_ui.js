@@ -11,6 +11,7 @@ import {
     handlePaletteNavigation
 } from "./ui/palette.js";
 import QRCode from 'qrcode';
+import { nip19 } from 'nostr-tools';
 import nip46 from "./services/nip46.js";
 
 let _getConfig = null;
@@ -336,7 +337,8 @@ async function handleInspectorAction(action, id) {
     } else if (action === "publish-item") {
         const item = findItem(id);
         if (item && confirm(`Publish this ${TYPE_LABELS[item.kind]}?`)) {
-            eventBus.emit('publish-item', { item, kind: TYPE_LABELS[item.kind].toLowerCase() });
+            const shouldAnnounce = document.getElementById("p-announce-check")?.checked || false;
+            eventBus.emit('publish-item', { item, kind: TYPE_LABELS[item.kind].toLowerCase(), shouldAnnounce });
         }
     } else if (action === "revise-item") {
         handleReviseAction(id);
@@ -1139,3 +1141,52 @@ function renderSettingsModal() {
         }
     };
 }
+
+function openAnnouncementModal(item, _eventId) {
+    const modal = document.createElement("div");
+    modal.className = "p-modal-overlay";
+    
+    const dTag = item.d || "ncc-??";
+    const title = item.title || "Untitled";
+    const topics = (item.tags?.topics || []).map(t => "#" + String(t).replace(/\s+/g, "")).join(" ");
+    
+    // Construct naddr for the published replaceable event
+    const naddr = nip19.naddrEncode({
+        identifier: dTag,
+        pubkey: _state.signerPubkey,
+        kind: KINDS.ncc,
+        relays: _state.connectionRelays || []
+    });
+    
+    const defaultNote = `🚀 Published new Nostr Community Convention: ${dTag} - ${title}\n\n${topics}\n\nnostr:${naddr}`;
+
+    modal.innerHTML = `
+        <div class="p-modal">
+            <div class="p-modal-header">
+                <h2>Post Announcement</h2>
+                <button class="p-ghost-btn" data-action="close-modal">X</button>
+            </div>
+            <div class="p-modal-body">
+                <div class="p-field">
+                    <label>Announcement Note (Kind 1)</label>
+                    <textarea id="m-announce-content" style="height: 150px; font-family: var(--mono)">${defaultNote}</textarea>
+                </div>
+                <div class="p-modal-footer">
+                    <button class="p-btn-ghost" data-action="close-modal">Cancel</button>
+                    <button class="p-btn-accent" id="m-announce-submit">Post to Profile</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById("m-announce-submit").onclick = async () => {
+        const content = document.getElementById("m-announce-content").value.trim();
+        if (content) {
+            eventBus.emit('post-announcement', { content });
+            modal.remove();
+        }
+    };
+}
+
+eventBus.on('open-announcement-modal', ({ item, eventId }) => openAnnouncementModal(item, eventId));

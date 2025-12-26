@@ -174,3 +174,44 @@ export function showToast(message, type = "info") {
     setTimeout(() => toast.remove(), 300);
   }, 3200);
 }
+
+export async function waitForNostr(timeout = 5000) {
+  if (typeof window === "undefined") return false;
+  
+  const isInsecureIP = window.location.protocol === 'http:' && 
+                       window.location.hostname !== 'localhost' && 
+                       window.location.hostname !== '127.0.0.1' &&
+                       /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(window.location.hostname);
+
+  const check = () => {
+    return !!(window.nostr || window.Nostr || (window.alby && window.alby.nostr));
+  };
+
+  if (check()) return true;
+  
+  if (isInsecureIP) {
+      console.warn("[Signer] Security Hint: Most Nostr extensions (NIP-07) will NOT inject into an IP address over HTTP. Please use localhost or HTTPS.");
+  }
+
+  console.info("[Signer] window.nostr not found, waiting (up to 5s)...", {
+      location: window.location.href,
+      secure: window.isSecureContext,
+      isInsecureIP
+  });
+
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (check()) {
+        console.info(`[Signer] Signer detected after ${Date.now() - start}ms`);
+        clearInterval(interval);
+        resolve(true);
+      } else if (Date.now() - start > timeout) {
+        console.warn(`[Signer] Signer not detected after ${timeout}ms. Current window keys:`, 
+            Object.keys(window).filter(k => k.toLowerCase().includes('nostr') || k.toLowerCase().includes('alby')));
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 100);
+  });
+}
