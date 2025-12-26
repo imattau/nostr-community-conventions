@@ -94,7 +94,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
 
     # 2. Determine IP/Onion
     endpoints = []
-    
+
     # Manual Onion
     if args.onion:
         endpoints.append({
@@ -113,7 +113,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             endpoints.append({
                 "type": "tcp",
                 "uri": f"{onion_addr}:8080",
-                "priority": 1, # Prefer auto-onion
+                "priority": 1,  # Prefer auto-onion
                 "family": "onion"
             })
             print(f"Created ephemeral Onion: {onion_addr}")
@@ -171,7 +171,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         "endpoints": endpoints,
         "notes": "NCC-05 Tor Auto PoC"
     }
-    
+
     # Encrypt (NIP-44)
     from nostr_sdk import PublicKey as NSPublicKey
     encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
@@ -181,7 +181,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         keys.secret_key(), encryption_target,
         json.dumps(payload), Nip44Version.V2
     )
-    
+
     event = (EventBuilder(Kind(30058), encrypted_content)
              .tags([Tag.parse(["d", id_tag])])
              .sign_with_keys(keys))
