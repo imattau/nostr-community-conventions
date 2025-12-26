@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { validateEvent, verifyEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05';
-import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../relay/protocol.js';
+import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../lib/protocol.js';
 import { normalizeLocatorEndpoints, choosePreferredEndpoint } from './selector.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,17 +16,6 @@ const rootConfig = JSON.parse(readFileSync(rootConfigPath, 'utf-8'));
 
 const clientConfigPath = path.resolve(__dirname, './config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
-
-const rootConfigDir = path.dirname(rootConfigPath);
-const TLS_CERT_PATH = rootConfig.relayTlsCert ? path.resolve(rootConfigDir, rootConfig.relayTlsCert) : null;
-let TLS_CA = null;
-if (TLS_CERT_PATH) {
-  try {
-    TLS_CA = readFileSync(TLS_CERT_PATH);
-  } catch (err) {
-    console.warn(`[Client] WARNING: Unable to load TLS certificate for service endpoint: ${err?.message || err}`);
-  }
-}
 
 const RELAY_URL = clientConfig.relayUrl || rootConfig.relayUrl;
 const SERVICE_IDENTITY_URI = clientConfig.serviceIdentityUri || (clientConfig.serviceNpub ? `wss://${clientConfig.serviceNpub}` : null);
@@ -252,14 +241,7 @@ async function connectAndTest(endpointUrl) {
   }
 
   log(`Attempting to connect to resolved endpoint: ${endpointUrl}`);
-  const wsOptions = {};
-  if (endpointUrl.startsWith('wss://')) {
-    if (TLS_CA) {
-      wsOptions.ca = TLS_CA;
-    } else {
-      wsOptions.rejectUnauthorized = false;
-    }
-  }
+  const wsOptions = endpointUrl.startsWith('wss://') ? { rejectUnauthorized: false } : {};
   const ws = new WebSocket(endpointUrl, wsOptions);
 
   return new Promise((resolve, reject) => {

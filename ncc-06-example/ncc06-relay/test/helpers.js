@@ -5,7 +5,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../relay/protocol.js';
+import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../lib/protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +20,7 @@ let relayProcess = null;
 
 export const startRelay = async () => {
   return new Promise((resolve, reject) => {
-    relayProcess = spawn('node', ['relay/server.js'], {
+    relayProcess = spawn('node', ['scripts/run-relay.js'], {
       cwd: path.resolve(__dirname, '..'), // Run from the ncc06-relay root
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true // Allows the relay to run independently
@@ -28,7 +28,7 @@ export const startRelay = async () => {
 
     relayProcess.stdout.on('data', data => {
       process.stdout.write(`[Relay STDOUT] ${data}`);
-      if (data.toString().includes(`Nostr Relay is listening on port ${RELAY_PORT}`)) {
+      if (data.toString().includes(`Relay listening on ws://127.0.0.1:${RELAY_PORT}`)) {
         resolve(true);
       }
     });

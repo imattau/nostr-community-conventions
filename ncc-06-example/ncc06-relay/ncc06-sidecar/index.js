@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { createOkMessage, createNoticeMessage, parseNostrMessage } from '../relay/protocol.js';
+import { createOkMessage, createNoticeMessage, parseNostrMessage } from '../lib/protocol.js';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
@@ -17,7 +17,7 @@ const rootConfig = JSON.parse(readFileSync(rootConfigPath, 'utf-8'));
 
 const sidecarConfigPath = path.resolve(__dirname, './config.json');
 const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
-const clientConfigPath = path.resolve(__dirname, '../client/config.json');
+const clientConfigPath = path.resolve(__dirname, '../ncc06-client/config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
 
 const RELAY_URL = sidecarConfig.relayUrl || rootConfig.relayUrl;
@@ -26,7 +26,7 @@ const PUBLIC_KEY = sidecarConfig.servicePk;
 const SERVICE_NPUB = sidecarConfig.serviceNpub;
 
 if (!PRIVATE_KEY || !PUBLIC_KEY || !SERVICE_NPUB) {
-  console.error("Sidecar service identity is missing. Please ensure 'serviceSk', 'servicePk', and 'serviceNpub' are set in sidecar/config.json.");
+  console.error("Sidecar service identity is missing. Please ensure 'serviceSk', 'servicePk', and 'serviceNpub' are set in ncc06-sidecar/config.json.");
   process.exit(1);
 }
 

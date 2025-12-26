@@ -1,12 +1,14 @@
 # NCC-06 Minimal Relay + Sidecars + Simple Client (Node.js)
 
-This project implements a minimal Node.js-based Nostr relay, sidecar publisher, and client resolver/connector, adhering to the NCC-06 specification for decentralized service discovery.
+This project pairs a Node.js-based NIP-01 relay with Node.js sidecar and client helpers to exercise the NCC-06 conventions for discovery and resolver-driven trust. The relay, sidecar, and `ncc06-client` harness are all JavaScript modules that cooperate to publish NCC-02/NCC-05 data and resolve identity URIs.
 
 ## Project Structure
 
-- `relay/`: Contains the NIP-01 WebSocket relay server implementation.
-- `sidecar/`: Contains scripts for publishing NCC-00, NCC-02, and NCC-05 events to the relay.
-- `client/`: Contains the client-side resolver and connector logic for NCC-06.
+- `lib/relay.js`: The Node relay implementation delivering a protocol-dumb NIP-01 server that stores events and serves filters.
+- `scripts/run-relay.js`: Launches the Node relay using `config.json`.
+- `certs/`: TLS key/cert pair used by the `wss://` interface (packaged for the harness).
+- `ncc06-sidecar/`: Contains scripts for publishing NCC-00, NCC-02, and NCC-05 events to the relay.
+- `ncc06-client/`: Contains the client-side resolver and connector logic for NCC-06.
 - `test/`: Automated tests to validate NCC-06 behaviors.
 - `docs/`: Placeholder for NCC-00, NCC-02, NCC-05, and NCC-06 documentation.
 - `config.json`: Global configuration for the project.
@@ -34,25 +36,27 @@ This project implements a minimal Node.js-based Nostr relay, sidecar publisher, 
 All configuration is managed in `config.json` files.
 
 - `config.json` (root): Global settings, including default relay port and test keys.
-- `sidecar/config.json`: Specific configuration for the sidecar publisher, including the private key for publishing.
-- `client/config.json`: Specific configuration for the client, including the public key of the service to resolve and expected `k` value.
+- `ncc06-sidecar/config.json`: Specific configuration for the sidecar publisher, including the private key for publishing.
+- `ncc06-client/config.json`: Specific configuration for the client, including the public key of the service to resolve and expected `k` value.
 
 **NOTE:** For this minimal harness, `k` is treated as a required tag for `wss` endpoints, but uses a fixed placeholder scheme like `TESTKEY:<string>`. The client "verifies" `k` by comparing it to an expected string in its config.
 
-### Configuration
-
-- `config.json` now powers both the discovery relay (ws://127.0.0.1:7000) and the secure wss endpoint (`wss://127.0.0.1:7447`). The TLS key/cert pair live under `relay/certs/` and are wired into the wss interface so the client can authenticate the connection.
-- `sidecar/config.json` stores the relay’s service identity (`serviceSk`, `servicePk`, `serviceNpub`) together with the NCC-02/NCC-05 metadata (service id, locator id, TTLs, and the placeholder `k` value `TESTKEY:relay-local-dev-1`).
-- `client/config.json` now provides `serviceIdentityUri` (e.g., `wss://<service_npub>`). The resolver derives the pubkey from that identity, verifies matching `k` tags, and trusts the certificate published in `config.json` while connecting to the resolved endpoint.
+- `config.json` now powers both the discovery relay (ws://127.0.0.1:7000) and the secure wss endpoint (`wss://127.0.0.1:7447`). The TLS key/cert pair live under `certs/` and are consumed by the Node relay purely as encrypted transport; their fingerprints are asserted through NCC-02 `k` rather than Web PKI, and the client never performs traditional CA validation.
+- `ncc06-sidecar/config.json` stores the relay’s service identity (`serviceSk`, `servicePk`, `serviceNpub`) together with the NCC-02/NCC-05 metadata (service id, locator id, TTLs, and the placeholder `k` value `TESTKEY:relay-local-dev-1`).
+- `ncc06-client/config.json` now provides `serviceIdentityUri` (e.g., `wss://<service_npub>`). The resolver derives the pubkey from that identity and verifies matching `k` tags before connecting to whichever concrete endpoint the NCC-02/NCC-05 resolution returns; the TLS cert is only used for encryption, not trust.
 
 ### Running the Components
 
-#### 1. Start the Relay
+#### 1. Start the relay (Node.js)
 
+`scripts/run-relay.js` (invoked via `npm run relay`) launches the Node-based relay under `lib/relay.js` using `config.json`.  
 ```bash
 npm run relay
 ```
-The relay will start on the port specified in `config.json` (default: 7000).
+There is no compilation step for the JavaScript relay; `relay:build` simply reports that there is nothing to build.
+```bash
+npm run relay:build
+```
 
 #### 2. Run the Sidecar Publisher
 
@@ -72,7 +76,7 @@ npm run client:resolve-connect
 
 #### 4. Run the Full Local Environment (Relay + Sidecar)
 
-This command will start the relay and then run the sidecar publisher.
+This command will start the Node relay (via `scripts/run-relay.js`) and then run the sidecar publisher.
 
 ```bash
 npm run start-local-env
@@ -90,10 +94,11 @@ npm test
 
 ### Relay
 
-- Implements NIP-01 message handling: `EVENT`, `REQ`, `CLOSE`, `EOSE`.
-- Stores and serves events in-memory, including kinds 30058, 30059, 30060, 30061.
-- Supports filtering by `kinds`, `authors`, `since/until`, `#d`, and `#e` tags.
-- Performs basic event signature verification.
+- Implemented in Node.js via `lib/relay.js`, the relay handles the standard NIP-01 verbs (`EVENT`, `REQ`, `CLOSE`, `EOSE`) while remaining protocol-dumb.
+- Stores events in-memory and serves filters that touch `kinds`, `authors`, `since`/`until`, and `#d`/`#e` tags.
+- Validates incoming events via `nostr-tools` before responding with `OK` and notifying open subscriptions.
+- TLS material (from `certs/`) is used only for encrypting traffic; endpoint authenticity and `k` pinning stay on the NCC-02/NCC-05 client path.
+- `scripts/run-relay.js` launches the Node relay directly without any build step.
 
 ### Sidecar Publisher
 

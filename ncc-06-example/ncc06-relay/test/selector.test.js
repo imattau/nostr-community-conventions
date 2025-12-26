@@ -1,6 +1,6 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
-import { normalizeLocatorEndpoints, choosePreferredEndpoint } from '../client/selector.js';
+import { normalizeLocatorEndpoints, choosePreferredEndpoint } from '../ncc06-client/selector.js';
 
 test('choosePreferredEndpoint prefers onion when torPreferred and meets k expectations', () => {
   const endpoints = [

@@ -11,7 +11,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 
-const sidecarConfigPath = path.resolve(projectRoot, 'sidecar/config.json');
+const sidecarConfigPath = path.resolve(projectRoot, 'ncc06-sidecar/config.json');
+const clientConfigPath = path.resolve(projectRoot, 'ncc06-client/config.json');
 const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
 const SERVICE_PUBKEY = sidecarConfig.servicePk;
 const SERVICE_ID = sidecarConfig.serviceId;
@@ -59,7 +60,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
   before(async () => {
     console.log('Storing original config files...');
     originalSidecarConfigContent = readFileSync(sidecarConfigPath, 'utf-8');
-    originalClientConfigContent = readFileSync(path.resolve(projectRoot, 'client/config.json'), 'utf-8');
+    originalClientConfigContent = readFileSync(clientConfigPath, 'utf-8');
 
     console.log('Starting relay for tests...');
     await startRelay();
@@ -72,7 +73,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     writeFileSync(sidecarConfigPath, originalSidecarConfigContent);
     await new Promise(resolve => setTimeout(resolve, 50));
-    writeFileSync(path.resolve(projectRoot, 'client/config.json'), originalClientConfigContent);
+    writeFileSync(clientConfigPath, originalClientConfigContent);
     // Give file system a moment to catch up
     await new Promise(resolve => setTimeout(resolve, 100));
   });
@@ -85,7 +86,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
   test('1. Relay stores and serves NCC-02 Service Record (30059) via #d filter', async () => {
     console.log('Running sidecar to publish events...');
-    await runScript('sidecar/index.js');
+    await runScript('ncc06-sidecar/index.js');
     await new Promise(resolve => setTimeout(resolve, 500)); // Give relay time to process
 
     const filters = [{
@@ -106,7 +107,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
   test('2. Relay stores and serves NCC-05 Locator (30058) and client prefers it when fresh', async () => {
     // Sidecar already ran in test 1, so events should be in the relay
     // Now run the client, which should prefer NCC-05 if fresh
-    const clientOutput = await runScript('client/index.js');
+    const clientOutput = await runScript('ncc06-client/index.js');
     console.log('Client Output:', clientOutput);
 
     assert.ok(clientOutput.includes('Fresh NCC-05 locator found.'), 'Client should prefer fresh NCC-05');
@@ -129,12 +130,12 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
     // Re-publish events with expired NCC-05
     console.log('Re-running sidecar to publish expired NCC-05...');
-    await runScript('sidecar/index.js');
+    await runScript('ncc06-sidecar/index.js');
     await new Promise(resolve => setTimeout(resolve, 500)); // Give relay time to process
 
     // Run client, expecting fallback
     console.log('Running client, expecting fallback to NCC-02...');
-    const clientOutput = await runScript('client/index.js');
+    const clientOutput = await runScript('ncc06-client/index.js');
     console.log('Client Output:', clientOutput);
 
     assert.ok(clientOutput.includes('NCC-05 locator found but it is expired or not fresh.'), 'Client should detect expired NCC-05');
@@ -158,7 +159,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
     // Re-publish events with mismatched 'k'
     console.log('Re-running sidecar to publish NCC-05 with mismatched `k`...');
-    await runScript('sidecar/index.js');
+    await runScript('ncc06-sidecar/index.js');
     await new Promise(resolve => setTimeout(resolve, 500)); // Give relay time to process
 
     // Run client, expecting rejection due to 'k' mismatch
@@ -166,7 +167,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     let clientOutput = '';
     let clientError = null;
     try {
-      clientOutput = await runScript('client/index.js');
+      clientOutput = await runScript('ncc06-client/index.js');
     } catch (e) {
       clientError = e;
       clientOutput = e.message; // Capture output from error

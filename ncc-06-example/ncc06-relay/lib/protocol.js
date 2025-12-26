@@ -1,4 +1,4 @@
-// relay/protocol.js
+// lib/protocol.js
 
 /**
  * Parses an incoming WebSocket message string into a Nostr protocol message array.

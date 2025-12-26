@@ -4,7 +4,7 @@
   "relayHost": "127.0.0.1",
   "relayWssPort": 7447,
   "relayWssUrl": "wss://127.0.0.1:7447",
-  "relayTlsKey": "./relay/certs/server.key",
-  "relayTlsCert": "./relay/certs/server.crt",
+  "relayTlsKey": "./certs/server.key",
+  "relayTlsCert": "./certs/server.crt",
   "logLevel": "info"
 }

@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "relay": "node relay/server.js",
-    "sidecar:publish": "node sidecar/index.js",
-    "client:resolve-connect": "node client/index.js",
+    "relay": "node scripts/run-relay.js",
+    "relay:build": "node scripts/run-relay.js --build-only",
+    "sidecar:publish": "node ncc06-sidecar/index.js",
+    "client:resolve-connect": "node ncc06-client/index.js",
     "start-local-env": "npm-run-all --parallel relay sidecar:publish",
     "lint": "echo 'No linting configured yet.'"
   },
