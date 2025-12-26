@@ -1,0 +1,22 @@
+{
+  "name": "ncc-05",
+  "version": "1.0.0",
+  "description": "Nostr Community Convention 05 - Identity-Bound Service Locator Resolution",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["nostr", "dns", "identity", "resolution", "privacy"],
+  "author": "lostcause",
+  "license": "MIT",
+  "dependencies": {
+    "nostr-tools": "^2.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
