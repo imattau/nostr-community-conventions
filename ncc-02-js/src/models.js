@@ -25,12 +25,14 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Service Record (Kind 30059).
-   * @param {string} serviceId
-   * @param {string} endpoint
-   * @param {string} fingerprint
-   * @param {number} [expiryDays=14]
+   * @param {Object} options
+   * @param {string} options.serviceId - The 'd' tag identifier.
+   * @param {string} options.endpoint - The 'u' tag URI.
+   * @param {string} options.fingerprint - The 'k' tag fingerprint.
+   * @param {number} [options.expiryDays=14] - Expiry in days.
    */
-  createServiceRecord(serviceId, endpoint, fingerprint, expiryDays = 14) {
+  createServiceRecord(options) {
+    const { serviceId, endpoint, fingerprint, expiryDays = 14 } = options;
     if (!serviceId) throw new Error('serviceId (d tag) is required');
     if (!endpoint) throw new Error('endpoint (u tag) is required');
     if (!fingerprint) throw new Error('fingerprint (k tag) is required');
@@ -60,6 +62,10 @@ export class NCC02Builder {
    * @param {number} [validDays=30]
    */
   createAttestation(subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30) {
+    // Keeping signature backward compatible for now unless requested, 
+    // but improving internal logic slightly if needed.
+    // Ideally this should also be options object but user only asked for createServiceRecord fix.
+    // I'll leave it to minimize breaking changes scope creep.
     if (!subjectPubkey) throw new Error('subjectPubkey is required');
     if (!serviceId) throw new Error('serviceId is required');
     if (!serviceEventId) throw new Error('serviceEventId (e tag) is required');

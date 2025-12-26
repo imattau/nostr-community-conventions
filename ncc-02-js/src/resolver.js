@@ -1,4 +1,4 @@
-import { verifyEvent } from 'nostr-tools/pure';
+import { SimplePool, verifyEvent } from 'nostr-tools';
 import { KINDS } from './models.js';
 
 /**
@@ -33,12 +33,35 @@ export class NCC02Error extends Error {
  */
 export class NCC02Resolver {
   /**
-   * @param {any} relay - A relay client providing a `query` method.
-   * @param {string[]} [trustedCAPubkeys=[]] - List of CA pubkeys trusted by this client.
+   * @param {string[]} relays - List of relay URLs.
+   * @param {Object} [options={}]
+   * @param {SimplePool} [options.pool] - Shared SimplePool instance.
+   * @param {string[]} [options.trustedCAPubkeys=[]] - List of trusted CA pubkeys.
    */
-  constructor(relay, trustedCAPubkeys = []) {
-    this.relay = relay;
-    this.trustedCAPubkeys = new Set(trustedCAPubkeys);
+  constructor(relays, options = {}) {
+    if (!Array.isArray(relays)) {
+       throw new Error("NCC02Resolver expects an array of relay URLs.");
+    }
+    this.relays = relays;
+    this.pool = options.pool || new SimplePool();
+    this.ownsPool = !options.pool;
+    this.trustedCAPubkeys = new Set(options.trustedCAPubkeys || []);
+  }
+
+  /**
+   * Internal query helper using SimplePool.subscribeMany (since list() is deprecated).
+   * @param {Object} filter 
+   * @returns {Promise<any[]>}
+   */
+  async _query(filter) {
+      return new Promise((resolve) => {
+          const events = [];
+          // subscribeMany(relays, filters, callbacks)
+          const sub = this.pool.subscribeMany(this.relays, [filter], {
+              onevent(e) { events.push(e); },
+              oneose() { sub.close(); resolve(events); }
+          });
+      });
   }
 
   /**
@@ -62,7 +85,7 @@ export class NCC02Resolver {
 
     let serviceEvents;
     try {
-      serviceEvents = await this.relay.query({
+      serviceEvents = await this._query({
         kinds: [KINDS.SERVICE_RECORD],
         authors: [pubkey],
         '#d': [serviceId]
@@ -105,8 +128,8 @@ export class NCC02Resolver {
     let revocations;
     try {
       [attestations, revocations] = await Promise.all([
-        this.relay.query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
-        this.relay.query({ kinds: [KINDS.REVOCATION] })
+        this._query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
+        this._query({ kinds: [KINDS.REVOCATION] })
       ]);
     } catch (err) {
       throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
