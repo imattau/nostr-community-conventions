@@ -1,10 +1,14 @@
 import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group } from './index.js';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
+import { MockRelay } from './mock-relay.js';
 
 async function test() {
+    console.log('Starting Mock Relay...');
+    const relay = new MockRelay(8080);
+    const relays = ['ws://localhost:8080'];
+
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const relays = ['wss://relay.damus.io'];
 
     const publisher = new NCC05Publisher();
     const resolver = new NCC05Resolver({ bootstrapRelays: relays });
@@ -28,7 +32,8 @@ async function test() {
     if (resolved) {
         console.log('Successfully resolved:', JSON.stringify(resolved, null, 2));
     } else {
-        console.log('Failed to resolve.');
+        console.error('FAILED: resolution.');
+        process.exit(1);
     }
 
     // Test Strict Mode with Expired Record
@@ -126,7 +131,7 @@ async function test() {
         process.exit(1);
     }
 
-    // Test Group Wrapping (NIP-59 style Multi-Recipient)
+    // Test Group Wrapping (Multi-Recipient)
     console.log('Testing Group Wrapping (Multi-Recipient)...');
     const skAlice = generateSecretKey();
     const pkAlice = getPublicKey(skAlice);
@@ -158,6 +163,8 @@ async function test() {
 
     publisher.close(relays);
     resolver.close();
+    relay.stop();
+    console.log('Local Mock Test Suite Passed.');
     process.exit(0);
 }
 
