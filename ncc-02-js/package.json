@@ -2,10 +2,12 @@
   "name": "ncc-02-js",
   "version": "0.1.0",
   "description": "Nostr-native service discovery and trust implementation (NCC-02)",
-  "main": "src/index.js",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "type": "module",
   "scripts": {
-    "test": "node tests/test.js"
+    "test": "node tests/test.js",
+    "build": "esbuild src/index.js --bundle --platform=node --format=cjs --outfile=dist/index.js && esbuild src/index.js --bundle --platform=node --format=esm --outfile=dist/index.mjs"
   },
   "keywords": [
     "nostr",
@@ -19,7 +21,11 @@
   "dependencies": {
     "nostr-tools": "^2.10.4"
   },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
   "files": [
+    "dist",
     "src",
     "README.md",
     "LICENSE"

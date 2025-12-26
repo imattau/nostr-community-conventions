@@ -1,5 +1,5 @@
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { NCC02Builder, NCC02Resolver, MockRelay } from '../src/index.js';
+import { NCC02Builder, NCC02Resolver, MockRelay } from '../dist/index.mjs';
 
 async function runTests() {
   console.log('--- NCC-02 JS Library Refinement Tests ---');
