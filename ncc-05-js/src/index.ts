@@ -18,6 +18,64 @@ import {
     generateSecretKey
 } from 'nostr-tools';
 
+// --- Error Classes ---
+
+export class NCC05Error extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NCC05Error';
+    }
+}
+
+export class NCC05RelayError extends NCC05Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NCC05RelayError';
+    }
+}
+
+export class NCC05TimeoutError extends NCC05Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NCC05TimeoutError';
+    }
+}
+
+export class NCC05DecryptionError extends NCC05Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NCC05DecryptionError';
+    }
+}
+
+export class NCC05ArgumentError extends NCC05Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NCC05ArgumentError';
+    }
+}
+
+// --- Helpers ---
+
+function ensureUint8Array(key: string | Uint8Array): Uint8Array {
+    if (key instanceof Uint8Array) return key;
+    if (typeof key === 'string') {
+        // Assume hex string
+        if (key.match(/^[0-9a-fA-F]+$/)) {
+             return new Uint8Array(key.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+        }
+        throw new NCC05ArgumentError("Invalid hex key provided");
+    }
+    throw new NCC05ArgumentError("Key must be a hex string or Uint8Array");
+}
+
+function getHexPubkey(key: string | Uint8Array): string {
+    if (key instanceof Uint8Array) {
+        return Array.from(key).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    return key;
+}
+
 /**
  * Represents a single reachable service endpoint.
  */
@@ -60,6 +118,20 @@ export interface ResolverOptions {
     timeout?: number;
     /** Custom WebSocket implementation (e.g., for Tor/SOCKS5 in Node.js) */
     websocketImplementation?: any;
+    /** Existing SimplePool instance to share connections */
+    pool?: SimplePool;
+}
+
+/**
+ * Options for configuring the NCC05Publisher.
+ */
+export interface PublisherOptions {
+    /** Custom WebSocket implementation */
+    websocketImplementation?: any;
+    /** Existing SimplePool instance */
+    pool?: SimplePool;
+    /** Timeout for publishing in milliseconds (default: 5000) */
+    timeout?: number;
 }
 
 /**
@@ -106,7 +178,7 @@ export class NCC05Group {
     static async resolveAsGroup(
         resolver: NCC05Resolver,
         groupPubkey: string,
-        groupSecretKey: Uint8Array,
+        groupSecretKey: string | Uint8Array,
         identifier: string = 'addr'
     ): Promise<NCC05Payload | null> {
         return resolver.resolve(groupPubkey, groupSecretKey, identifier);
@@ -125,11 +197,19 @@ export class NCC05Resolver {
      * @param options - Configuration for the resolver.
      */
     constructor(options: ResolverOptions = {}) {
-        this.pool = new SimplePool();
-        if (options.websocketImplementation) {
-            // @ts-ignore - Patching pool for custom transport
-            this.pool.websocketImplementation = options.websocketImplementation;
+        this.pool = options.pool || new SimplePool();
+        
+        if (!options.pool) {
+            if (options.websocketImplementation) {
+                // @ts-ignore - Patching pool for custom transport
+                this.pool.websocketImplementation = options.websocketImplementation;
+            } else if (typeof globalThis !== 'undefined' && !globalThis.WebSocket) {
+                // In Node.js environment without global WebSocket, this might fail later.
+                // We leave it to the user or nostr-tools to handle, but this logic
+                // allows 'websocketImplementation' to be explicitly checked.
+            }
         }
+
         this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://nos.lol'];
         this.timeout = options.timeout || 10000;
     }
@@ -144,11 +224,13 @@ export class NCC05Resolver {
      * @param secretKey - Your secret key (required if the record is encrypted).
      * @param identifier - The 'd' tag of the record (default: 'addr').
      * @param options - Resolution options (strict mode, gossip discovery).
-     * @returns The resolved and validated NCC05Payload, or null if not found/invalid.
+     * @returns The resolved and validated NCC05Payload, or null if not found.
+     * @throws {NCC05TimeoutError} if resolution times out.
+     * @throws {NCC05RelayError} if underlying relay communication fails.
      */
     async resolve(
         targetPubkey: string, 
-        secretKey?: Uint8Array, 
+        secretKey?: string | Uint8Array, 
         identifier: string = 'addr',
         options: { strict?: boolean, gossip?: boolean } = {}
     ): Promise<NCC05Payload | null> {
@@ -162,18 +244,23 @@ export class NCC05Resolver {
 
         // 1. NIP-65 Gossip Discovery
         if (options.gossip) {
-            const relayListEvent = await this.pool.get(this.bootstrapRelays, {
-                authors: [hexPubkey],
-                kinds: [10002]
-            });
-            // Security: Verify NIP-65 event signature and author
-            if (relayListEvent && verifyEvent(relayListEvent) && relayListEvent.pubkey === hexPubkey) {
-                const discoveredRelays = relayListEvent.tags
-                    .filter(t => t[0] === 'r')
-                    .map(t => t[1]);
-                if (discoveredRelays.length > 0) {
-                    queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+            try {
+                const relayListEvent = await this.pool.get(this.bootstrapRelays, {
+                    authors: [hexPubkey],
+                    kinds: [10002]
+                });
+                // Security: Verify NIP-65 event signature and author
+                if (relayListEvent && verifyEvent(relayListEvent) && relayListEvent.pubkey === hexPubkey) {
+                    const discoveredRelays = relayListEvent.tags
+                        .filter(t => t[0] === 'r')
+                        .map(t => t[1]);
+                    if (discoveredRelays.length > 0) {
+                        queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+                    }
                 }
+            } catch (e: any) {
+                console.warn(`[NCC-05] Gossip discovery failed: ${e.message}`);
+                // Proceed with bootstrap relays
             }
         }
 
@@ -184,21 +271,26 @@ export class NCC05Resolver {
             limit: 10
         };
 
-        const queryPromise = this.pool.querySync(queryRelays, filter);
-        const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), this.timeout));
-        const result = await Promise.race([queryPromise, timeoutPromise]);
-        
-        if (!result || (Array.isArray(result) && result.length === 0)) return null;
-        
-        // 2. Filter for valid signatures, correct author, and sort by created_at
-        const validEvents = (result as Event[])
-            .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
-            .sort((a, b) => b.created_at - a.created_at);
-
-        if (validEvents.length === 0) return null;
-        const latestEvent = validEvents[0];
+        const sk = secretKey ? ensureUint8Array(secretKey) : undefined;
 
         try {
+            const queryPromise = this.pool.querySync(queryRelays, filter);
+            const timeoutPromise = new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new NCC05TimeoutError("Resolution timed out")), this.timeout)
+            );
+            
+            const result = await Promise.race([queryPromise, timeoutPromise]);
+            
+            if (!result || (Array.isArray(result) && result.length === 0)) return null;
+            
+            // 2. Filter for valid signatures, correct author, and sort by created_at
+            const validEvents = (result as Event[])
+                .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
+                .sort((a, b) => b.created_at - a.created_at);
+
+            if (validEvents.length === 0) return null;
+            const latestEvent = validEvents[0];
+
             let content = latestEvent.content;
             
             // Security: Robust multi-recipient detection
@@ -206,35 +298,49 @@ export class NCC05Resolver {
                              content.includes('"ciphertext"') && 
                              content.startsWith('{');
 
-            if (isWrapped && secretKey) {
-                const wrapped = JSON.parse(content) as WrappedContent;
-                const myPk = getPublicKey(secretKey);
-                const myWrap = wrapped.wraps[myPk];
-                
-                if (myWrap) {
-                    const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
-                    const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
+            if (isWrapped && sk) {
+                try {
+                    const wrapped = JSON.parse(content) as WrappedContent;
+                    const myPk = getPublicKey(sk);
+                    const myWrap = wrapped.wraps[myPk];
                     
-                    // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
-                    const symmetricKey = new Uint8Array(
-                        symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-                    );
-                    
-                    const sessionConversationKey = nip44.getConversationKey(
-                        symmetricKey, getPublicKey(symmetricKey)
-                    );
-                    content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
-                } else {
-                    return null; // Not intended for us
+                    if (myWrap) {
+                        const conversationKey = nip44.getConversationKey(sk, hexPubkey);
+                        const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
+                        
+                        // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
+                        const symmetricKey = new Uint8Array(
+                            symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+                        );
+                        
+                        const sessionConversationKey = nip44.getConversationKey(
+                            symmetricKey, getPublicKey(symmetricKey)
+                        );
+                        content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
+                    } else {
+                        return null; // Not intended for us
+                    }
+                } catch (e) {
+                    throw new NCC05DecryptionError("Failed to decrypt wrapped content");
                 }
-            } else if (secretKey && !content.startsWith('{')) {
+            } else if (sk && !content.startsWith('{')) {
                 // Standard NIP-44 (likely encrypted if not starting with {)
-                const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
-                content = nip44.decrypt(latestEvent.content, conversationKey);
+                try {
+                    const conversationKey = nip44.getConversationKey(sk, hexPubkey);
+                    content = nip44.decrypt(latestEvent.content, conversationKey);
+                } catch (e) {
+                     throw new NCC05DecryptionError("Failed to decrypt content");
+                }
             }
 
             // Security: Safe JSON parsing
-            const payload = JSON.parse(content) as NCC05Payload;
+            let payload: NCC05Payload;
+            try {
+                payload = JSON.parse(content) as NCC05Payload;
+            } catch (e) {
+                return null; // Invalid JSON
+            }
+
             if (!payload || !payload.endpoints || !Array.isArray(payload.endpoints)) {
                 return null;
             }
@@ -248,7 +354,8 @@ export class NCC05Resolver {
 
             return payload;
         } catch (e) {
-            return null; // Decryption or parsing failed
+            if (e instanceof NCC05Error) throw e;
+            throw new NCC05RelayError(`Relay query failed: ${(e as Error).message}`);
         }
     }
 
@@ -256,6 +363,10 @@ export class NCC05Resolver {
      * Closes connections to all relays in the pool.
      */
     close() {
+        // If we didn't create the pool, we probably shouldn't close it?
+        // But the previous implementation did.
+        // We will only close bootstrap relays to be safe if sharing pool.
+        // Actually, pool.close() takes args.
         this.pool.close(this.bootstrapRelays);
     }
 }
@@ -265,16 +376,51 @@ export class NCC05Resolver {
  */
 export class NCC05Publisher {
     private pool: SimplePool;
+    private timeout: number;
 
     /**
      * @param options - Configuration for the publisher.
      */
-    constructor(options: { websocketImplementation?: any } = {}) {
-        this.pool = new SimplePool();
-        if (options.websocketImplementation) {
+    constructor(options: PublisherOptions = {}) {
+        this.pool = options.pool || new SimplePool();
+        if (!options.pool && options.websocketImplementation) {
             // @ts-ignore
             this.pool.websocketImplementation = options.websocketImplementation;
         }
+        this.timeout = options.timeout || 5000;
+    }
+
+    private async _publishToRelays(relays: string[], signedEvent: Event): Promise<void> {
+        const publishPromises = this.pool.publish(relays, signedEvent);
+        
+        // Convert to promise that resolves/rejects based on timeout
+        const wrappedPromises = publishPromises.map(p => {
+             // In nostr-tools v2, publish returns Promise<void>. 
+             // We wrap it to handle timeout.
+             return new Promise<void>((resolve, reject) => {
+                 const timer = setTimeout(() => reject(new NCC05TimeoutError("Publish timed out")), this.timeout);
+                 p.then(() => {
+                     clearTimeout(timer);
+                     resolve();
+                 }).catch((err) => {
+                     clearTimeout(timer);
+                     reject(err);
+                 });
+             });
+        });
+
+        const results = await Promise.allSettled(wrappedPromises);
+        const successful = results.filter(r => r.status === 'fulfilled');
+        
+        if (successful.length === 0) {
+            const errors = results
+                .filter(r => r.status === 'rejected')
+                .map(r => (r as PromiseRejectedResult).reason.message)
+                .join(', ');
+            throw new NCC05RelayError(`Failed to publish to any relay. Errors: ${errors}`);
+        }
+        
+        // If partial success, we consider it a success.
     }
 
     /**
@@ -290,11 +436,12 @@ export class NCC05Publisher {
      */
     async publishWrapped(
         relays: string[],
-        secretKey: Uint8Array,
+        secretKey: string | Uint8Array,
         recipients: string[],
         payload: NCC05Payload,
         identifier: string = 'addr'
     ): Promise<Event> {
+        const sk = ensureUint8Array(secretKey);
         const sessionKey = generateSecretKey();
         const sessionKeyHex = Array.from(sessionKey).map(b => b.toString(16).padStart(2, '0')).join('');
         
@@ -303,7 +450,7 @@ export class NCC05Publisher {
 
         const wraps: Record<string, string> = {};
         for (const rPk of recipients) {
-            const conversationKey = nip44.getConversationKey(secretKey, rPk);
+            const conversationKey = nip44.getConversationKey(sk, rPk);
             wraps[rPk] = nip44.encrypt(sessionKeyHex, conversationKey);
         }
 
@@ -316,8 +463,8 @@ export class NCC05Publisher {
             content: JSON.stringify(wrappedContent),
         };
 
-        const signedEvent = finalizeEvent(eventTemplate, secretKey);
-        await Promise.all(this.pool.publish(relays, signedEvent));
+        const signedEvent = finalizeEvent(eventTemplate, sk);
+        await this._publishToRelays(relays, signedEvent);
         return signedEvent;
     }
 
@@ -332,17 +479,18 @@ export class NCC05Publisher {
      */
     async publish(
         relays: string[],
-        secretKey: Uint8Array,
+        secretKey: string | Uint8Array,
         payload: NCC05Payload,
         options: { identifier?: string, recipientPubkey?: string, public?: boolean } = {}
     ): Promise<Event> {
-        const myPubkey = getPublicKey(secretKey);
+        const sk = ensureUint8Array(secretKey);
+        const myPubkey = getPublicKey(sk);
         const identifier = options.identifier || 'addr';
         let content = JSON.stringify(payload);
 
         if (!options.public) {
             const encryptionTarget = options.recipientPubkey || myPubkey;
-            const conversationKey = nip44.getConversationKey(secretKey, encryptionTarget);
+            const conversationKey = nip44.getConversationKey(sk, encryptionTarget);
             content = nip44.encrypt(content, conversationKey);
         }
 
@@ -354,8 +502,8 @@ export class NCC05Publisher {
             content: content,
         };
 
-        const signedEvent = finalizeEvent(eventTemplate, secretKey);
-        await Promise.all(this.pool.publish(relays, signedEvent));
+        const signedEvent = finalizeEvent(eventTemplate, sk);
+        await this._publishToRelays(relays, signedEvent);
         return signedEvent;
     }
 
