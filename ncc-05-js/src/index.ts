@@ -190,6 +190,7 @@ export class NCC05Group {
  */
 export class NCC05Resolver {
     private pool: SimplePool;
+    private _ownPool: boolean;
     private bootstrapRelays: string[];
     private timeout: number;
 
@@ -197,16 +198,16 @@ export class NCC05Resolver {
      * @param options - Configuration for the resolver.
      */
     constructor(options: ResolverOptions = {}) {
+        this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
         
-        if (!options.pool) {
+        if (this._ownPool) {
             if (options.websocketImplementation) {
                 // @ts-ignore - Patching pool for custom transport
                 this.pool.websocketImplementation = options.websocketImplementation;
-            } else if (typeof globalThis !== 'undefined' && !globalThis.WebSocket) {
-                // In Node.js environment without global WebSocket, this might fail later.
-                // We leave it to the user or nostr-tools to handle, but this logic
-                // allows 'websocketImplementation' to be explicitly checked.
+            } else if (typeof WebSocket === 'undefined' && typeof globalThis !== 'undefined' && globalThis.WebSocket) {
+                 // @ts-ignore
+                 this.pool.websocketImplementation = globalThis.WebSocket;
             }
         }
 
@@ -360,14 +361,12 @@ export class NCC05Resolver {
     }
 
     /**
-     * Closes connections to all relays in the pool.
+     * Closes connections to all relays in the pool if managed internally.
      */
     close() {
-        // If we didn't create the pool, we probably shouldn't close it?
-        // But the previous implementation did.
-        // We will only close bootstrap relays to be safe if sharing pool.
-        // Actually, pool.close() takes args.
-        this.pool.close(this.bootstrapRelays);
+        if (this._ownPool) {
+            this.pool.close(this.bootstrapRelays);
+        }
     }
 }
 
@@ -376,17 +375,26 @@ export class NCC05Resolver {
  */
 export class NCC05Publisher {
     private pool: SimplePool;
+    private _ownPool: boolean;
     private timeout: number;
 
     /**
      * @param options - Configuration for the publisher.
      */
     constructor(options: PublisherOptions = {}) {
+        this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
-        if (!options.pool && options.websocketImplementation) {
-            // @ts-ignore
-            this.pool.websocketImplementation = options.websocketImplementation;
+        
+        if (this._ownPool) {
+            if (options.websocketImplementation) {
+                // @ts-ignore
+                this.pool.websocketImplementation = options.websocketImplementation;
+            } else if (typeof WebSocket === 'undefined' && typeof globalThis !== 'undefined' && globalThis.WebSocket) {
+                // @ts-ignore
+                this.pool.websocketImplementation = globalThis.WebSocket;
+            }
         }
+        
         this.timeout = options.timeout || 5000;
     }
 
@@ -508,9 +516,11 @@ export class NCC05Publisher {
     }
 
     /**
-     * Closes connections to the specified relays.
+     * Closes connections to the specified relays if managed internally.
      */
     close(relays: string[]) {
-        this.pool.close(relays);
+        if (this._ownPool) {
+            this.pool.close(relays);
+        }
     }
 }
