@@ -119,7 +119,11 @@ export function renderInspector(container, item, state, options = {}) {
             addRow("Previous", item.tags?.previous);
             addRow("Steward", item.tags?.steward);
             addRow("Reason", item.tags?.reason);
-            addRow("Effective", item.tags?.effective_at);
+            const effAt = item.effective_at || item.tags?.effective_at;
+            if (effAt) {
+                const date = new Date(parseInt(effAt, 10) * 1000).toLocaleString();
+                addRow("Effective", date);
+            }
         } else if (item.kind === KINDS.endorsement) {
             addRow("Endorses", item.tags?.endorses);
             addRow("Roles", (item.tags?.roles || item.tags?.role || []).join(", "));
@@ -181,15 +185,6 @@ function renderActions(container, item, isPublished, isEditMode) {
             publishBtn.dataset.id = item.id;
             container.appendChild(publishBtn);
 
-            const announceWrap = document.createElement("label");
-            announceWrap.className = "p-checkbox-label";
-            announceWrap.style.marginTop = "4px";
-            announceWrap.innerHTML = `
-                <input type="checkbox" id="p-announce-check" />
-                <span>Post Announcement</span>
-            `;
-            container.appendChild(announceWrap);
-
             // DELETE or WITHDRAW logic for draft
             if (!item.event_id) {
                 const deleteBtn = document.createElement("button");
@@ -231,10 +226,25 @@ function renderActions(container, item, isPublished, isEditMode) {
         // EDIT MODE ACTIONS
         if (!isPublished) {
             const saveBtn = document.createElement("button");
-            saveBtn.className = "p-btn-accent";
-            saveBtn.textContent = "Save (Ctrl+S)";
+            saveBtn.className = "p-btn-ghost";
+            saveBtn.textContent = "Save Draft (Ctrl+S)";
             saveBtn.dataset.action = "save-item";
             container.appendChild(saveBtn);
+
+            const savePublishBtn = document.createElement("button");
+            savePublishBtn.className = "p-btn-accent";
+            savePublishBtn.textContent = "Save & Publish";
+            savePublishBtn.dataset.action = "save-publish-item";
+            container.appendChild(savePublishBtn);
+
+            const announceWrap = document.createElement("label");
+            announceWrap.className = "p-checkbox-label";
+            announceWrap.style.marginTop = "4px";
+            announceWrap.innerHTML = `
+                <input type="checkbox" id="p-announce-check" />
+                <span>Post Announcement</span>
+            `;
+            container.appendChild(announceWrap);
         }
         else {
             const saveMsg = document.createElement("span");

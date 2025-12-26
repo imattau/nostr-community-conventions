@@ -344,6 +344,14 @@ async function handleInspectorAction(action, id) {
         handleReviseAction(id);
     } else if (action === "save-item") {
         handleSaveShortcut();
+    } else if (action === "save-publish-item") {
+        const item = findItem(currentItemId);
+        if (item && confirm(`Save changes and publish this ${TYPE_LABELS[item.kind]}?`)) {
+            const editor = document.getElementById("p-editor");
+            const content = editor?.value || item.content;
+            const shouldAnnounce = document.getElementById("p-announce-check")?.checked || false;
+            eventBus.emit('save-publish-item', { id: currentItemId, content, item, shouldAnnounce });
+        }
     } else if (action === "cancel-item") {
         isEditMode = false;
         

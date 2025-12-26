@@ -914,6 +914,23 @@ function setupEventListeners() {
     });
 
     eventBus.on('save-item', ({ id, content, item }) => handlePowerSave(id, content, item));
+    
+    eventBus.on('save-publish-item', async ({ id, content, item, shouldAnnounce }) => {
+        try {
+            const savedItem = await handlePowerSave(id, content, item);
+            if (savedItem) {
+                // Determine kind string for publishDraft
+                const kindStr = savedItem.kind === KINDS.ncc ? "ncc" : 
+                               savedItem.kind === KINDS.nsr ? "nsr" :
+                               savedItem.kind === KINDS.endorsement ? "endorsement" : "supporting";
+                await publishDraft(savedItem, kindStr, shouldAnnounce);
+            }
+        } catch (err) {
+            console.error("Save & Publish failed:", err);
+            showToast(`Save & Publish failed: ${err.message}`, "error");
+        }
+    });
+
     eventBus.on('sign-out', signOutSigner);
     eventBus.on('update-signer-config', ({ mode }) => handleUpdateSignerConfig(mode));
     eventBus.on('export-all', handleExportAllDrafts);

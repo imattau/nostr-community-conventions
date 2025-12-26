@@ -111,6 +111,7 @@ export function payloadToDraft(payload) {
     event_id: payload.event_id || payload.id || "",
     author_pubkey: payload.author_pubkey || payload.pubkey || "",
     published_at: tagMap.published_at ? Number(tagMap.published_at[0]) : null,
+    effective_at: tagMap.effective_at ? tagMap.effective_at[0] : null,
     // raw_event is now stored centrally in state.eventsById, so don't duplicate it here.
     // Instead, this draft is a view of the event.
   };
