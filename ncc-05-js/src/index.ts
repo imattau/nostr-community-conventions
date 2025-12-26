@@ -26,6 +26,7 @@ export interface NCC05Payload {
 export interface ResolverOptions {
     bootstrapRelays?: string[];
     timeout?: number;
+    websocketImplementation?: any; // To support Tor/SOCKS5 proxies in Node.js
 }
 
 export class NCC05Resolver {
@@ -35,6 +36,10 @@ export class NCC05Resolver {
 
     constructor(options: ResolverOptions = {}) {
         this.pool = new SimplePool();
+        if (options.websocketImplementation) {
+            // @ts-ignore - Patching pool for custom WebSocket (Tor/Proxy)
+            this.pool.websocketImplementation = options.websocketImplementation;
+        }
         this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://nos.lol'];
         this.timeout = options.timeout || 10000;
     }
@@ -42,12 +47,17 @@ export class NCC05Resolver {
     /**
      * Resolve a locator record for a given pubkey.
      */
-    async resolve(targetPubkey: string, secretKey: Uint8Array, identifier: string = 'addr'): Promise<NCC05Payload | null> {
+    async resolve(
+        targetPubkey: string, 
+        secretKey: Uint8Array, 
+        identifier: string = 'addr',
+        options: { strict?: boolean } = {}
+    ): Promise<NCC05Payload | null> {
         const filter = {
             authors: [targetPubkey],
             kinds: [30058],
             '#d': [identifier],
-            limit: 1
+            limit: 5 // Get a few to find the latest valid signed one
         };
 
         const queryPromise = this.pool.querySync(this.bootstrapRelays, filter);
@@ -59,24 +69,33 @@ export class NCC05Resolver {
         
         if (!result || (Array.isArray(result) && result.length === 0)) return null;
         
-        const events = result as Event[];
+        // 1. Filter for valid signatures and sort by created_at
+        const validEvents = (result as Event[])
+            .filter(e => verifyEvent(e))
+            .sort((a, b) => b.created_at - a.created_at);
 
-        // 2. Select latest valid event
-        const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
-        
-        if (!verifyEvent(latestEvent)) {
-            throw new Error('Invalid event signature');
-        }
+        if (validEvents.length === 0) return null;
+        const latestEvent = validEvents[0];
 
-        // 3. Decrypt
+        // 2. Decrypt
         try {
             const conversationKey = nip44.getConversationKey(secretKey, targetPubkey);
             const decrypted = nip44.decrypt(latestEvent.content, conversationKey);
             const payload = JSON.parse(decrypted) as NCC05Payload;
 
+            // 3. Basic Validation
+            if (!payload.endpoints || !Array.isArray(payload.endpoints)) {
+                console.error('Invalid NCC-05 payload structure');
+                return null;
+            }
+
             // 4. Freshness check
             const now = Math.floor(Date.now() / 1000);
             if (now > payload.updated_at + payload.ttl) {
+                if (options.strict) {
+                    console.warn('Rejecting expired NCC-05 record (strict mode)');
+                    return null;
+                }
                 console.warn('NCC-05 record has expired');
             }
 

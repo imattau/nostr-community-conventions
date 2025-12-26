@@ -69,6 +69,29 @@ await publisher.publish(relays, mySecretKey, payload);
 - **NIP-44 Encryption**: All locator records are encrypted by default.
 - **NIP-01/NIP-33**: Uses standard Nostr primitives.
 - **Identity-Centric**: Resolution is bound to a cryptographic identity (Pubkey).
+- **Tor/Proxy Support**: Easily route relay traffic through SOCKS5 in Node.js.
+
+## Tor & Privacy (Node.js)
+
+To resolve anonymously through Tor, you can use the `socks-proxy-agent` and a custom `WebSocket` implementation:
+
+```typescript
+import { NCC05Resolver } from 'ncc-05';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { WebSocket } from 'ws';
+
+// Create a custom WebSocket class that uses the Tor agent
+class TorWebSocket extends WebSocket {
+    constructor(address: string, protocols?: string | string[]) {
+        const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
+        super(address, protocols, { agent });
+    }
+}
+
+const resolver = new NCC05Resolver({
+    websocketImplementation: TorWebSocket
+});
+```
 
 ## License
 

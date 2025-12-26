@@ -31,6 +31,24 @@ async function test() {
         console.log('Failed to resolve.');
     }
 
+    // Test Strict Mode with Expired Record
+    console.log('Testing expired record in strict mode...');
+    const expiredPayload: NCC05Payload = {
+        v: 1,
+        ttl: 1,
+        updated_at: Math.floor(Date.now() / 1000) - 10, // 10s ago
+        endpoints: [{ type: 'tcp', uri: '1.1.1.1:1', priority: 1, family: 'ipv4' }]
+    };
+    await publisher.publish(relays, sk, expiredPayload, 'expired-test');
+    const strictResult = await resolver.resolve(pk, sk, 'expired-test', { strict: true });
+    
+    if (strictResult === null) {
+        console.log('Correctly rejected expired record in strict mode.');
+    } else {
+        console.error('FAILED: Strict mode allowed an expired record.');
+        process.exit(1);
+    }
+
     publisher.close(relays);
     resolver.close();
     process.exit(0);
