@@ -25,13 +25,19 @@ async def resolve(provided_keys=None, target_pk=None,
                             help="The 'd' tag identifier")
         args = parser.parse_args()
 
-        if not args.nsec:
-            print("Error: --nsec is required.")
+        if args.nsec:
+            keys = Keys.parse(getpass.getpass("Enter your nsec: "))
+        else:
+            keys = None
+
+        target_pubkey_hex = args.pubkey
+        if not target_pubkey_hex and keys:
+            target_pubkey_hex = keys.public_key().to_hex()
+
+        if not target_pubkey_hex:
+            print("Error: --pubkey (or --nsec) required.")
             return None
 
-        keys = Keys.parse(getpass.getpass("Enter your nsec: "))
-        target_pubkey_hex = args.pubkey if args.pubkey else \
-            keys.public_key().to_hex()
         gossip_enabled = args.gossip
         proxy_addr = args.proxy
         relay_arg = args.relay
@@ -39,8 +45,7 @@ async def resolve(provided_keys=None, target_pk=None,
         id_tag = args.identifier
     else:
         keys = provided_keys
-        target_pubkey_hex = target_pk if target_pk else \
-            keys.public_key().to_hex()
+        target_pubkey_hex = target_pk
         gossip_enabled = gossip
         proxy_addr = None
         relay_arg = bootstrap_relay
@@ -49,35 +54,26 @@ async def resolve(provided_keys=None, target_pk=None,
 
     # Setup Client
     from nostr_sdk import ClientBuilder
-    builder = ClientBuilder().signer(NostrSigner.keys(keys))
+    if keys:
+        builder = ClientBuilder().signer(NostrSigner.keys(keys))
+    else:
+        builder = ClientBuilder()
 
     opts = ClientOptions()
     if gossip_enabled:
-        print("Gossip enabled. Discovering relay list for target...")
         limits = GossipRelayLimits(
-            read_relays_per_user=2,
-            write_relays_per_user=2,
-            hint_relays_per_user=1,
-            most_used_relays_per_user=1,
-            nip17_relays=0
+            read_relays_per_user=2, write_relays_per_user=2,
+            hint_relays_per_user=1, most_used_relays_per_user=1, nip17_relays=0
         )
         opts = opts.gossip(GossipOptions(limits=limits))
 
     if proxy_addr:
-        print(f"Routing through proxy: {proxy_addr}")
         conn = Connection().mode(ConnectionMode.PROXY).addr(proxy_addr)
         opts = opts.connection(conn)
 
     client = builder.opts(opts).build()
-
-    if relay_arg:
-        relay_url = relay_arg
-    else:
-        relay_url = "wss://relay.damus.io" if live_mode \
-            else "ws://localhost:8080"
-
-    print(f"Bootstrap Relay: {relay_url}")
-    print(f"Target Pubkey: {target_pubkey_hex}")
+    relay_url = relay_arg or ("wss://relay.damus.io" if live_mode
+                              else "ws://localhost:8080")
 
     await client.add_relay(RelayUrl.parse(relay_url))
     await client.connect()
@@ -85,8 +81,7 @@ async def resolve(provided_keys=None, target_pk=None,
     f = Filter().author(PublicKey.parse(target_pubkey_hex)) \
         .kind(Kind(30058)).identifier(id_tag).limit(10)
 
-    print("Fetching event...")
-    # fetch_events with gossip will hunt for kind:10002 first
+    print(f"Fetching event for {target_pubkey_hex[:8]}...")
     events_obj = await client.fetch_events(f, timedelta(seconds=15))
     all_events = events_obj.to_vec()
 
@@ -94,21 +89,22 @@ async def resolve(provided_keys=None, target_pk=None,
         print("No record found.")
         return None
 
-    # Sort to ensure we have the latest
     all_events.sort(key=lambda x: x.created_at().as_secs(), reverse=True)
     latest_event = all_events[0]
-    print(f"Found event {latest_event.id().to_hex()} "
-          f"created at {latest_event.created_at().as_secs()}")
 
-    # 4. Decrypt
+    # 4. Decrypt or Parse
     try:
-        decrypted = nip44_decrypt(
-            keys.secret_key(),
-            latest_event.author(),
-            latest_event.content()
-        )
-        payload = json.loads(decrypted)
+        content = latest_event.content()
+        # If it looks like JSON, it might be plaintext
+        if not (content.startswith('{') or content.startswith('[')):
+            if not keys:
+                print("Error: Event content is encrypted. Use --nsec.")
+                return None
+            content = nip44_decrypt(
+                keys.secret_key(), latest_event.author(), content
+            )
 
+        payload = json.loads(content)
         print("\n--- NCC-05 Resolution Result ---")
         for ep in payload.get('endpoints', []):
             print(f"  - {ep.get('type')}://{ep.get('uri')} "
@@ -116,7 +112,7 @@ async def resolve(provided_keys=None, target_pk=None,
         print("---------------------------------")
         return payload
     except Exception as e:
-        print(f"Decryption failed: {e}")
+        print(f"Failed to process content: {e}")
         return None
 
 

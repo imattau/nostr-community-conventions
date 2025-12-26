@@ -11,6 +11,19 @@ from nostr_sdk import (
 )
 
 
+class NCC05Group:
+    """Helper for generating shared identities for multiple recipients."""
+    @staticmethod
+    def generate():
+        keys = Keys.generate()
+        return {
+            "nsec": keys.secret_key().to_bech32(),
+            "npub": keys.public_key().to_bech32(),
+            "hex": keys.public_key().to_hex(),
+            "keys": keys
+        }
+
+
 def get_local_public_ipv6():
     """Try to find a global IPv6 address on local interfaces."""
     try:
@@ -49,7 +62,8 @@ def get_auto_onion_address(control_port=9051, service_port=8080):
 
 
 async def run(provided_keys=None, manual_ip=None, relay=None,
-              relay_list=None, d_tag="addr", auto_onion=False):
+              relay_list=None, d_tag="addr", auto_onion=False,
+              recipient=None, is_public=False):
     # Setup argparse if not called from a test
     if provided_keys is None:
         parser = argparse.ArgumentParser(description="NCC-05 Publisher PoC")
@@ -57,6 +71,8 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
                             help="Use existing nsec (interactive)")
         parser.add_argument("--live", action="store_true",
                             help="Use real IP and real relays")
+        parser.add_argument("--public", action="store_true",
+                            help="Publish in plaintext (no encryption)")
         parser.add_argument("--ip", help="Manually specify the public IP")
         parser.add_argument("--onion", help="Add a Tor .onion address")
         parser.add_argument("--auto-onion", action="store_true",
@@ -66,23 +82,25 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
                             "relays")
         parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. "
                             "127.0.0.1:9050)")
-        parser.add_argument("--recipient", help="Hex pubkey of the recipient "
-                            "(optional, defaults to self)")
+        parser.add_argument("--recipient", help="Hex pubkey of the recipient")
         parser.add_argument("--identifier", default="addr",
                             help="The 'd' tag identifier")
         args = parser.parse_args()
         id_tag = args.identifier
         recipient_pk = args.recipient
         auto_onion_flag = args.auto_onion
+        publish_public = args.public
     else:
         args = argparse.Namespace(nsec=False, live=False, ip=manual_ip,
                                   onion=None, auto_onion=auto_onion,
                                   relay=relay,
                                   relay_list=relay_list,
-                                  proxy=None, recipient=None)
+                                  proxy=None, recipient=recipient,
+                                  public=is_public)
         id_tag = d_tag
-        recipient_pk = None
+        recipient_pk = recipient
         auto_onion_flag = auto_onion
+        publish_public = is_public
 
     # 1. Setup Keys
     if args.nsec:
@@ -97,8 +115,6 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
 
     # 2. Determine IP/Onion
     endpoints = []
-
-    # Manual Onion
     if args.onion:
         endpoints.append({
             "type": "tcp",
@@ -106,20 +122,15 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             "priority": 5,
             "family": "onion"
         })
-        print(f"Adding Onion endpoint: {args.onion}")
-
-    # Auto Onion
     if auto_onion_flag:
-        print("Attempting to create Tor Hidden Service...")
         onion_addr = get_auto_onion_address()
         if onion_addr:
             endpoints.append({
                 "type": "tcp",
                 "uri": f"{onion_addr}:8080",
-                "priority": 1,  # Prefer auto-onion
+                "priority": 1,
                 "family": "onion"
             })
-            print(f"Created ephemeral Onion: {onion_addr}")
 
     if args.ip:
         ip = args.ip
@@ -135,59 +146,46 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             "priority": 10,
             "family": "ipv6" if ":" in ip else "ipv4"
         })
-        print(f"Adding IP endpoint: {ip}")
 
     # 3. Setup Client with Proxy
     from nostr_sdk import ClientBuilder, ClientOptions, Connection, \
         ConnectionMode
     signer = NostrSigner.keys(keys)
     builder = ClientBuilder().signer(signer)
-
     if args.proxy:
-        print(f"Routing through proxy: {args.proxy}")
         conn = Connection().mode(ConnectionMode.PROXY).addr(args.proxy)
-        opts = ClientOptions().connection(conn)
-        builder = builder.opts(opts)
+        builder = builder.opts(ClientOptions().connection(conn))
 
     client = builder.build()
-
     relay_url = args.relay if args.relay else \
         ("wss://relay.damus.io" if args.live else "ws://localhost:8080")
-
     await client.add_relay(RelayUrl.parse(relay_url))
     await client.connect()
 
-    # 4. Optional: NIP-65
-    if args.relay_list:
-        print(f"Publishing relay list: {args.relay_list}")
-        relay_map = {RelayUrl.parse(r.strip()): None
-                     for r in args.relay_list.split(",")}
-        await client.send_event(
-            EventBuilder.relay_list(relay_map).sign_with_keys(keys)
-        )
-
-    # 5. Payload & Publish
+    # 4. Payload
     payload = {
         "v": 1,
         "ttl": 600,
         "updated_at": int(time.time()),
         "endpoints": endpoints,
-        "notes": "NCC-05 Tor Auto PoC"
+        "notes": "NCC-05 Multi-Recipient PoC"
     }
+    content = json.dumps(payload)
 
-    # Encrypt (NIP-44)
-    from nostr_sdk import PublicKey as NSPublicKey
-    encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
-        else keys.public_key()
+    # 5. Handle Encryption
+    if not publish_public:
+        from nostr_sdk import PublicKey as NSPublicKey
+        encryption_target = NSPublicKey.parse(recipient_pk) if recipient_pk \
+            else keys.public_key()
+        content = nip44_encrypt(
+            keys.secret_key(), encryption_target,
+            content, Nip44Version.V2
+        )
 
-    encrypted_content = nip44_encrypt(
-        keys.secret_key(), encryption_target,
-        json.dumps(payload), Nip44Version.V2
-    )
-
-    event = (EventBuilder(Kind(30058), encrypted_content)
-             .tags([Tag.parse(["d", id_tag])])
-             .sign_with_keys(keys))
+    event = (
+        EventBuilder(Kind(30058), content)
+        .tags([Tag.parse(["d", id_tag])])
+        .sign_with_keys(keys))
 
     print(f"Publishing event {event.id().to_hex()}...")
     await client.send_event(event)
