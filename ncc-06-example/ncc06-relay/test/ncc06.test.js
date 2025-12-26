@@ -1,7 +1,7 @@
 // test/ncc06.test.js
 import { strict as assert } from 'assert';
 import { test, before, beforeEach, after, describe } from 'node:test';
-import { startRelay, stopRelay, queryRelay, RELAY_CONSTANTS } from './helpers.js';
+import { startRelay, stopRelay, queryRelay } from './helpers.js';
 import { spawn } from 'child_process';
 import path from 'path';
 import { readFileSync, writeFileSync } from 'fs';
@@ -16,8 +16,6 @@ const clientConfigPath = path.resolve(projectRoot, 'ncc06-client/config.json');
 const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
 const SERVICE_PUBKEY = sidecarConfig.servicePk;
 const SERVICE_ID = sidecarConfig.serviceId;
-const LOCATOR_ID = sidecarConfig.locatorId;
-const NCC02_EXPECTED_KEY = sidecarConfig.ncc02ExpectedKey;
 
 // Helper to run sidecar or client
 const runScript = (scriptPath, args = []) => {
@@ -165,11 +163,9 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     // Run client, expecting rejection due to 'k' mismatch
     console.log('Running client, expecting WSS endpoint rejection due to `k` mismatch...');
     let clientOutput = '';
-    let clientError = null;
     try {
       clientOutput = await runScript('ncc06-client/index.js');
     } catch (e) {
-      clientError = e;
       clientOutput = e.message; // Capture output from error
     }
     console.log('Client Output:', clientOutput);
@@ -229,7 +225,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
   test('6. Relay emits EOSE for REQ', async () => {
     const filters = [{ kinds: [1] }]; // Request some common kind
-    const events = await queryRelay(filters); // queryRelay already waits for EOSE
+    await queryRelay(filters); // queryRelay already waits for EOSE
 
     assert.ok(true, 'queryRelay successfully completed, implying EOSE was received.');
     console.log('Test 6 passed.');

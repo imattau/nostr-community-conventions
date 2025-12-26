@@ -36,7 +36,6 @@ if (identityDecoded.type !== 'npub') {
   process.exit(1);
 }
 const SERVICE_PUBKEY = identityDecoded.data;
-const SERVICE_NPUB = identityPart;
 if (clientConfig.servicePubkey && clientConfig.servicePubkey !== SERVICE_PUBKEY) {
   console.warn(`[Client] WARNING: 'servicePubkey' in config does not match parsed npub; using identity-based pubkey ${SERVICE_PUBKEY}.`);
 }

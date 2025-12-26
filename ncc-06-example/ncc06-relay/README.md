@@ -92,6 +92,13 @@ npm run start-local-env
 npm test
 ```
 
+You can also verify style and types with:
+
+```bash
+npm run lint
+npm run typecheck
+```
+
 ## Implementation Details
 
 ### Relay

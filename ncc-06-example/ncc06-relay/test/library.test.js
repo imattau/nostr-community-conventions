@@ -373,7 +373,6 @@ test('NCC-02 resolver rejects untrusted attestation sources', async () => {
   });
 
   const caSk = generateSecretKey();
-  const caPk = getPublicKey(caSk);
   const caBuilder = new NCC02Builder(caSk);
   const attestation = caBuilder.createAttestation(servicePk, 'relay', serviceEvent.id);
 
