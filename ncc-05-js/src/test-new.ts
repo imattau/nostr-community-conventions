@@ -76,9 +76,9 @@ async function testNewFeatures() {
         console.error('Should have timed out!');
         wss.close();
         process.exit(1);
-    } catch (e: any) {
+    } catch (e) {
         const duration = Date.now() - start;
-        if (e.name === 'NCC05TimeoutError') {
+        if (e instanceof NCC05TimeoutError) {
             console.log(`Timed out as expected in ${duration}ms: OK`);
         } else {
             console.error('Caught unexpected error:', e);

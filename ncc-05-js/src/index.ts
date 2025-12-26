@@ -69,13 +69,6 @@ function ensureUint8Array(key: string | Uint8Array): Uint8Array {
     throw new NCC05ArgumentError("Key must be a hex string or Uint8Array");
 }
 
-function getHexPubkey(key: string | Uint8Array): string {
-    if (key instanceof Uint8Array) {
-        return Array.from(key).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    return key;
-}
-
 /**
  * Represents a single reachable service endpoint.
  */
@@ -321,7 +314,7 @@ export class NCC05Resolver {
                     } else {
                         return null; // Not intended for us
                     }
-                } catch (e) {
+                } catch (_e) {
                     throw new NCC05DecryptionError("Failed to decrypt wrapped content");
                 }
             } else if (sk && !content.startsWith('{')) {
@@ -329,7 +322,7 @@ export class NCC05Resolver {
                 try {
                     const conversationKey = nip44.getConversationKey(sk, hexPubkey);
                     content = nip44.decrypt(latestEvent.content, conversationKey);
-                } catch (e) {
+                } catch (_e) {
                      throw new NCC05DecryptionError("Failed to decrypt content");
                 }
             }
@@ -338,7 +331,7 @@ export class NCC05Resolver {
             let payload: NCC05Payload;
             try {
                 payload = JSON.parse(content) as NCC05Payload;
-            } catch (e) {
+            } catch (_e) {
                 return null; // Invalid JSON
             }
 

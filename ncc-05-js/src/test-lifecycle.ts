@@ -1,4 +1,4 @@
-import { NCC05Publisher, NCC05Resolver } from './index.js';
+import { NCC05Resolver } from './index.js';
 import { SimplePool } from 'nostr-tools';
 
 async function testLifecycle() {
@@ -9,7 +9,7 @@ async function testLifecycle() {
     const resolverInternal = new NCC05Resolver();
     // @ts-ignore - Access private property for testing or infer from behavior
     const internalPool = resolverInternal['pool'];
-    const closeSpy = internalPool.close = (relays?: string[]) => {
+    internalPool.close = (_relays?: string[]) => {
         console.log('Internal pool close called.');
     };
     
@@ -19,7 +19,7 @@ async function testLifecycle() {
     console.log('Test 2: Shared Pool (should NOT close)');
     const sharedPool = new SimplePool();
     let sharedClosed = false;
-    sharedPool.close = (relays?: string[]) => {
+    sharedPool.close = (_relays?: string[]) => {
         sharedClosed = true;
         console.error('ERROR: Shared pool was closed!');
     };
