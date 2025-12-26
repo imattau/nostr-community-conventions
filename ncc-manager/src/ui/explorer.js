@@ -264,11 +264,15 @@ function renderExplorerBranch(group, sectionType, context) {
 
     const isDraftSection = sectionType === "drafts";
     
-    const nccItemsHtml = group.kinds.ncc.length
-        ? (isDraftSection ? [group.kinds.ncc[0]] : group.kinds.ncc).map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state, validation))
-        : [];
+    // Split NCC items: latest stays top-level, others go into history subtree
+    const nccItems = group.kinds.ncc;
+    const latestNcc = nccItems.length ? [nccItems[0]] : [];
+    const historyNccs = nccItems.length > 1 ? nccItems.slice(1) : [];
+
+    const nccItemsHtml = latestNcc.map((entry, idx) => renderExplorerItem(entry, idx, status, currentItemId, state, validation));
 
     const subTrees = [ 
+        { key: "history", label: "History", items: historyNccs },
         { key: "endorsement", label: "Endorsements", items: group.kinds.endorsement },
         { key: "nsr", label: "Succession", items: group.kinds.nsr },
         { key: "supporting", label: "Supporting Docs", items: group.kinds.supporting }
@@ -278,7 +282,8 @@ function renderExplorerBranch(group, sectionType, context) {
         if (sub.items.length) {
             const subKey = `${branchKey}:${sub.key}`;
             const subOpen = expandedBranches.has(subKey);
-            const itemsToShow = isDraftSection ? [sub.items[0]] : sub.items;
+            // In drafts section, we usually only show the latest anyway, but keep logic consistent
+            const itemsToShow = (isDraftSection && sub.key !== 'history') ? [sub.items[0]] : sub.items;
 
             return html`
                 <div class="p-nav-tree p-nav-subtree">
@@ -290,7 +295,11 @@ function renderExplorerBranch(group, sectionType, context) {
                         </span>
                     </button>
                     <div class="p-nav-branch-body ${subOpen ? "is-open" : ""}">
-                        ${itemsToShow.map((entry, idx) => renderExplorerItem(entry, idx, "published", currentItemId, state, validation))}
+                        ${itemsToShow.map((entry, idx) => {
+                            // For history, idx needs to be offset by 1 because slice(1) was used
+                            const actualIdx = sub.key === 'history' ? idx + 1 : idx;
+                            return renderExplorerItem(entry, actualIdx, "published", currentItemId, state, validation);
+                        })}
                     </div>
                 </div>
             `;
