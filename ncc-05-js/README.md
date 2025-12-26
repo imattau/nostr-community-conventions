@@ -115,4 +115,6 @@ const resolver = new NCC05Resolver({
 
 ## License
 
-MIT
+
+
+CC0 1.0 Universal

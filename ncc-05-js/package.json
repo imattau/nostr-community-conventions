@@ -17,7 +17,7 @@
     "privacy"
   ],
   "author": "lostcause",
-  "license": "MIT",
+  "license": "CC0-1.0",
   "dependencies": {
     "nostr-tools": "^2.10.0"
   },
