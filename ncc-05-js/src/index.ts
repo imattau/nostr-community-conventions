@@ -1,3 +1,12 @@
+/**
+ * NCC-05: Identity-Bound Service Locator Resolution
+ * 
+ * This library implements the NCC-05 convention for publishing and resolving
+ * dynamic service endpoints (IP, Port, Onion) bound to Nostr identities.
+ * 
+ * @module ncc-05
+ */
+
 import { 
     SimplePool, 
     nip44, 
@@ -9,39 +18,71 @@ import {
     generateSecretKey
 } from 'nostr-tools';
 
+/**
+ * Represents a single reachable service endpoint.
+ */
 export interface NCC05Endpoint {
+    /** Protocol type, e.g., 'tcp', 'udp', 'http' */
     type: 'tcp' | 'udp' | string;
+    /** The URI string, e.g., '1.2.3.4:8080' or '[2001:db8::1]:9000' */
     uri: string;
+    /** Priority for selection (lower is higher priority) */
     priority: number;
+    /** Network family for routing hints */
     family: 'ipv4' | 'ipv6' | 'onion' | string;
 }
 
+/**
+ * The logical structure of an NCC-05 locator record payload.
+ */
 export interface NCC05Payload {
+    /** Payload version (currently 1) */
     v: number;
+    /** Time-to-live in seconds */
     ttl: number;
+    /** Unix timestamp of the last update */
     updated_at: number;
+    /** List of available endpoints */
     endpoints: NCC05Endpoint[];
+    /** Optional capability identifiers supported by the service */
     caps?: string[];
+    /** Optional human-readable notes */
     notes?: string;
 }
 
+/**
+ * Options for configuring the NCC05Resolver.
+ */
 export interface ResolverOptions {
+    /** List of relays used to bootstrap discovery */
     bootstrapRelays?: string[];
+    /** Timeout for relay queries in milliseconds (default: 10000) */
     timeout?: number;
+    /** Custom WebSocket implementation (e.g., for Tor/SOCKS5 in Node.js) */
     websocketImplementation?: any;
 }
 
 /**
- * Advanced multi-recipient "wrapping" structure.
+ * Structure for multi-recipient encrypted events.
+ * Implements a "wrapping" pattern to share one event with multiple keys.
  */
 export interface WrappedContent {
-    /** The actual payload encrypted with a random symmetric key */
+    /** The NCC05Payload encrypted with a random symmetric session key */
     ciphertext: string;
-    /** Map of recipient pubkey -> wrapped symmetric key */
+    /** Map of recipient pubkey (hex) to the encrypted session key */
     wraps: Record<string, string>;
 }
 
+/**
+ * Utility for managing shared group access to service records.
+ */
 export class NCC05Group {
+    /**
+     * Generates a fresh identity (keypair) for a shared group.
+     * The resulting nsec should be shared with all authorized group members.
+     * 
+     * @returns An object containing nsec, hex pubkey, and the raw secret key.
+     */
     static createGroupIdentity() {
         const sk = generateSecretKey();
         const pk = getPublicKey(sk);
@@ -54,7 +95,13 @@ export class NCC05Group {
     }
 
     /**
-     * Resolve a record that was published using a group's shared identity.
+     * Helper to resolve a record using a group's shared identity.
+     * 
+     * @param resolver - An initialized NCC05Resolver instance.
+     * @param groupPubkey - The public key of the group.
+     * @param groupSecretKey - The shared secret key of the group.
+     * @param identifier - The 'd' tag of the record (default: 'addr').
+     * @returns The resolved NCC05Payload or null.
      */
     static async resolveAsGroup(
         resolver: NCC05Resolver,
@@ -66,21 +113,39 @@ export class NCC05Group {
     }
 }
 
+/**
+ * Handles the discovery, selection, and decryption of NCC-05 locator records.
+ */
 export class NCC05Resolver {
     private pool: SimplePool;
     private bootstrapRelays: string[];
     private timeout: number;
 
+    /**
+     * @param options - Configuration for the resolver.
+     */
     constructor(options: ResolverOptions = {}) {
         this.pool = new SimplePool();
         if (options.websocketImplementation) {
-            // @ts-ignore
+            // @ts-ignore - Patching pool for custom transport
             this.pool.websocketImplementation = options.websocketImplementation;
         }
         this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://nos.lol'];
         this.timeout = options.timeout || 10000;
     }
 
+    /**
+     * Resolves a locator record for a given identity.
+     * 
+     * Supports standard NIP-44 encryption, multi-recipient "wrapping", 
+     * and plaintext public records.
+     * 
+     * @param targetPubkey - The pubkey (hex or npub) of the service owner.
+     * @param secretKey - Your secret key (required if the record is encrypted).
+     * @param identifier - The 'd' tag of the record (default: 'addr').
+     * @param options - Resolution options (strict mode, gossip discovery).
+     * @returns The resolved and validated NCC05Payload, or null if not found/invalid.
+     */
     async resolve(
         targetPubkey: string, 
         secretKey?: Uint8Array, 
@@ -95,6 +160,7 @@ export class NCC05Resolver {
 
         let queryRelays = [...this.bootstrapRelays];
 
+        // 1. NIP-65 Gossip Discovery
         if (options.gossip) {
             const relayListEvent = await this.pool.get(this.bootstrapRelays, {
                 authors: [hexPubkey],
@@ -104,7 +170,9 @@ export class NCC05Resolver {
                 const discoveredRelays = relayListEvent.tags
                     .filter(t => t[0] === 'r')
                     .map(t => t[1]);
-                queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+                if (discoveredRelays.length > 0) {
+                    queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+                }
             }
         }
 
@@ -131,7 +199,7 @@ export class NCC05Resolver {
         try {
             let content = latestEvent.content;
             
-            // 1. Try to detect if it's a "Wrapped" multi-recipient event
+            // Handle "Wrapped" multi-recipient content
             if (content.includes('"wraps"') && secretKey) {
                 const wrapped = JSON.parse(content) as WrappedContent;
                 const myPk = getPublicKey(secretKey);
@@ -140,15 +208,13 @@ export class NCC05Resolver {
                 if (myWrap) {
                     const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                     const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
-                    
-                    // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
                     const symmetricKey = new Uint8Array(symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
                     
-                    // The payload was self-encrypted by the publisher with the session key
                     const sessionConversationKey = nip44.getConversationKey(symmetricKey, getPublicKey(symmetricKey));
                     content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
                 }
             } else if (secretKey) {
+                // Standard NIP-44
                 const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                 content = nip44.decrypt(latestEvent.content, conversationKey);
             }
@@ -156,10 +222,11 @@ export class NCC05Resolver {
             const payload = JSON.parse(content) as NCC05Payload;
             if (!payload.endpoints) return null;
 
+            // Freshness validation
             const now = Math.floor(Date.now() / 1000);
             if (now > payload.updated_at + payload.ttl) {
                 if (options.strict) return null;
-                console.warn('NCC-05 record expired');
+                console.warn('NCC-05 record has expired');
             }
 
             return payload;
@@ -168,12 +235,23 @@ export class NCC05Resolver {
         }
     }
 
-    close() { this.pool.close(this.bootstrapRelays); }
+    /**
+     * Closes connections to all relays in the pool.
+     */
+    close() {
+        this.pool.close(this.bootstrapRelays);
+    }
 }
 
+/**
+ * Handles the construction, encryption, and publication of NCC-05 events.
+ */
 export class NCC05Publisher {
     private pool: SimplePool;
 
+    /**
+     * @param options - Configuration for the publisher.
+     */
     constructor(options: { websocketImplementation?: any } = {}) {
         this.pool = new SimplePool();
         if (options.websocketImplementation) {
@@ -182,6 +260,17 @@ export class NCC05Publisher {
         }
     }
 
+    /**
+     * Publishes a single record encrypted for multiple recipients using the wrapping pattern.
+     * This avoids sharing a single group private key.
+     * 
+     * @param relays - List of relays to publish to.
+     * @param secretKey - The publisher's secret key.
+     * @param recipients - List of recipient public keys (hex).
+     * @param payload - The service locator payload.
+     * @param identifier - The 'd' tag identifier (default: 'addr').
+     * @returns The signed Nostr event.
+     */
     async publishWrapped(
         relays: string[],
         secretKey: Uint8Array,
@@ -215,6 +304,15 @@ export class NCC05Publisher {
         return signedEvent;
     }
 
+    /**
+     * Publishes a locator record. Supports self-encryption, targeted encryption, or plaintext.
+     * 
+     * @param relays - List of relays to publish to.
+     * @param secretKey - The publisher's secret key.
+     * @param payload - The service locator payload.
+     * @param options - Publishing options (identifier, recipient, or public flag).
+     * @returns The signed Nostr event.
+     */
     async publish(
         relays: string[],
         secretKey: Uint8Array,
@@ -244,5 +342,10 @@ export class NCC05Publisher {
         return signedEvent;
     }
 
-    close(relays: string[]) { this.pool.close(relays); }
+    /**
+     * Closes connections to the specified relays.
+     */
+    close(relays: string[]) {
+        this.pool.close(relays);
+    }
 }

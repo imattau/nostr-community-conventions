@@ -1,8 +1,17 @@
 # ncc-05
 
-Nostr Community Convention 05 - Identity-Bound Service Locator Resolution.
+**Nostr Community Convention 05 - Identity-Bound Service Locator Resolution.**
 
-This library provides a simple way to publish and resolve identity-bound service endpoints (IP/Port/Onion) using Nostr `kind:30058` events.
+A TypeScript library for publishing and resolving dynamic, encrypted service endpoints (IP, Port, Onion) bound to cryptographic identities using Nostr `kind:30058` events.
+
+## Features
+
+- **Identity-Centric**: Endpoints are bound to a Nostr Pubkey.
+- **Privacy-First**: NIP-44 encryption is mandatory by default.
+- **Multi-Recipient Support**: Implement "Wrapping" patterns to share endpoints with groups without sharing private keys.
+- **NIP-65 Gossip**: Built-in support for discovering a publisher's preferred relays.
+- **Tor Ready**: Easy integration with SOCKS5 proxies for anonymous resolution.
+- **Type Safe**: Fully typed with TypeScript.
 
 ## Installation
 
@@ -12,7 +21,7 @@ npm install ncc-05
 
 ## Usage
 
-### Resolver
+### 1. Basic Resolution (Self or Public)
 
 Resolve an identity-bound service locator for a given pubkey.
 
@@ -22,65 +31,62 @@ import { nip19 } from 'nostr-tools';
 
 const resolver = new NCC05Resolver();
 
-// Your secret key is needed to decrypt the record (NIP-44)
-const mySecretKey = nip19.decode('nsec...').data as Uint8Array;
-const targetPubkey = '...'; 
+// Resolve using an npub (or hex pubkey)
+const target = 'npub1...';
+const mySecretKey = ...; // Uint8Array needed for encrypted records
 
-const payload = await resolver.resolve(targetPubkey, mySecretKey);
+const payload = await resolver.resolve(target, mySecretKey, 'addr', { 
+    gossip: true, // Follow NIP-65 hints
+    strict: true  // Reject expired records
+});
 
 if (payload) {
-    console.log('Resolved Endpoints:');
-    payload.endpoints.forEach(ep => {
-        console.log(`- ${ep.type}://${ep.uri} (${ep.family})`);
-    });
+    console.log('Resolved Endpoints:', payload.endpoints);
 }
 ```
 
-### Publisher
+### 2. Targeted Encryption (Friend-to-Friend)
 
-Publish your own service locator record.
+Alice publishes a record that only Bob can decrypt.
 
 ```typescript
-import { NCC05Publisher, NCC05Payload } from 'ncc-05';
+import { NCC05Publisher } from 'ncc-05';
 
 const publisher = new NCC05Publisher();
-const mySecretKey = ...;
+const AliceSK = ...;
+const BobPK = "..."; // Bob's hex pubkey
 
-const payload: NCC05Payload = {
-    v: 1,
-    ttl: 600,
-    updated_at: Math.floor(Date.now() / 1000),
-    endpoints: [
-        {
-            type: 'tcp',
-            uri: '127.0.0.1:8080',
-            priority: 10,
-            family: 'ipv4'
-        }
-    ]
-};
-
-const relays = ['wss://relay.damus.io', 'wss://nos.lol'];
-await publisher.publish(relays, mySecretKey, payload);
+await publisher.publish(relays, AliceSK, payload, {
+    identifier: 'for-bob',
+    recipientPubkey: BobPK // Encrypts specifically for Bob
+});
 ```
 
-## Features
+### 3. Group Wrapping (One Event, Many Recipients)
 
-- **NIP-44 Encryption**: All locator records are encrypted by default.
-- **NIP-01/NIP-33**: Uses standard Nostr primitives.
-- **Identity-Centric**: Resolution is bound to a cryptographic identity (Pubkey).
-- **Tor/Proxy Support**: Easily route relay traffic through SOCKS5 in Node.js.
-
-## Tor & Privacy (Node.js)
-
-To resolve anonymously through Tor, you can use the `socks-proxy-agent` and a custom `WebSocket` implementation:
+Alice shares her endpoint with a list of authorized friends in a single event.
 
 ```typescript
-import { NCC05Resolver } from 'ncc-05';
+await publisher.publishWrapped(
+    relays, 
+    AliceSK, 
+    [BobPK, CharliePK, DavePK], 
+    payload, 
+    'private-group'
+);
+
+// Bob resolves it using his own key:
+const payload = await resolver.resolve(AlicePK, BobSK, 'private-group');
+```
+
+### 4. Tor & Privacy (Node.js)
+
+Route all Nostr relay traffic through a local Tor proxy (`127.0.0.1:9050`).
+
+```typescript
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { WebSocket } from 'ws';
 
-// Create a custom WebSocket class that uses the Tor agent
 class TorWebSocket extends WebSocket {
     constructor(address: string, protocols?: string | string[]) {
         const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
@@ -92,6 +98,20 @@ const resolver = new NCC05Resolver({
     websocketImplementation: TorWebSocket
 });
 ```
+
+## API Reference
+
+### `NCC05Resolver`
+- `resolve(targetPubkey, secretKey?, identifier?, options?)`: Finds and decrypts a locator record.
+- `close()`: Closes pool connections.
+
+### `NCC05Publisher`
+- `publish(relays, secretKey, payload, options?)`: Publishes a standard or targeted record.
+- `publishWrapped(relays, secretKey, recipients, payload, identifier?)`: Publishes a multi-recipient record.
+
+### `NCC05Group`
+- `createGroupIdentity()`: Generates a shared group keypair.
+- `resolveAsGroup(...)`: Helper for shared-nsec resolution.
 
 ## License
 
