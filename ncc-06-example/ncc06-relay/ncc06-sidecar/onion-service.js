@@ -1,9 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { TorControl } from './tor-control.js';
 
-export async function ensureOnionEndpoint({ torControl, cacheFile, relayPort }) {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export async function ensureOnionEndpoint({ torControl, cacheFile, relayPort, TorControlClass = TorControl }) {
   if (!torControl?.enabled) {
     return null;
   }
@@ -20,7 +24,7 @@ export async function ensureOnionEndpoint({ torControl, cacheFile, relayPort }) 
     }
   }
 
-  const client = new TorControl({
+  const client = new TorControlClass({
     host: torControl.host,
     port: torControl.port,
     password: torControl.password,
