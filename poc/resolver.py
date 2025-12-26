@@ -1,6 +1,9 @@
 import time
 from typing import Optional, Dict, List
-from .mock_relay import MockRelay
+try:
+    from .mock_relay import MockRelay
+except ImportError:
+    from mock_relay import MockRelay
 
 
 class NCC02Error(Exception):
@@ -10,7 +13,7 @@ class NCC02Error(Exception):
 
 
 class ServiceResolver:
-    def __init__(self, relay: MockRelay, trusted_ca_pubkeys: List[str] = None):
+    def __init__(self, relay: MockRelay, trusted_ca_pubkeys: Optional[List[str]] = None):
         self.relay = relay
         self.trusted_ca_pubkeys = trusted_ca_pubkeys or []
 
@@ -26,11 +29,21 @@ class ServiceResolver:
             raise NCC02Error("NOT_FOUND", f"No record for {service_id}")
 
         # 2. Verify signature and expiry
-        service_event = events[0]
+        # Stable tie-breaking: Sort by created_at DESC, then ID ASC
+        service_event = sorted(
+            events,
+            key=lambda e: (-e.created_at, e.id)
+        )[0]
+
         if not service_event.verify():
             raise NCC02Error("INVALID_SIGNATURE", "Service record invalid")
 
         service_tags = {tag[0]: tag[1] for tag in service_event.tags}
+        
+        # u, k, and exp are required
+        if not all(k in service_tags for k in ["u", "k", "exp"]):
+            raise NCC02Error("MALFORMED_RECORD", "Missing required tags")
+
         exp = service_tags.get("exp")
         if exp and int(exp) < int(time.time()):
             raise NCC02Error("EXPIRED", "Service record expired")
@@ -89,7 +102,9 @@ class ServiceResolver:
         for rev in revocations:
             rev_tags = {tag[0]: tag[1] for tag in rev.tags}
             if rev_tags.get("e") == event.id and rev.pubkey == event.pubkey:
-                return False
+                # Security Fix: MUST verify revocation signature
+                if rev.verify():
+                    return False
         return True
 
     def verify_endpoint(self, resolved_service: Dict,

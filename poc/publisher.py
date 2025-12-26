@@ -1,6 +1,11 @@
 import time
-from .models import NostrEvent
-from .mock_relay import MockRelay
+import argparse
+try:
+    from .models import NostrEvent
+    from .mock_relay import MockRelay
+except ImportError:
+    from models import NostrEvent
+    from mock_relay import MockRelay
 
 
 class ServicePublisher:
@@ -78,3 +83,24 @@ class CertificateAuthority:
         event.sign(self.sk.hex())
         self.relay.publish(event)
         return event
+
+
+def main():
+    parser = argparse.ArgumentParser(description="NCC-02 Service Publisher (CLI)")
+    parser.add_argument("--sk", required=True, help="Private key (hex)")
+    parser.add_argument("--id", required=True, help="Service ID (d tag)")
+    parser.add_argument("--u", required=True, help="Endpoint URI")
+    parser.add_argument("--k", required=True, help="Key fingerprint")
+    
+    args = parser.parse_args()
+    
+    relay = MockRelay() 
+    publisher = ServicePublisher(args.sk, relay)
+    
+    event = publisher.publish_service_record(args.id, args.u, args.k)
+    print(f"Published Service Record: {event.id}")
+    print(f"Tags: {event.tags}")
+
+
+if __name__ == "__main__":
+    main()

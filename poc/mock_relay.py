@@ -1,5 +1,8 @@
 from typing import List, Dict, Optional
-from .models import NostrEvent
+try:
+    from .models import NostrEvent
+except ImportError:
+    from models import NostrEvent
 
 
 class MockRelay:

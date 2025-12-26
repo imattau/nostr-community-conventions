@@ -1,3 +1,4 @@
+import time
 from pynostr.key import PrivateKey
 from poc.mock_relay import MockRelay
 from poc.publisher import ServicePublisher, CertificateAuthority
@@ -32,6 +33,7 @@ def run_poc():
 
     # Test 2: Latest Record Selection
     print("Test 2: Latest record selection...")
+    time.sleep(1.1)
     publisher.publish_service_record(service_id, "https://new.io", "fp_new")
     res_latest = resolver.resolve(owner_pk, service_id)
     if res_latest["endpoint"] == "https://new.io":
