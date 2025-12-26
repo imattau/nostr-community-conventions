@@ -1,11 +1,10 @@
 import json
-import time
 import asyncio
 import argparse
 import getpass
 from datetime import timedelta
 from nostr_sdk import (
-    Keys, Client, Filter, Kind, NostrSigner,
+    Keys, Filter, Kind, NostrSigner,
     nip44_decrypt, RelayUrl, PublicKey,
     ClientOptions, GossipOptions, GossipRelayLimits,
     Connection, ConnectionMode
@@ -16,12 +15,12 @@ async def resolve(provided_keys=None, target_pk=None,
                   bootstrap_relay=None, gossip=False, identifier="addr"):
     if provided_keys is None:
         parser = argparse.ArgumentParser(description="NCC-05 Resolver PoC")
-        parser.add_argument("--nsec", action="store_true", help="Prompt for nsec")
-        parser.add_argument("--pubkey", help="The hex public key to resolve")
-        parser.add_argument("--live", action="store_true", help="Use real relays")
+        parser.add_argument("--nsec", action="store_true", help="Prompt nsec")
+        parser.add_argument("--pubkey", help="Hex public key to resolve")
+        parser.add_argument("--live", action="store_true", help="Use real")
         parser.add_argument("--relay", help="Bootstrap relay")
-        parser.add_argument("--gossip", action="store_true", help="Enable Gossip")
-        parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. 127.0.0.1:9050)")
+        parser.add_argument("--gossip", action="store_true", help="Gossip")
+        parser.add_argument("--proxy", help="SOCKS5 proxy")
         parser.add_argument("--identifier", default="addr",
                             help="The 'd' tag identifier")
         args = parser.parse_args()

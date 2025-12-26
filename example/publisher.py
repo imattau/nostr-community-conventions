@@ -6,9 +6,8 @@ import socket
 import getpass
 import requests
 from nostr_sdk import (
-    Keys, Client, EventBuilder, Tag, Kind,
-    NostrSigner, nip44_encrypt, Nip44Version, RelayUrl,
-    RelayMetadata, Connection, ConnectionMode, ClientOptions
+    Keys, EventBuilder, Tag, Kind,
+    NostrSigner, nip44_encrypt, Nip44Version, RelayUrl
 )
 
 
@@ -46,8 +45,10 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         parser.add_argument("--ip", help="Manually specify the public IP")
         parser.add_argument("--onion", help="Add a Tor .onion address")
         parser.add_argument("--relay", help="Set a specific relay")
-        parser.add_argument("--relay-list", help="Comma-separated NIP-65 relays")
-        parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. 127.0.0.1:9050)")
+        parser.add_argument("--relay-list", help="Comma-separated NIP-65 "
+                            "relays")
+        parser.add_argument("--proxy", help="SOCKS5 proxy (e.g. "
+                            "127.0.0.1:9050)")
         parser.add_argument("--identifier", default="addr",
                             help="The 'd' tag identifier")
         args = parser.parse_args()
@@ -98,7 +99,8 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
         print(f"Adding IP endpoint: {ip}")
 
     # 3. Setup Client with Proxy
-    from nostr_sdk import ClientBuilder
+    from nostr_sdk import ClientBuilder, ClientOptions, Connection, \
+        ConnectionMode
     signer = NostrSigner.keys(keys)
     builder = ClientBuilder().signer(signer)
 
@@ -144,6 +146,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
     print(f"Publishing event {event.id().to_hex()}...")
     await client.send_event(event)
     print("Success!")
+
 
 if __name__ == "__main__":
     asyncio.run(run())
