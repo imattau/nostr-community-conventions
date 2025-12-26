@@ -50,8 +50,16 @@ export class NCC05Resolver {
             limit: 1
         };
 
-        const events = await this.pool.querySync(this.bootstrapRelays, filter);
-        if (events.length === 0) return null;
+        const queryPromise = this.pool.querySync(this.bootstrapRelays, filter);
+        const timeoutPromise = new Promise<null>((resolve) => 
+            setTimeout(() => resolve(null), this.timeout)
+        );
+
+        const result = await Promise.race([queryPromise, timeoutPromise]);
+        
+        if (!result || (Array.isArray(result) && result.length === 0)) return null;
+        
+        const events = result as Event[];
 
         // 2. Select latest valid event
         const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
