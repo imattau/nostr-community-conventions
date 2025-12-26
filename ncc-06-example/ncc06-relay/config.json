@@ -2,6 +2,9 @@
   "relayPort": 7000,
   "relayUrl": "ws://127.0.0.1:7000",
   "relayHost": "127.0.0.1",
-  "relayWssUrl": "wss://127.0.0.1:7001",
+  "relayWssPort": 7447,
+  "relayWssUrl": "wss://127.0.0.1:7447",
+  "relayTlsKey": "./relay/certs/server.key",
+  "relayTlsCert": "./relay/certs/server.crt",
   "logLevel": "info"
 }

@@ -21,11 +21,12 @@ const clientConfigPath = path.resolve(__dirname, '../client/config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
 
 const RELAY_URL = sidecarConfig.relayUrl || rootConfig.relayUrl;
-const PRIVATE_KEY = sidecarConfig.sidecarPrivateKey;
-const PUBLIC_KEY = sidecarConfig.sidecarPublicKey;
+const PRIVATE_KEY = sidecarConfig.serviceSk;
+const PUBLIC_KEY = sidecarConfig.servicePk;
+const SERVICE_NPUB = sidecarConfig.serviceNpub;
 
-if (!PRIVATE_KEY || !PUBLIC_KEY) {
-  console.error("Sidecar keys not found in config. Please ensure 'sidecarPrivateKey' and 'sidecarPublicKey' are set in sidecar/config.json.");
+if (!PRIVATE_KEY || !PUBLIC_KEY || !SERVICE_NPUB) {
+  console.error("Sidecar service identity is missing. Please ensure 'serviceSk', 'servicePk', and 'serviceNpub' are set in sidecar/config.json.");
   process.exit(1);
 }
 
@@ -43,7 +44,7 @@ async function connectAndPublish() {
   const ws = new WebSocket(RELAY_URL);
 
   ws.onopen = async () => {
-    log('Connected to relay. Publishing events...');
+    log(`Connected to relay. Publishing events for SERVICE_NPUB=${SERVICE_NPUB}...`);
     
     // --- Step 1: Publish NCC documents (Stub for now) ---
     // The kind for NCC documents is not specified in NCC-00.
@@ -114,7 +115,7 @@ async function publishNCC02(ws) {
   try {
     storedServiceRecord = ncc02Builder.createServiceRecord({
       serviceId: sidecarConfig.serviceId,
-      endpoint: sidecarConfig.relayUrl,
+      endpoint: rootConfig.relayWssUrl || sidecarConfig.relayUrl,
       fingerprint: sidecarConfig.ncc02ExpectedKey,
       expiryDays
     });
@@ -126,39 +127,43 @@ async function publishNCC02(ws) {
 
 function buildLocatorPayload() {
     const createdAt = Math.floor(Date.now() / 1000);
+    const endpoints = [
+        {
+            url: rootConfig.relayWssUrl,
+            protocol: "wss",
+            family: "ipv4",
+            priority: 1,
+            type: "clearnet",
+            k: sidecarConfig.ncc02ExpectedKey
+        },
+        {
+            url: rootConfig.relayUrl,
+            protocol: "ws",
+            family: "ipv4",
+            priority: 10,
+            type: "clearnet",
+            k: sidecarConfig.ncc02ExpectedKey
+        },
+        {
+            url: "ws://[::1]:7000",
+            protocol: "ws",
+            family: "ipv6",
+            priority: 20
+        },
+        {
+            url: "wss://exampleonion.onion:443",
+            protocol: "wss",
+            family: "onion",
+            priority: 30,
+            type: "onion",
+            k: sidecarConfig.ncc02ExpectedKey
+        }
+    ];
+
     return {
         ttl: sidecarConfig.ncc05TtlSeconds,
         updated_at: createdAt,
-        endpoints: [
-            {
-                url: rootConfig.relayUrl,
-                protocol: "ws",
-                family: "ipv4",
-                priority: 10,
-                k: sidecarConfig.ncc02ExpectedKey
-            },
-            {
-                url: rootConfig.relayWssUrl,
-                protocol: "wss",
-                family: "ipv4",
-                priority: 5,
-                k: sidecarConfig.ncc02ExpectedKey
-            },
-            {
-                url: "ws://[::1]:7000",
-                protocol: "ws",
-                family: "ipv6",
-                priority: 20,
-                k: sidecarConfig.ncc02ExpectedKey
-            },
-            {
-                url: "wss://exampleonion.onion:443",
-                protocol: "wss",
-                family: "onion",
-                priority: 1,
-                k: sidecarConfig.ncc02ExpectedKey
-            }
-        ]
+        endpoints
     };
 }
 

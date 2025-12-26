@@ -1,9 +1,11 @@
 # NCC-06: NCC-02 / NCC-05 Relay Profile
 
 ## Type
+
 Convention
 
 ## Layer
+
 Application
 
 ## Related NCCs (Informative)
@@ -45,6 +47,20 @@ This convention specifies:
 - A relay participation profile for NCC-02 and NCC-05
 - Required and recommended relay behaviours using existing Nostr primitives
 - Clear responsibility boundaries between relays, sidecars, and clients
+
+
+
+### Identity-First Addressing
+
+Relays conforming to this profile are addressed by **Nostr identity**, not by DNS hostnames.
+
+Clients are expected to refer to such relays using identity-based URIs (for example `wss://<npub>`), which function as **identity references**, not concrete network endpoints.
+
+These identity-based URIs MUST NOT be dereferenced directly. Clients MUST resolve them via NCC-02 and NCC-05 before establishing a network connection.
+
+Relays MUST NOT accept, interpret, or resolve identity-based URIs.
+
+
 
 This convention does not specify:
 
@@ -187,12 +203,14 @@ The sidecar MUST NOT assume relay-side or client-side trust acceptance.
 
 Clients interacting with relays conforming to this profile are expected to:
 
-1. Identify the relay by Nostr identity
+1. Identify the relay by Nostr identity (for example via an identity-based URI such as `wss://<npub>`), not by hostname
 2. Resolve NCC-02 Service Records and trust material
 3. Apply attestation and revocation policy locally
 4. Resolve NCC-05 Locators for current endpoints
 5. Select endpoints based on transport and privacy policy
 6. Connect using standard NIP-01 semantics
+
+Identity-based URIs are not dereferenced directly and are always resolved through NCC-02 and NCC-05 prior to connection.
 
 Relays do not participate in this logic.
 
@@ -225,6 +243,7 @@ A relay conforms to NCC-06 if:
 - It serves NCC documents per NCC-00
 - It responds with correct `EOSE` semantics
 - It is protocol-compatible with NIP-01 when accessed via a concrete endpoint
+- The relay is not reachable via identity-based URIs directly; clients resolve identity references before connecting to concrete endpoints
 
 ---
 
@@ -257,7 +276,9 @@ This appendix is informative only. It does not add new requirements beyond NCC-0
 ### A.1 Components
 
 #### A.1.1 Relay (NIP-01 only)
+
 Responsibilities:
+
 - Accept WebSocket connections
 - Handle `EVENT`, `REQ`, `CLOSE`
 - Emit `EVENT` messages that match filters
@@ -266,12 +287,15 @@ Responsibilities:
 - No NCC resolution, no trust evaluation, no redirect/proxy
 
 Suggested stack:
+
 - Node.js
 - `ws` for WebSocket server
 - Any storage: in-memory for tests, SQLite/Postgres/LMDB for real use
 
 #### A.1.2 Sidecar Publisher (out of band)
+
 Responsibilities:
+
 - Maintain the relay’s self-description as a service identity (npub)
 - Publish:
   - NCC-02 Service Record (kind 30059) with `d`, `u`, `k`, `exp`
@@ -282,12 +306,15 @@ Responsibilities:
 - Publish to the relay itself first (local-first bootstrap)
 
 Suggested stack:
+
 - Node.js
 - `nostr-tools` for key handling and event signing
 - Optional: TLS tooling to compute SPKI fingerprint for `k`
 
 #### A.1.3 Simple Client (resolver + connector)
+
 Responsibilities:
+
 - Input: relay identity (npub) and service id (for example `relay`)
 - Fetch NCC-02 Service Record for `(npub, d)`
 - Validate:
@@ -310,12 +337,14 @@ These examples show representative payloads and tags. Exact tag names and JSON f
 #### A.2.1 NCC-02 Service Record (kind 30059)
 
 Tags:
+
 - `d`: service identifier, for example `relay`
 - `u`: fallback endpoint URI
 - `k`: endpoint key fingerprint (recommended for `wss://`)
 - `exp`: expiry (unix seconds)
 
 Example:
+
 ```json
 {
   "kind": 30059,
@@ -329,4 +358,4 @@ Example:
   ],
   "content": ""
 }
-
+```

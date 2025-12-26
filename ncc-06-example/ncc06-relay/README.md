@@ -39,6 +39,12 @@ All configuration is managed in `config.json` files.
 
 **NOTE:** For this minimal harness, `k` is treated as a required tag for `wss` endpoints, but uses a fixed placeholder scheme like `TESTKEY:<string>`. The client "verifies" `k` by comparing it to an expected string in its config.
 
+### Configuration
+
+- `config.json` now powers both the discovery relay (ws://127.0.0.1:7000) and the secure wss endpoint (`wss://127.0.0.1:7447`). The TLS key/cert pair live under `relay/certs/` and are wired into the wss interface so the client can authenticate the connection.
+- `sidecar/config.json` stores the relay’s service identity (`serviceSk`, `servicePk`, `serviceNpub`) together with the NCC-02/NCC-05 metadata (service id, locator id, TTLs, and the placeholder `k` value `TESTKEY:relay-local-dev-1`).
+- `client/config.json` now provides `serviceIdentityUri` (e.g., `wss://<service_npub>`). The resolver derives the pubkey from that identity, verifies matching `k` tags, and trusts the certificate published in `config.json` while connecting to the resolved endpoint.
+
 ### Running the Components
 
 #### 1. Start the Relay

@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateEvent, verifyEvent } from 'nostr-tools/pure';
+import { nip19 } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05';
 import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../relay/protocol.js';
 import { normalizeLocatorEndpoints, choosePreferredEndpoint } from './selector.js';
@@ -16,8 +17,40 @@ const rootConfig = JSON.parse(readFileSync(rootConfigPath, 'utf-8'));
 const clientConfigPath = path.resolve(__dirname, './config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
 
+const rootConfigDir = path.dirname(rootConfigPath);
+const TLS_CERT_PATH = rootConfig.relayTlsCert ? path.resolve(rootConfigDir, rootConfig.relayTlsCert) : null;
+let TLS_CA = null;
+if (TLS_CERT_PATH) {
+  try {
+    TLS_CA = readFileSync(TLS_CERT_PATH);
+  } catch (err) {
+    console.warn(`[Client] WARNING: Unable to load TLS certificate for service endpoint: ${err?.message || err}`);
+  }
+}
+
 const RELAY_URL = clientConfig.relayUrl || rootConfig.relayUrl;
-const SERVICE_PUBKEY = clientConfig.servicePubkey;
+const SERVICE_IDENTITY_URI = clientConfig.serviceIdentityUri || (clientConfig.serviceNpub ? `wss://${clientConfig.serviceNpub}` : null);
+if (!SERVICE_IDENTITY_URI || !SERVICE_IDENTITY_URI.toLowerCase().startsWith('wss://')) {
+  console.error("Client 'serviceIdentityUri' must be specified as wss://<npub> in config.json.");
+  process.exit(1);
+}
+const identityPart = SERVICE_IDENTITY_URI.replace(/^wss:\/\//i, '').replace(/\/$/, '');
+let identityDecoded;
+try {
+  identityDecoded = nip19.decode(identityPart);
+} catch (err) {
+  console.error("Client 'serviceIdentityUri' must encode a valid npub:", err?.message || err);
+  process.exit(1);
+}
+if (identityDecoded.type !== 'npub') {
+  console.error("Client 'serviceIdentityUri' must encode a valid npub.");
+  process.exit(1);
+}
+const SERVICE_PUBKEY = identityDecoded.data;
+const SERVICE_NPUB = identityPart;
+if (clientConfig.servicePubkey && clientConfig.servicePubkey !== SERVICE_PUBKEY) {
+  console.warn(`[Client] WARNING: 'servicePubkey' in config does not match parsed npub; using identity-based pubkey ${SERVICE_PUBKEY}.`);
+}
 const NCC02_EXPECTED_KEY = clientConfig.ncc02ExpectedKey;
 const SERVICE_ID = clientConfig.serviceId;
 const LOCATOR_ID = clientConfig.locatorId;
@@ -35,7 +68,7 @@ const warn = (message, ...args) => console.warn(`[Client] WARNING: ${message}`, 
 const error = (message, ...args) => console.error(`[Client] ERROR: ${message}`, ...args);
 
 async function resolveServiceEndpoint() {
-  log(`Connecting to discovery relay at ${RELAY_URL} to resolve service endpoint for pubkey ${SERVICE_PUBKEY}...`);
+  log(`Connecting to discovery relay at ${RELAY_URL} to resolve service endpoint for identity ${SERVICE_IDENTITY_URI} (${SERVICE_PUBKEY})...`);
 
   const serviceEvent = await fetchServiceRecord();
   const serviceTags = Object.fromEntries(serviceEvent.tags);
@@ -199,7 +232,9 @@ function determineEndpoint(ncc02Event, locatorPayload) {
     log(`Falling back to NCC-02 URL: ${ncc02Url}`);
     if (ncc02Url.startsWith('wss://')) {
       if (!tags.k || tags.k !== NCC02_EXPECTED_KEY) {
-        error(`WSS endpoint from NCC-02 fallback missing or mismatched 'k' value. Expected: ${NCC02_EXPECTED_KEY}, Got: ${tags.k || 'N/A'}. Rejecting fallback.`);
+        const fallbackMessage = `WSS endpoint from NCC-02 fallback missing or mismatched 'k' value. Expected: ${NCC02_EXPECTED_KEY}, Got: ${tags.k || 'N/A'}. Rejecting fallback.`;
+        log(fallbackMessage);
+        error(fallbackMessage);
         return null;
       }
     }
@@ -217,7 +252,15 @@ async function connectAndTest(endpointUrl) {
   }
 
   log(`Attempting to connect to resolved endpoint: ${endpointUrl}`);
-  const ws = new WebSocket(endpointUrl);
+  const wsOptions = {};
+  if (endpointUrl.startsWith('wss://')) {
+    if (TLS_CA) {
+      wsOptions.ca = TLS_CA;
+    } else {
+      wsOptions.rejectUnauthorized = false;
+    }
+  }
+  const ws = new WebSocket(endpointUrl, wsOptions);
 
   return new Promise((resolve, reject) => {
     const subId = 'test-req-' + Math.random().toString().slice(2, 6);
@@ -280,17 +323,21 @@ async function connectAndTest(endpointUrl) {
 async function main() {
   try {
     const resolvedEndpoint = await resolveServiceEndpoint();
-    if (resolvedEndpoint) {
-      log(`Service endpoint resolved to: ${resolvedEndpoint}`);
-      const testResult = await connectAndTest(resolvedEndpoint);
-      if (testResult) {
-        log('Client successfully resolved, connected, and performed REQ roundtrip.');
-      } else {
-        error('Client failed REQ roundtrip test.');
-      }
+  if (resolvedEndpoint) {
+    log(`Service endpoint resolved to: ${resolvedEndpoint}`);
+    const testResult = await connectAndTest(resolvedEndpoint);
+    if (testResult) {
+      log('Client successfully resolved, connected, and performed REQ roundtrip.');
     } else {
-      error('Failed to resolve service endpoint.');
+      const failureMessage = 'Client failed REQ roundtrip test.';
+      log(failureMessage);
+      error(failureMessage);
     }
+  } else {
+    const failureMessage = 'Failed to resolve service endpoint.';
+    log(failureMessage);
+    error(failureMessage);
+  }
   } catch (err) {
     error('Client main execution failed:', err);
   } finally {

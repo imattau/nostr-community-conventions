@@ -13,7 +13,7 @@ const projectRoot = path.resolve(__dirname, '..');
 
 const sidecarConfigPath = path.resolve(projectRoot, 'sidecar/config.json');
 const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
-const SERVICE_PUBKEY = sidecarConfig.sidecarPublicKey;
+const SERVICE_PUBKEY = sidecarConfig.servicePk;
 const SERVICE_ID = sidecarConfig.serviceId;
 const LOCATOR_ID = sidecarConfig.locatorId;
 const NCC02_EXPECTED_KEY = sidecarConfig.ncc02ExpectedKey;
@@ -110,7 +110,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     console.log('Client Output:', clientOutput);
 
     assert.ok(clientOutput.includes('Fresh NCC-05 locator found.'), 'Client should prefer fresh NCC-05');
-    assert.ok(clientOutput.includes('Service endpoint resolved to: ws://127.0.0.1:7000'), 'Client should resolve to NCC-05 endpoint');
+    assert.ok(clientOutput.includes('Service endpoint resolved to: wss://127.0.0.1:7447'), 'Client should resolve to NCC-05 endpoint');
     assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip');
     console.log('Test 2 passed.');
   });
@@ -138,7 +138,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     console.log('Client Output:', clientOutput);
 
     assert.ok(clientOutput.includes('NCC-05 locator found but it is expired or not fresh.'), 'Client should detect expired NCC-05');
-    assert.ok(clientOutput.includes('Falling back to NCC-02 URL: ws://127.0.0.1:7000'), 'Client should fall back to NCC-02 URL');
+    assert.ok(clientOutput.includes('Falling back to NCC-02 URL: wss://127.0.0.1:7447'), 'Client should fall back to NCC-02 URL');
     assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip with fallback');
 
     console.log('Test 3 passed.');
@@ -173,9 +173,22 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     }
     console.log('Client Output:', clientOutput);
     
-    assert.ok(clientOutput.includes('K mismatch for WSS endpoint. Expected: TESTKEY:Ncc06TestKey, Got: MISMATCHED_KEY. Rejecting.'), 'Client should report K mismatch for WSS endpoint');
-    assert.ok(clientOutput.includes('Falling back to NCC-02 URL: ws://127.0.0.1:7000'), 'Client should fall back to NCC-02 URL');
-    assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip with fallback');
+    assert.ok(
+      clientOutput.includes('K mismatch for WSS endpoint. Expected: TESTKEY:relay-local-dev-1, Got: MISMATCHED_KEY. Rejecting.'),
+      'Client should report K mismatch for WSS endpoint'
+    );
+    assert.ok(
+      clientOutput.includes('Falling back to NCC-02 URL: wss://127.0.0.1:7447'),
+      'Client should fall back to NCC-02 URL'
+    );
+    assert.ok(
+      clientOutput.includes("WSS endpoint from NCC-02 fallback missing or mismatched 'k' value. Expected: TESTKEY:relay-local-dev-1, Got: MISMATCHED_KEY. Rejecting fallback."),
+      'Client should reject fallback wss endpoint when k mismatch persists'
+    );
+    assert.ok(
+      clientOutput.includes('Failed to resolve service endpoint.'),
+      'Client should stop after untrusted endpoints'
+    );
     
     console.log('Test 4 passed.');
   });
