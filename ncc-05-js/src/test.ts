@@ -49,6 +49,27 @@ async function test() {
         process.exit(1);
     }
 
+    // Test Gossip Mode
+    console.log('Testing Gossip discovery...');
+    // In this test, we just point kind:10002 to the same relay we are using
+    // to verify the code path executes.
+    const relayListTemplate = {
+        kind: 10002,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['r', relays[0]]],
+        content: '',
+    };
+    const signedRL = (await import('nostr-tools')).finalizeEvent(relayListTemplate, sk);
+    await Promise.all(publisher['pool'].publish(relays, signedRL));
+    
+    const gossipResult = await resolver.resolve(pk, sk, 'addr', { gossip: true });
+    if (gossipResult) {
+        console.log('Gossip discovery successful.');
+    } else {
+        console.error('FAILED: Gossip discovery did not find record.');
+        process.exit(1);
+    }
+
     publisher.close(relays);
     resolver.close();
     process.exit(0);

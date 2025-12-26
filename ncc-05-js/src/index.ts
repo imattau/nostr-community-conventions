@@ -51,16 +51,35 @@ export class NCC05Resolver {
         targetPubkey: string, 
         secretKey: Uint8Array, 
         identifier: string = 'addr',
-        options: { strict?: boolean } = {}
+        options: { strict?: boolean, gossip?: boolean } = {}
     ): Promise<NCC05Payload | null> {
+        let queryRelays = [...this.bootstrapRelays];
+
+        // 1. NIP-65 Gossip Discovery
+        if (options.gossip) {
+            const relayListEvent = await this.pool.get(this.bootstrapRelays, {
+                authors: [targetPubkey],
+                kinds: [10002]
+            });
+
+            if (relayListEvent) {
+                const discoveredRelays = relayListEvent.tags
+                    .filter(t => t[0] === 'r')
+                    .map(t => t[1]);
+                if (discoveredRelays.length > 0) {
+                    queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+                }
+            }
+        }
+
         const filter = {
             authors: [targetPubkey],
             kinds: [30058],
             '#d': [identifier],
-            limit: 5 // Get a few to find the latest valid signed one
+            limit: 10
         };
 
-        const queryPromise = this.pool.querySync(this.bootstrapRelays, filter);
+        const queryPromise = this.pool.querySync(queryRelays, filter);
         const timeoutPromise = new Promise<null>((resolve) => 
             setTimeout(() => resolve(null), this.timeout)
         );
@@ -69,7 +88,7 @@ export class NCC05Resolver {
         
         if (!result || (Array.isArray(result) && result.length === 0)) return null;
         
-        // 1. Filter for valid signatures and sort by created_at
+        // 2. Filter for valid signatures and sort by created_at
         const validEvents = (result as Event[])
             .filter(e => verifyEvent(e))
             .sort((a, b) => b.created_at - a.created_at);
