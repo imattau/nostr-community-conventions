@@ -8,6 +8,7 @@ import { createOkMessage, createNoticeMessage, parseNostrMessage } from '../lib/
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
+import { ensureOnionEndpoint } from './onion-service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +38,7 @@ const error = (message, ...args) => console.error(`[Sidecar] ERROR: ${message}`,
 const ncc02Builder = new NCC02Builder(PRIVATE_KEY);
 let storedServiceRecord = null;
 let storedAttestation = null;
+let onionEndpoint = null;
 
 
 async function connectAndPublish() {
@@ -45,6 +47,8 @@ async function connectAndPublish() {
 
   ws.onopen = async () => {
     log(`Connected to relay. Publishing events for SERVICE_NPUB=${SERVICE_NPUB}...`);
+    
+    onionEndpoint = await createOnionEndpoint();
     
     // --- Step 1: Publish NCC documents (Stub for now) ---
     // The kind for NCC documents is not specified in NCC-00.
@@ -127,44 +131,58 @@ async function publishNCC02(ws) {
 
 function buildLocatorPayload() {
     const createdAt = Math.floor(Date.now() / 1000);
-    const endpoints = [
-        {
+    const endpoints = [];
+
+    if (rootConfig.relayWssUrl) {
+        endpoints.push(createEndpoint({
             url: rootConfig.relayWssUrl,
             protocol: "wss",
             family: "ipv4",
             priority: 1,
             type: "clearnet",
-            k: sidecarConfig.ncc02ExpectedKey
-        },
-        {
+            includeK: true
+        }));
+    }
+    if (rootConfig.relayUrl) {
+        endpoints.push(createEndpoint({
             url: rootConfig.relayUrl,
             protocol: "ws",
             family: "ipv4",
             priority: 10,
             type: "clearnet",
-            k: sidecarConfig.ncc02ExpectedKey
-        },
-        {
-            url: "ws://[::1]:7000",
+            includeK: false
+        }));
+    }
+
+    if (onionEndpoint) {
+        endpoints.push({
+            url: `ws://${onionEndpoint.address}:${onionEndpoint.servicePort}`,
             protocol: "ws",
-            family: "ipv6",
-            priority: 20
-        },
-        {
-            url: "wss://exampleonion.onion:443",
-            protocol: "wss",
             family: "onion",
-            priority: 30,
-            type: "onion",
-            k: sidecarConfig.ncc02ExpectedKey
-        }
-    ];
+            priority: 5,
+            type: "onion"
+        });
+    }
 
     return {
         ttl: sidecarConfig.ncc05TtlSeconds,
         updated_at: createdAt,
         endpoints
     };
+}
+
+function createEndpoint({ url, protocol, family, priority, type, includeK }) {
+    const endpoint = {
+        url,
+        protocol,
+        family,
+        priority,
+        type
+    };
+    if (includeK) {
+        endpoint.k = sidecarConfig.ncc02ExpectedKey;
+    }
+    return endpoint;
 }
 
 async function publishEncryptedLocator(ws, payload) {
@@ -243,9 +261,27 @@ async function publishRevocation(ws) {
             storedAttestation.id,
             'Automated revocation for test harness'
         );
-        await publishEvent(ws, revocationEvent);
+    await publishEvent(ws, revocationEvent);
+  } catch (err) {
+    error('Failed to build NCC-02 revocation:', err);
+  }
+}
+
+async function createOnionEndpoint() {
+    const relayPort = Number(rootConfig.relayPort || 7000);
+    try {
+        const endpoint = await ensureOnionEndpoint({
+            torControl: sidecarConfig.torControl,
+            cacheFile: sidecarConfig.torControl?.serviceFile,
+            relayPort
+        });
+        if (endpoint) {
+            log(`Onion endpoint enabled: ws://${endpoint.address}:${endpoint.servicePort}`);
+        }
+        return endpoint;
     } catch (err) {
-        error('Failed to build NCC-02 revocation:', err);
+        warn('Onion endpoint could not be created:', err.message);
+        return null;
     }
 }
 

@@ -38,11 +38,13 @@ All configuration is managed in `config.json` files.
 - `config.json` (root): Global settings, including default relay port and test keys.
 - `ncc06-sidecar/config.json`: Specific configuration for the sidecar publisher, including the private key for publishing.
 - `ncc06-client/config.json`: Specific configuration for the client, including the public key of the service to resolve and expected `k` value.
+- `ncc06-sidecar/config.json`: now optionally includes a `torControl` block so the sidecar can provision a Tor v3 hidden service and publish `ws://<onion>.onion` locators.
 
 **NOTE:** For this minimal harness, `k` is treated as a required tag for `wss` endpoints, but uses a fixed placeholder scheme like `TESTKEY:<string>`. The client "verifies" `k` by comparing it to an expected string in its config.
 
 - `config.json` now powers both the discovery relay (ws://127.0.0.1:7000) and the secure wss endpoint (`wss://127.0.0.1:7447`). The TLS key/cert pair live under `certs/` and are consumed by the Node relay purely as encrypted transport; their fingerprints are asserted through NCC-02 `k` rather than Web PKI, and the client never performs traditional CA validation.
 - `ncc06-sidecar/config.json` stores the relay’s service identity (`serviceSk`, `servicePk`, `serviceNpub`) together with the NCC-02/NCC-05 metadata (service id, locator id, TTLs, and the placeholder `k` value `TESTKEY:relay-local-dev-1`).
+- The sidecar can optionally connect to Tor’s control port (`torControl.enabled`) to create a v3 onion service pointing at the relay port; the generated `ws://<onion>.onion` endpoint is published inside NCC-05 (no `k` tag is applied to onion).
 - `ncc06-client/config.json` now provides `serviceIdentityUri` (e.g., `wss://<service_npub>`). The resolver derives the pubkey from that identity and verifies matching `k` tags before connecting to whichever concrete endpoint the NCC-02/NCC-05 resolution returns; the TLS cert is only used for encryption, not trust.
 
 ### Running the Components

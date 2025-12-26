@@ -35,6 +35,7 @@
 - Keep `selector.js` focused: normalize endpoint objects, rank by priority, prefer `wss` unless policy forbids it, and enforce `k` checks there so client code can just log the result.
 - When generating TLS certs for local WSS, include `127.0.0.1` in the SAN so the handshake succeeds; the client connects with `rejectUnauthorized=false` because endpoint trust is established through NCC-02 `k`, not the certificate chain.
 - Reset configs between integration tests (sidecar/client) to avoid leakage across cases that deliberately mutate TTLs or `k` values.
+- If Tor control is enabled, the sidecar now creates a v3 onion service for the relay port, caches the key material (so the address survives restarts), and publishes `ws://<onion>.onion` in NCC-05 locators (no `k` tag is needed for those entries). The relay remains unaware of Tor.
 
 ## Pitfalls
 

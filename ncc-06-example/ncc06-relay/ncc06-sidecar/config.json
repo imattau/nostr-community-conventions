@@ -7,5 +7,14 @@
   "ncc02ExpSeconds": 1209600,
   "ncc05TtlSeconds": 3600,
   "serviceId": "relay",
-  "locatorId": "relay-locator"
+  "locatorId": "relay-locator",
+  "torControl": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 9051,
+    "password": "",
+    "servicePort": 80,
+    "serviceFile": "./onion-service.json",
+    "timeout": 5000
+  }
 }
