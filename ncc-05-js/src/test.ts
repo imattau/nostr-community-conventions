@@ -70,6 +70,17 @@ async function test() {
         process.exit(1);
     }
 
+    // Test npub resolution
+    console.log('Testing npub resolution...');
+    const npub = (await import('nostr-tools')).nip19.npubEncode(pk);
+    const npubResult = await resolver.resolve(npub, sk);
+    if (npubResult) {
+        console.log('npub resolution successful.');
+    } else {
+        console.error('FAILED: npub resolution did not find record.');
+        process.exit(1);
+    }
+
     publisher.close(relays);
     resolver.close();
     process.exit(0);

@@ -1,6 +1,7 @@
 import { 
     SimplePool, 
     nip44, 
+    nip19,
     finalizeEvent, 
     verifyEvent, 
     Event, 
@@ -46,6 +47,7 @@ export class NCC05Resolver {
 
     /**
      * Resolve a locator record for a given pubkey.
+     * Supports both hex and npub strings.
      */
     async resolve(
         targetPubkey: string, 
@@ -53,12 +55,18 @@ export class NCC05Resolver {
         identifier: string = 'addr',
         options: { strict?: boolean, gossip?: boolean } = {}
     ): Promise<NCC05Payload | null> {
+        let hexPubkey = targetPubkey;
+        if (targetPubkey.startsWith('npub1')) {
+            const decoded = nip19.decode(targetPubkey);
+            hexPubkey = decoded.data as string;
+        }
+
         let queryRelays = [...this.bootstrapRelays];
 
         // 1. NIP-65 Gossip Discovery
         if (options.gossip) {
             const relayListEvent = await this.pool.get(this.bootstrapRelays, {
-                authors: [targetPubkey],
+                authors: [hexPubkey],
                 kinds: [10002]
             });
 
@@ -73,7 +81,7 @@ export class NCC05Resolver {
         }
 
         const filter = {
-            authors: [targetPubkey],
+            authors: [hexPubkey],
             kinds: [30058],
             '#d': [identifier],
             limit: 10
@@ -98,7 +106,7 @@ export class NCC05Resolver {
 
         // 2. Decrypt
         try {
-            const conversationKey = nip44.getConversationKey(secretKey, targetPubkey);
+            const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
             const decrypted = nip44.decrypt(latestEvent.content, conversationKey);
             const payload = JSON.parse(decrypted) as NCC05Payload;
 
@@ -133,8 +141,12 @@ export class NCC05Resolver {
 export class NCC05Publisher {
     private pool: SimplePool;
 
-    constructor() {
+    constructor(options: { websocketImplementation?: any } = {}) {
         this.pool = new SimplePool();
+        if (options.websocketImplementation) {
+            // @ts-ignore - Patching pool for custom WebSocket (Tor/Proxy)
+            this.pool.websocketImplementation = options.websocketImplementation;
+        }
     }
 
     /**
