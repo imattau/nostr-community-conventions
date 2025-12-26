@@ -42,6 +42,18 @@ export class NCC05Group {
             npub: nip19.npubEncode(pk)
         };
     }
+
+    /**
+     * Resolve a record that was published using a group's shared identity.
+     */
+    static async resolveAsGroup(
+        resolver: NCC05Resolver,
+        groupPubkey: string,
+        groupSecretKey: Uint8Array,
+        identifier: string = 'addr'
+    ): Promise<NCC05Payload | null> {
+        return resolver.resolve(groupPubkey, groupSecretKey, identifier);
+    }
 }
 
 export class NCC05Resolver {
@@ -106,18 +118,14 @@ export class NCC05Resolver {
         if (validEvents.length === 0) return null;
         const latestEvent = validEvents[0];
 
-        // 2. Decrypt or Parse Plaintext
         try {
             let content = latestEvent.content;
-            
-            // Attempt decryption if SK is provided
             if (secretKey) {
                 const conversationKey = nip44.getConversationKey(secretKey, hexPubkey);
                 content = nip44.decrypt(latestEvent.content, conversationKey);
             }
 
             const payload = JSON.parse(content) as NCC05Payload;
-
             if (!payload.endpoints) return null;
 
             const now = Math.floor(Date.now() / 1000);
@@ -128,7 +136,6 @@ export class NCC05Resolver {
 
             return payload;
         } catch (e) {
-            // If it's encrypted but we don't have the key, this fails naturally
             return null;
         }
     }
@@ -157,17 +164,16 @@ export class NCC05Publisher {
         const identifier = options.identifier || 'addr';
         let content = JSON.stringify(payload);
 
-        // 1. Handle Encryption
         if (!options.public) {
             const encryptionTarget = options.recipientPubkey || myPubkey;
             const conversationKey = nip44.getConversationKey(secretKey, encryptionTarget);
             content = nip44.encrypt(content, conversationKey);
         }
 
-        // 2. Create Event
         const eventTemplate = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
+            pubkey: myPubkey,
             tags: [['d', identifier]],
             content: content,
         };

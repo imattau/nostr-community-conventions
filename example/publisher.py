@@ -128,7 +128,7 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             endpoints.append({
                 "type": "tcp",
                 "uri": f"{onion_addr}:8080",
-                "priority": 1,
+                "priority": 1,  # Prefer auto-onion
                 "family": "onion"
             })
 
@@ -162,7 +162,16 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
     await client.add_relay(RelayUrl.parse(relay_url))
     await client.connect()
 
-    # 4. Payload
+    # 4. Optional: NIP-65
+    if args.relay_list:
+        print(f"Publishing relay list: {args.relay_list}")
+        relay_map = {RelayUrl.parse(r.strip()): None
+                     for r in args.relay_list.split(",")}
+        await client.send_event(
+            EventBuilder.relay_list(relay_map).sign_with_keys(keys)
+        )
+
+    # 5. Payload
     payload = {
         "v": 1,
         "ttl": 600,
@@ -182,10 +191,9 @@ async def run(provided_keys=None, manual_ip=None, relay=None,
             content, Nip44Version.V2
         )
 
-    event = (
-        EventBuilder(Kind(30058), content)
-        .tags([Tag.parse(["d", id_tag])])
-        .sign_with_keys(keys))
+    event = (EventBuilder(Kind(30058), content)
+             .tags([Tag.parse(["d", id_tag])])
+             .sign_with_keys(keys))
 
     print(f"Publishing event {event.id().to_hex()}...")
     await client.send_event(event)

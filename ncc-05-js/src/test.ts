@@ -1,5 +1,5 @@
 import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group } from './index.js';
-import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
 
 async function test() {
     const sk = generateSecretKey();
@@ -39,7 +39,7 @@ async function test() {
         updated_at: Math.floor(Date.now() / 1000) - 10, // 10s ago
         endpoints: [{ type: 'tcp', uri: '1.1.1.1:1', priority: 1, family: 'ipv4' }]
     };
-    await publisher.publish(relays, sk, expiredPayload, 'expired-test');
+    await publisher.publish(relays, sk, expiredPayload, { identifier: 'expired-test' });
     const strictResult = await resolver.resolve(pk, sk, 'expired-test', { strict: true });
     
     if (strictResult === null) {
@@ -51,8 +51,6 @@ async function test() {
 
     // Test Gossip Mode
     console.log('Testing Gossip discovery...');
-    // In this test, we just point kind:10002 to the same relay we are using
-    // to verify the code path executes.
     const relayListTemplate = {
         kind: 10002,
         created_at: Math.floor(Date.now() / 1000),
@@ -60,6 +58,7 @@ async function test() {
         content: '',
     };
     const signedRL = (await import('nostr-tools')).finalizeEvent(relayListTemplate, sk);
+    // @ts-ignore
     await Promise.all(publisher['pool'].publish(relays, signedRL));
     
     const gossipResult = await resolver.resolve(pk, sk, 'addr', { gossip: true });
@@ -72,7 +71,7 @@ async function test() {
 
     // Test npub resolution
     console.log('Testing npub resolution...');
-    const npub = (await import('nostr-tools')).nip19.npubEncode(pk);
+    const npub = nip19.npubEncode(pk);
     const npubResult = await resolver.resolve(npub, sk);
     if (npubResult) {
         console.log('npub resolution successful.');
@@ -95,7 +94,17 @@ async function test() {
 
     // User A publishes for User B
     console.log('User A publishing for User B...');
-    await publisher.publish(relays, skA, payloadFriend, 'friend-test', pkB);
+    await publisher.publish(relays, skA, payloadFriend, { identifier: 'friend-test', recipientPubkey: pkB });
+
+    // User B resolves User A's record
+    console.log('User B resolving User A...');
+    const friendResult = await resolver.resolve(pkA, skB, 'friend-test');
+    if (friendResult && friendResult.endpoints[0].uri === 'friend:7777') {
+        console.log('Friend-to-Friend resolution successful.');
+    } else {
+        console.error('FAILED: Friend-to-Friend resolution.');
+        process.exit(1);
+    }
 
     // Test Group Resolution Utility
     console.log('Testing NCC05Group utility...');
@@ -106,7 +115,7 @@ async function test() {
     };
 
     console.log('Publishing as Group...');
-    await publisher.publish(relays, groupIdentity.sk, payloadGroup, 'group-test');
+    await publisher.publish(relays, groupIdentity.sk, payloadGroup, { identifier: 'group-test' });
 
     console.log('Resolving as Group Member...');
     const groupResult = await NCC05Group.resolveAsGroup(resolver, groupIdentity.pk, groupIdentity.sk, 'group-test');
