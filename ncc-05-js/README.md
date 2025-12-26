@@ -10,94 +10,57 @@ A TypeScript library for publishing and resolving dynamic, encrypted service end
 - **Privacy-First**: NIP-44 encryption is mandatory by default.
 - **Multi-Recipient Support**: Implement "Wrapping" patterns to share endpoints with groups without sharing private keys.
 - **NIP-65 Gossip**: Built-in support for discovering a publisher's preferred relays.
-- **Tor Ready**: Easy integration with SOCKS5 proxies for anonymous resolution.
+- **Robust & Flexible**: Handles relay failures gracefully, supports configurable timeouts, and accepts Hex strings or Uint8Array for keys.
+- **Shared Resources**: Supports external `SimplePool` instances for efficient connection management.
 - **Type Safe**: Fully typed with TypeScript.
 
 ## Installation
-
-```bash
-npm install ncc-05
-```
-
-## Usage
-
+...
 ### 1. Basic Resolution (Self or Public)
 
 Resolve an identity-bound service locator for a given pubkey.
 
 ```typescript
 import { NCC05Resolver } from 'ncc-05';
-import { nip19 } from 'nostr-tools';
+import { SimplePool } from 'nostr-tools';
 
-const resolver = new NCC05Resolver();
+// Optional: Share an existing connection pool
+const pool = new SimplePool();
+const resolver = new NCC05Resolver({ 
+    pool,
+    timeout: 5000 // Custom timeout
+});
 
-// Resolve using an npub (or hex pubkey)
+// Resolve using an npub or HEX pubkey
 const target = 'npub1...';
-const mySecretKey = ...; // Uint8Array needed for encrypted records
+const mySecretKey = "hex_or_uint8array_key"; 
 
-const payload = await resolver.resolve(target, mySecretKey, 'addr', { 
-    gossip: true, // Follow NIP-65 hints
-    strict: true  // Reject expired records
-});
-
-if (payload) {
-    console.log('Resolved Endpoints:', payload.endpoints);
+try {
+    const payload = await resolver.resolve(target, mySecretKey, 'addr', { 
+        gossip: true, 
+        strict: true  
+    });
+    if (payload) console.log('Resolved:', payload.endpoints);
+} catch (e) {
+    if (e.name === 'NCC05TimeoutError') console.error('Resolution timed out');
 }
 ```
-
-### 2. Targeted Encryption (Friend-to-Friend)
-
-Alice publishes a record that only Bob can decrypt.
-
-```typescript
-import { NCC05Publisher } from 'ncc-05';
-
-const publisher = new NCC05Publisher();
-const AliceSK = ...;
-const BobPK = "..."; // Bob's hex pubkey
-
-await publisher.publish(relays, AliceSK, payload, {
-    identifier: 'for-bob',
-    recipientPubkey: BobPK // Encrypts specifically for Bob
-});
-```
-
-### 3. Group Wrapping (One Event, Many Recipients)
-
-Alice shares her endpoint with a list of authorized friends in a single event.
-
-```typescript
-await publisher.publishWrapped(
-    relays, 
-    AliceSK, 
-    [BobPK, CharliePK, DavePK], 
-    payload, 
-    'private-group'
-);
-
-// Bob resolves it using his own key:
-const payload = await resolver.resolve(AlicePK, BobSK, 'private-group');
-```
-
+...
 ### 4. Tor & Privacy (Node.js)
-
-Route all Nostr relay traffic through a local Tor proxy (`127.0.0.1:9050`).
-
+...
 ```typescript
-import { SocksProxyAgent } from 'socks-proxy-agent';
-import { WebSocket } from 'ws';
-
-class TorWebSocket extends WebSocket {
-    constructor(address: string, protocols?: string | string[]) {
-        const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
-        super(address, protocols, { agent });
-    }
-}
-
 const resolver = new NCC05Resolver({
     websocketImplementation: TorWebSocket
 });
 ```
+
+## Error Handling
+
+The library exports specific error classes for granular handling:
+- `NCC05RelayError`: Communication failure with Nostr relays.
+- `NCC05TimeoutError`: Operation exceeded the specified timeout.
+- `NCC05DecryptionError`: Failed to decrypt the record (invalid keys).
+- `NCC05ArgumentError`: Invalid arguments provided (e.g. malformed keys).
 
 ## API Reference
 
