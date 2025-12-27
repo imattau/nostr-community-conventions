@@ -1,5 +1,5 @@
 import { eventBus } from "./eventBus.js";
-import { esc, shortenKey, showToast } from "./utils.js";
+import { esc, shortenKey, showToast, eventTagValue } from "./utils.js";
 import { KINDS } from "./state.js";
 import { renderExplorer } from "./ui/explorer.js";
 import { renderInspector } from "./ui/inspector.js";
@@ -943,8 +943,62 @@ function openEndorsementModal(nccItem) {
 }
 
 function openNsrModal(nccItem) {
+    const nccD = nccItem.d || eventTagValue(nccItem.tags, 'd');
+    
+    // Collect candidates for authoritative event ID
+    const allNccs = [
+        ...(_state.nccLocalDrafts || []),
+        ...(_state.nccDocs || []).map(id => _state.eventsById.get(id)).filter(Boolean),
+        ...(_state.remoteDrafts || []).filter(i => i.kind === KINDS.ncc)
+    ];
+
+    // Deduplicate by event_id or id
+    const candidateMap = new Map();
+    allNccs.forEach(i => {
+        const d = i.d || eventTagValue(i.tags, 'd');
+        if (i.kind !== KINDS.ncc || d !== nccD) return;
+        
+        const id = i.event_id || i.id;
+        if (id === (nccItem.event_id || nccItem.id)) return;
+        
+        const existing = candidateMap.get(id);
+        const currentTs = i.updated_at || i.created_at || 0;
+        const existingTs = existing ? (existing.updated_at || existing.created_at || 0) : -1;
+        
+        if (!existing || currentTs > existingTs) {
+            candidateMap.set(id, i);
+        }
+    });
+
+    const candidates = Array.from(candidateMap.values()).sort((a, b) => {
+        const aTs = a.updated_at || a.created_at || 0;
+        const bTs = b.updated_at || b.created_at || 0;
+        return bTs - aTs;
+    });
+
     const modal = document.createElement("div");
     modal.className = "p-modal-overlay";
+
+    let authFieldHtml = "";
+    if (candidates.length > 0) {
+        authFieldHtml = `
+            <select id="m-nsr-auth" style="width: 100%; padding: 8px; background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px;">
+                <option value="">Select an authoritative NCC...</option>
+                ${candidates.map(c => {
+                    const id = c.event_id || c.id;
+                    const author = c.author_pubkey || c.author || c.pubkey || "";
+                    const title = c.title || eventTagValue(c.tags, "title") || "Untitled";
+                    return `<option value="${esc(id)}">${esc(shortenKey(id))} - ${esc(shortenKey(author))} (${esc(title)})</option>`;
+                }).join("")}
+            </select>
+        `;
+    } else {
+        authFieldHtml = `
+            <input type="text" id="m-nsr-auth" placeholder="The new canonical event ID" />
+            <p class="p-muted-text small" style="margin-top: 4px">No other NCCs with same identifier found. Enter manually.</p>
+        `;
+    }
+
     modal.innerHTML = `
         <div class="p-modal">
             <div class="p-modal-header">
@@ -953,12 +1007,12 @@ function openNsrModal(nccItem) {
             </div>
             <div class="p-modal-body">
                 <p class="p-muted-text small" style="margin-bottom: 16px">
-                    Transferring stewardship for <strong>${esc(nccItem.d)}</strong>.
+                    Transferring stewardship for <strong>${esc(nccD)}</strong>.
                 </p>
                 <div class="p-modal-form">
                     <div class="p-field">
                         <label>Authoritative Event ID</label>
-                        <input type="text" id="m-nsr-auth" placeholder="The new canonical event ID" />
+                        ${authFieldHtml}
                     </div>
                     <div class="p-field">
                         <label>Reason</label>
@@ -992,7 +1046,7 @@ function openNsrModal(nccItem) {
             kind: KINDS.nsr,
             status: "draft",
             author_pubkey: _state.signerPubkey,
-            d: nccItem.d,
+            d: nccD,
             content: reason,
             tags: {
                 authoritative: auth,
