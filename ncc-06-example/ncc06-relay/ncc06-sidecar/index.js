@@ -174,11 +174,12 @@ function stageAttestation(events) {
     return;
   }
   try {
-    storedAttestation = ncc02Builder.createAttestation(
-      PUBLIC_KEY,
-      sidecarConfig.serviceId,
-      storedServiceRecord.id,
-    );
+    storedAttestation = ncc02Builder.createAttestation({
+      subjectPubkey: PUBLIC_KEY,
+      serviceId: sidecarConfig.serviceId,
+      serviceEventId: storedServiceRecord.id,
+      level: 'verified'
+    });
     events.push(storedAttestation);
     log(`Prepared NCC-02 attestation (ID: ${storedAttestation.id})`);
   } catch (err) {
@@ -192,10 +193,10 @@ function stageRevocation(events) {
     return;
   }
   try {
-    const revocationEvent = ncc02Builder.createRevocation(
-      storedAttestation.id,
-      'Automated revocation for test harness'
-    );
+    const revocationEvent = ncc02Builder.createRevocation({
+      attestationId: storedAttestation.id,
+      reason: 'Automated revocation for test harness'
+    });
     events.push(revocationEvent);
     log(`Prepared NCC-02 revocation (ID: ${revocationEvent.id})`);
   } catch (err) {

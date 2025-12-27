@@ -10,7 +10,7 @@
     "lint": "eslint . --ext .js"
   },
   "dependencies": {
-    "ncc-02-js": "^0.2.2",
+    "ncc-02-js": "^0.2.3",
     "ncc-05-js": "^1.1.9",
     "nostr-tools": "^2.19.4",
     "selfsigned": "^5.4.0",

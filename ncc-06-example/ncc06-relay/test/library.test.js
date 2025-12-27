@@ -98,18 +98,21 @@ test('NCC-02 builder produces verifiable service records, attestations, and revo
   assert.ok(serviceEvent.tags.some(tag => tag[0] === 'exp'), 'Expiration tag must be present');
   assert.ok(verifyEvent(serviceEvent), 'Service record signature must verify');
 
-  const attestation = builder.createAttestation(
-    pk,
-    'relay',
-    serviceEvent.id,
-    'verified',
-    1
-  );
+  const attestation = builder.createAttestation({
+    subjectPubkey: pk,
+    serviceId: 'relay',
+    serviceEventId: serviceEvent.id,
+    level: 'verified',
+    validDays: 1
+  });
   assert.ok(attestation.tags.some(tag => tag[0] === 'e' && tag[1] === serviceEvent.id));
   assert.equal(attestation.kind, 30060);
   assert.ok(verifyEvent(attestation), 'Attestation signature must verify');
 
-  const revocation = builder.createRevocation(attestation.id, 'test-revoke');
+  const revocation = builder.createRevocation({
+    attestationId: attestation.id,
+    reason: 'test-revoke'
+  });
   assert.ok(revocation.tags.some(tag => tag[0] === 'e' && tag[1] === attestation.id));
   assert.equal(revocation.kind, 30061);
   assert.ok(verifyEvent(revocation), 'Revocation signature must verify');
@@ -374,7 +377,11 @@ test('NCC-02 resolver honors trusted CA attestations', async () => {
   const caSk = generateSecretKey();
   const caPk = getPublicKey(caSk);
   const caBuilder = new NCC02Builder(caSk);
-  const attestation = caBuilder.createAttestation(servicePk, 'relay', serviceEvent.id);
+    const attestation = caBuilder.createAttestation({
+      subjectPubkey: servicePk,
+      serviceId: 'relay',
+      serviceEventId: serviceEvent.id
+    });
 
   const pool = new NCC02StubPool({ serviceEvent, attestations: [attestation] });
   const resolver = new NCC02Resolver(['wss://placeholder'], {
@@ -401,7 +408,11 @@ test('NCC-02 resolver rejects untrusted attestation sources', async () => {
 
   const caSk = generateSecretKey();
   const caBuilder = new NCC02Builder(caSk);
-  const attestation = caBuilder.createAttestation(servicePk, 'relay', serviceEvent.id);
+    const attestation = caBuilder.createAttestation({
+      subjectPubkey: servicePk,
+      serviceId: 'relay',
+      serviceEventId: serviceEvent.id
+    });
 
   const pool = new NCC02StubPool({ serviceEvent, attestations: [attestation] });
   const resolver = new NCC02Resolver(['wss://placeholder'], {
@@ -429,8 +440,14 @@ test('NCC-02 resolver rejects attestations that have been revoked', async () => 
   const caSk = generateSecretKey();
   const caPk = getPublicKey(caSk);
   const caBuilder = new NCC02Builder(caSk);
-  const attestation = caBuilder.createAttestation(servicePk, 'relay', serviceEvent.id);
-  const revocation = caBuilder.createRevocation(attestation.id);
+    const attestation = caBuilder.createAttestation({
+      subjectPubkey: servicePk,
+      serviceId: 'relay',
+      serviceEventId: serviceEvent.id
+    });
+    const revocation = caBuilder.createRevocation({
+      attestationId: attestation.id
+    });
 
   const pool = new NCC02StubPool({
     serviceEvent,
