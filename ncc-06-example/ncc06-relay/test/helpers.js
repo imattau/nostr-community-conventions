@@ -18,6 +18,12 @@ const RELAY_URL = `ws://127.0.0.1:${RELAY_PORT}`;
 
 let relayProcess = null;
 
+const AUX_RELAY_CONFIG_PATH = path.resolve(__dirname, './aux-relay-config.json');
+const AUX_RELAY_PORT = 7001;
+export const AUX_RELAY_URL = `ws://127.0.0.1:${AUX_RELAY_PORT}`;
+
+let auxRelayProcess = null;
+
 export const startRelay = async () => {
   return new Promise((resolve, reject) => {
     relayProcess = spawn('node', ['scripts/run-relay.js'], {
@@ -69,6 +75,90 @@ export const stopRelay = () => {
   }
 };
 
+export const startAuxRelay = async () => {
+  return new Promise((resolve, reject) => {
+    auxRelayProcess = spawn('node', ['scripts/run-relay.js', '--config', AUX_RELAY_CONFIG_PATH], {
+      cwd: path.resolve(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true
+    });
+
+    auxRelayProcess.stdout.on('data', data => {
+      process.stdout.write(`[Aux Relay STDOUT] ${data}`);
+      if (data.toString().includes(`Relay listening on ws://127.0.0.1:${AUX_RELAY_PORT}`)) {
+        resolve(true);
+      }
+    });
+
+    auxRelayProcess.stderr.on('data', data => {
+      process.stderr.write(`[Aux Relay STDERR] ${data}`);
+      if (data.toString().toLowerCase().includes('error')) {
+        reject(new Error(`Aux relay startup error: ${data.toString()}`));
+      }
+    });
+
+    auxRelayProcess.on('error', err => {
+      console.error('Failed to start auxiliary relay:', err);
+      reject(err);
+    });
+
+    auxRelayProcess.on('close', code => {
+      console.log(`Aux relay process exited with code ${code}`);
+      if (code !== 0) {
+        reject(new Error(`Aux relay exited with code ${code}`));
+      }
+    });
+  });
+};
+
+export const stopAuxRelay = () => {
+  if (auxRelayProcess && !auxRelayProcess.killed) {
+    console.log('Stopping auxiliary relay process...');
+    try {
+      process.kill(-auxRelayProcess.pid, 'SIGTERM');
+    } catch (err) {
+      if (err.code !== 'ESRCH') {
+        console.error('Error stopping auxiliary relay process:', err);
+      }
+    }
+    auxRelayProcess = null;
+  }
+};
+
+export const publishEventToRelay = (relayUrl, event) => {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(relayUrl);
+    const timeout = setTimeout(() => {
+      ws.close();
+      resolve();
+    }, 3000);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify(['EVENT', event]));
+    };
+
+    ws.onmessage = message => {
+      const parsed = parseNostrMessage(message.data.toString());
+      if (!parsed) return;
+      if (parsed[0] === 'OK' && parsed[1] === event.id) {
+        clearTimeout(timeout);
+        ws.close();
+        resolve();
+      }
+    };
+
+    ws.onerror = err => {
+      clearTimeout(timeout);
+      reject(err);
+    };
+
+    ws.onclose = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+  });
+};
+
 /**
  * Connects to the relay and sends a REQ message, collecting events until EOSE.
  * @param {Array<object>} filters - Array of Nostr filters.
@@ -118,11 +208,15 @@ export const RELAY_CONSTANTS = {
 };
 
 // Ensure relay process is stopped on exit
-process.on('exit', stopRelay);
-process.on('SIGINT', () => { stopRelay(); process.exit(); });
-process.on('SIGTERM', () => { stopRelay(); process.exit(); });
+process.on('exit', () => {
+  stopRelay();
+  stopAuxRelay();
+});
+process.on('SIGINT', () => { stopRelay(); stopAuxRelay(); process.exit(); });
+process.on('SIGTERM', () => { stopRelay(); stopAuxRelay(); process.exit(); });
 process.on('uncaughtException', err => {
-    console.error('Uncaught exception:', err);
-    stopRelay();
-    process.exit(1);
+  console.error('Uncaught exception:', err);
+  stopRelay();
+  stopAuxRelay();
+  process.exit(1);
 });

@@ -112,6 +112,8 @@ export class RelayServer {
     this.host = config.relayHost || DEFAULT_HOST;
     this.port = config.relayPort || DEFAULT_WS_PORT;
     this.wssPort = config.relayWssPort || DEFAULT_WSS_PORT;
+    this.bindHost = config.relayBindHost || this.host;
+    this.bindWssHost = config.relayWssBindHost || this.bindHost;
     this.tlsKey = config.relayTlsKey;
     this.tlsCert = config.relayTlsCert;
     this.tlsEnabled = Boolean(this.tlsKey && this.tlsCert);
@@ -161,7 +163,7 @@ export class RelayServer {
       this.wsServer.on('error', err => log('WebSocket error:', err.message));
       this.httpServer.once('error', err => reject(err));
       this.httpServer.once('listening', () => resolve());
-      this.httpServer.listen(this.port, this.host);
+      this.httpServer.listen(this.port, this.bindHost);
     });
   }
 
@@ -187,7 +189,7 @@ export class RelayServer {
       this.wssServer.on('error', err => log('WSS error:', err.message));
       this.httpsServer.once('error', err => reject(err));
       this.httpsServer.once('listening', () => resolve());
-      this.httpsServer.listen(this.wssPort, this.host);
+      this.httpsServer.listen(this.wssPort, this.bindWssHost);
       this.tlsEnabled = true;
     });
   }

@@ -6,7 +6,7 @@ import { validateEvent, verifyEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05';
 import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../lib/protocol.js';
-import { normalizeLocatorEndpoints, choosePreferredEndpoint } from './selector.js';
+import { normalizeLocatorEndpoints, choosePreferredEndpoint } from 'ncc-06-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,10 @@ const clientConfigPath = path.resolve(__dirname, './config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
 
 const RELAY_URL = clientConfig.relayUrl || rootConfig.relayUrl;
+const publicationRelayTimeoutMs = clientConfig.publicationRelayTimeoutMs || 5000;
+const staleFallbackSeconds = Number(clientConfig.staleFallbackSeconds ?? 600);
+const staleFallbackEnabled = clientConfig.hasOwnProperty('staleFallbackSeconds') ? staleFallbackSeconds > 0 : true;
+
 const SERVICE_IDENTITY_URI = clientConfig.serviceIdentityUri || (clientConfig.serviceNpub ? `wss://${clientConfig.serviceNpub}` : null);
 if (!SERVICE_IDENTITY_URI || !SERVICE_IDENTITY_URI.toLowerCase().startsWith('wss://')) {
   console.error("Client 'serviceIdentityUri' must be specified as wss://<npub> in config.json.");
@@ -55,190 +59,275 @@ const log = (message, ...args) => console.log(`[Client] ${message}`, ...args);
 const warn = (message, ...args) => console.warn(`[Client] WARNING: ${message}`, ...args);
 const error = (message, ...args) => console.error(`[Client] ERROR: ${message}`, ...args);
 
-async function resolveServiceEndpoint() {
-  log(`Connecting to discovery relay at ${RELAY_URL} to resolve service endpoint for identity ${SERVICE_IDENTITY_URI} (${SERVICE_PUBKEY})...`);
+const PUBLICATION_RELAYS = getPublicationRelaySet();
+const cache = {
+  service: null,
+  locator: null
+};
 
-  const serviceEvent = await fetchServiceRecord();
+function getPublicationRelaySet() {
+  const configured = Array.isArray(clientConfig.publicationRelays) ? clientConfig.publicationRelays : [];
+  const combined = [RELAY_URL, ...configured.filter(Boolean)];
+  const deduped = [...new Set(combined)];
+  return deduped;
+}
+
+async function resolveServiceEndpoint() {
+  log(`Resolving service endpoint for ${SERVICE_IDENTITY_URI} (${SERVICE_PUBKEY}) via relays: ${PUBLICATION_RELAYS.join(', ')}`);
+  const serviceEvent = await resolveServiceRecord();
   const serviceTags = Object.fromEntries(serviceEvent.tags);
   const serviceRecord = {
     d: serviceTags.d,
     u: serviceTags.u,
     k: serviceTags.k,
-    exp: parseInt(serviceTags.exp, 10) || 0,
+    exp: parseInt(serviceTags.exp, 10) || 0
   };
-  log('Found service record:', serviceRecord);
+  log('Selected NCC-02 service record:', serviceRecord);
 
-  const locatorPayload = await fetchLocatorPayload();
+  const locatorPayload = await resolveLocatorPayload();
   if (!locatorPayload) {
-    warn('No NCC-05 locator payload resolved; relying on NCC-02 fallback.');
+    warn('No usable NCC-05 locator payload resolved; relying on NCC-02 fallback.');
   }
 
   return determineEndpoint(serviceEvent, locatorPayload);
 }
 
-async function fetchServiceRecord() {
+async function resolveServiceRecord() {
+  const now = Math.floor(Date.now() / 1000);
+  const filter = {
+    kinds: [30059],
+    authors: [SERVICE_PUBKEY],
+    '#d': [SERVICE_ID],
+    limit: 10
+  };
+
+  const candidates = await queryPublicationRelays(filter);
+  const selected = pickBestServiceRecord(candidates, now, { allowExpired: false });
+  if (selected) {
+    cache.service = {
+      event: selected,
+      fetchedAt: now,
+      expiresAt: Number(Object.fromEntries(selected.tags).exp) || 0
+    };
+    return selected;
+  }
+
+  if (staleFallbackEnabled && cache.service && now <= cache.service.fetchedAt + staleFallbackSeconds) {
+    warn('Using stale NCC-02 service record due to missing fresh candidates.');
+    return cache.service.event;
+  }
+
+  throw new Error('No NCC-02 service record found');
+}
+
+async function resolveLocatorPayload() {
+  const now = Math.floor(Date.now() / 1000);
+  const resolver = new NCC05Resolver({
+    bootstrapRelays: PUBLICATION_RELAYS,
+    timeout: NCC05_TIMEOUT_MS
+  });
+
+  try {
+    const payload = await resolver.resolve(SERVICE_PUBKEY, LOCATOR_SECRET, LOCATOR_ID, {
+      strict: false,
+      gossip: false
+    });
+    if (!payload) {
+      return attemptStaleLocator(now);
+    }
+
+    const ttl = Number(payload.ttl) || 0;
+    const updated = Number(payload.updated_at) || 0;
+    const isFresh = ttl > 0 && now <= updated + ttl;
+
+    if (!isFresh) {
+      warn('Resolved NCC-05 locator is stale.');
+      return attemptStaleLocator(now);
+    }
+
+    cache.locator = { payload, fetchedAt: now };
+    log(`NCC-05 locator resolved (ttl=${ttl}s, updated_at=${updated}).`);
+    return payload;
+  } catch (err) {
+    warn('NCC-05 resolver error:', err?.message || err);
+    return attemptStaleLocator(now);
+  } finally {
+    resolver.close();
+  }
+}
+
+function attemptStaleLocator(now) {
+  if (staleFallbackEnabled && cache.locator && now <= cache.locator.fetchedAt + staleFallbackSeconds) {
+    warn('Using stale NCC-05 locator due to missing fresh data.');
+    return cache.locator.payload;
+  }
+  return null;
+}
+
+async function queryPublicationRelays(filter) {
+  const promises = PUBLICATION_RELAYS.map(relay => queryRelayForEvents(relay, filter));
+  const settled = await Promise.allSettled(promises);
+  return settled.reduce((acc, result) => {
+    if (result.status === 'fulfilled') {
+      return acc.concat(result.value);
+    }
+    warn(`Publication relay query failed: ${result.reason}`);
+    return acc;
+  }, []);
+}
+
+function queryRelayForEvents(relayUrl, filters) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(RELAY_URL);
+    const ws = new WebSocket(relayUrl);
+    const events = [];
     const subId = 'client-service-' + Math.random().toString().slice(2, 6);
-    let bestEvent = null;
     let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        ws.close();
+        resolve(events);
+      }
+    }, publicationRelayTimeoutMs);
 
     ws.onopen = () => {
-      log('Connected to discovery relay.');
-      const filter = {
-        kinds: [30059],
-        authors: [SERVICE_PUBKEY],
-        "#d": [SERVICE_ID],
-        limit: 1,
-      };
-      ws.send(serializeNostrMessage(createReqMessage(subId, filter)));
+      ws.send(serializeNostrMessage(createReqMessage(subId, filters)));
     };
 
     ws.onmessage = message => {
       const parsed = parseNostrMessage(message.data.toString());
       if (!parsed) return;
-
       const [type, ...payload] = parsed;
 
       if (type === 'EVENT') {
         const [receivedSubId, event] = payload;
-        if (receivedSubId !== subId || event.kind !== 30059) return;
-        if (!validateEvent(event) || !verifyEvent(event)) {
-          warn(`Invalid NCC-02 event received: ${event.id}`);
-          return;
-        }
-        if (!bestEvent || event.created_at > bestEvent.created_at) {
-          bestEvent = event;
-        }
+        if (receivedSubId !== subId) return;
+        events.push(event);
       } else if (type === 'EOSE') {
         const [receivedSubId] = payload;
         if (receivedSubId === subId && !settled) {
           settled = true;
+          clearTimeout(timeout);
           ws.close();
-          if (bestEvent) {
-            resolve(bestEvent);
-          } else {
-            reject(new Error('No NCC-02 service record found'));
-          }
+          resolve(events);
         }
-      } else if (type === 'NOTICE') {
-        const [notice] = payload;
-        warn(`Relay NOTICE during NCC-02 fetch: ${notice}`);
       }
     };
 
     ws.onerror = err => {
       if (!settled) {
         settled = true;
+        clearTimeout(timeout);
         reject(err);
       }
     };
 
     ws.onclose = () => {
-      log('Disconnected from discovery relay.');
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve(events);
+      }
     };
   });
 }
 
-async function fetchLocatorPayload() {
-  const resolver = new NCC05Resolver({
-    bootstrapRelays: [RELAY_URL],
-    timeout: NCC05_TIMEOUT_MS,
+function pickBestServiceRecord(events, now, options = {}) {
+  const candidates = new Map();
+
+  for (const event of events) {
+    if (!event || event.kind !== 30059) continue;
+    if (!validateEvent(event) || !verifyEvent(event)) {
+      warn(`Invalid NCC-02 event rejected: ${event?.id}`);
+      continue;
+    }
+    const tags = Object.fromEntries(event.tags);
+    const exp = Number(tags.exp) || 0;
+    const isExpired = exp > 0 && now > exp;
+    if (!options.allowExpired && isExpired) continue;
+    const existing = candidates.get(event.id);
+    if (!existing || event.created_at > existing.created_at || (event.created_at === existing.created_at && event.id > existing.id)) {
+      candidates.set(event.id, event);
+    }
+  }
+
+  const ordered = [...candidates.values()].sort((a, b) => {
+    if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+    return b.id.localeCompare(a.id);
   });
 
-  try {
-    const payload = await resolver.resolve(SERVICE_PUBKEY, LOCATOR_SECRET, LOCATOR_ID, {
-      strict: false,
-      gossip: false,
-    });
-    if (payload) {
-      log(`NCC-05 locator resolved (ttl=${payload.ttl}s, updated_at=${payload.updated_at}).`);
-    }
-    return payload;
-  } catch (err) {
-    warn('NCC-05 resolver error:', err?.message || err);
-    return null;
-  } finally {
-    resolver.close();
-  }
+  return ordered[0] || null;
 }
 
 function determineEndpoint(ncc02Event, locatorPayload) {
   const now = Math.floor(Date.now() / 1000);
+  const tags = Object.fromEntries(ncc02Event.tags);
+  const exp = Number(tags.exp) || 0;
+  const isServiceFresh = !exp || now <= exp;
   let preferredEndpoint = null;
   let ncc02Url = null;
 
-  const tags = Object.fromEntries(ncc02Event.tags);
-  const exp = tags.exp ? parseInt(tags.exp, 10) : 0;
-
-  if (!exp || exp >= now) {
+  if (isServiceFresh) {
     ncc02Url = tags.u;
-    log(`Fresh NCC-02 found. URL: ${ncc02Url}, K: ${tags.k || 'N/A'}`);
+    log(`Selected NCC-02 fallback URL: ${ncc02Url}, K=${tags.k || 'N/A'}`);
   } else {
-    warn('NCC-02 event found but it is expired.');
+    warn('Selected NCC-02 event is expired.');
   }
 
   if (locatorPayload && Array.isArray(locatorPayload.endpoints) && locatorPayload.endpoints.length > 0) {
     const ttl = Number(locatorPayload.ttl) || 0;
     const updated = Number(locatorPayload.updated_at) || 0;
     const isFresh = ttl > 0 && now <= updated + ttl;
-
     if (isFresh) {
       log('Fresh NCC-05 locator found.');
       const normalizedEndpoints = normalizeLocatorEndpoints(locatorPayload.endpoints);
       const selection = choosePreferredEndpoint(normalizedEndpoints, {
         torPreferred: TOR_PREFERRED,
-        expectedK: NCC02_EXPECTED_KEY,
+        expectedK: NCC02_EXPECTED_KEY
       });
-
       if (selection.endpoint) {
         preferredEndpoint = selection.endpoint;
-        log(`Preferred endpoint from NCC-05: ${preferredEndpoint.url}, Protocol: ${preferredEndpoint.protocol}, Family: ${preferredEndpoint.family}, K: ${preferredEndpoint.k || 'N/A'}`);
+        log(`Preferred endpoint from NCC-05: ${preferredEndpoint.url} (${preferredEndpoint.protocol}/${preferredEndpoint.family})`);
       } else if (selection.reason) {
         const message = selection.reason === 'k-mismatch'
-          ? `K mismatch for WSS endpoint. Expected: ${selection.expected}, Got: ${selection.actual}. Rejecting.`
+          ? `K mismatch for NCC-05 WSS endpoint (expected ${selection.expected} but got ${selection.actual}). Rejecting.`
           : selection.reason === 'missing-k'
-            ? "WSS endpoint in NCC-05 missing 'k' value. Rejecting."
-            : 'No usable NCC-05 endpoint could be selected.';
+            ? "NCC-05 WSS endpoint missing 'k'. Rejecting." 
+            : 'No usable NCC-05 endpoint selected.';
         log(message);
-        if (selection.reason === 'k-mismatch') {
-          error(message);
-        } else {
-          warn(message);
-        }
+        (selection.reason === 'k-mismatch') ? error(message) : warn(message);
       }
     } else {
-      const expiredMessage = 'NCC-05 locator found but it is expired or not fresh.';
-      log(expiredMessage);
-      warn(expiredMessage);
+      warn('NCC-05 locator is stale or missing TTL.');
     }
   }
 
   if (preferredEndpoint && preferredEndpoint.url) {
     return preferredEndpoint.url;
-  } else if (ncc02Url) {
+  }
+
+  if (ncc02Url) {
     log(`Falling back to NCC-02 URL: ${ncc02Url}`);
     if (ncc02Url.startsWith('wss://')) {
       if (!tags.k || tags.k !== NCC02_EXPECTED_KEY) {
-        const fallbackMessage = `WSS endpoint from NCC-02 fallback missing or mismatched 'k' value. Expected: ${NCC02_EXPECTED_KEY}, Got: ${tags.k || 'N/A'}. Rejecting fallback.`;
-        log(fallbackMessage);
-        error(fallbackMessage);
+        const message = `NCC-02 fallback WSS endpoint 'k' mismatch (expected ${NCC02_EXPECTED_KEY}, got ${tags.k || 'N/A'}).`;
+        log(message);
+        error(message);
         return null;
       }
     }
     return ncc02Url;
-  } else {
-    warn('No fresh NCC-05 or valid NCC-02 found.');
-    return null;
   }
+
+  warn('No valid endpoint could be resolved from NCC-05 or NCC-02 records.');
+  return null;
 }
 
 async function connectAndTest(endpointUrl) {
   if (!endpointUrl) {
-    error("No endpoint URL provided to connect and test.");
+    error('No endpoint URL provided to connect and test.');
     return;
   }
-
   log(`Attempting to connect to resolved endpoint: ${endpointUrl}`);
   const wsOptions = endpointUrl.startsWith('wss://') ? { rejectUnauthorized: false } : {};
   const ws = new WebSocket(endpointUrl, wsOptions);
@@ -249,11 +338,11 @@ async function connectAndTest(endpointUrl) {
     let eventReceived = false;
 
     ws.onopen = () => {
-      log('Successfully connected to service endpoint. Sending REQ for a NCC-02 event...');
+      log('Connected. Sending REQ for NCC-02 event.');
       const filter = {
         kinds: [30059],
         authors: [SERVICE_PUBKEY],
-        "#d": [SERVICE_ID],
+        '#d': [SERVICE_ID],
         limit: 1
       };
       ws.send(serializeNostrMessage(createReqMessage(subId, filter)));
@@ -262,11 +351,10 @@ async function connectAndTest(endpointUrl) {
     ws.onmessage = event => {
       const message = parseNostrMessage(event.data.toString());
       if (!message) return;
-
       if (message[0] === 'EVENT') {
         const [, receivedSubId, receivedEvent] = message;
         if (receivedSubId === subId && receivedEvent.kind === 30059) {
-          log(`Received expected NCC-02 event: ${receivedEvent.id}`);
+          log(`Received NCC-02 event ${receivedEvent.id}`);
           eventReceived = true;
         }
       } else if (message[0] === 'EOSE') {
@@ -277,11 +365,11 @@ async function connectAndTest(endpointUrl) {
       }
 
       if (eoseReceived && eventReceived) {
-        log('REQ roundtrip successful: Event received before EOSE.');
+        log('REQ roundtrip successful.');
         ws.close();
         resolve(true);
       } else if (eoseReceived && !eventReceived) {
-        warn('REQ roundtrip completed: EOSE received, but no expected event found.');
+        warn('EOSE received but expected event missing.');
         ws.close();
         resolve(false);
       }
@@ -295,7 +383,7 @@ async function connectAndTest(endpointUrl) {
     ws.onclose = () => {
       log('Disconnected from service endpoint.');
       if (!eoseReceived || !eventReceived) {
-        reject("Connection closed before successful REQ roundtrip.");
+        reject('Connection closed before successful REQ roundtrip.');
       }
     };
   });

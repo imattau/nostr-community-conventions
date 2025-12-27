@@ -29,14 +29,20 @@
 5. **Developer visibility matters.**  
    - Logging should highlight when NCC-05 is used vs. fallback, why endpoints were rejected, and when `EOSE` completes.  
    - Tests rely on predictable output strings; keep them stable so assertions remain valid.
+6. **Publication relays and stale fallback matter.**  
+   - `publicationRelays` enable the sidecar/client to push and fetch records from multiple relays so the resolver can handle conflict/availability issues without relying on any single endpoint.  
+   - The client caches NCC-02/NCC-05 candidates with sufficient metadata so stale fallback can be activated when every fresh record is unreachable, while still surfacing that stale data was used.
 
 ## Tips
 
 - Use `ncc-02-js`/`ncc-05` libraries directly in tests to cover builder/resolver expectations (TTL, gossip, multi-recipient wraps, policy violations).  
-- Keep `selector.js` focused: normalize endpoint objects, rank by priority, prefer `wss` unless policy forbids it, and enforce `k` checks there so client code can just log the result.
+- `ncc-06-js` now hosts the selector helpers (`normalizeLocatorEndpoints`, `choosePreferredEndpoint`) plus the resolver orchestration, so reuse those exports instead of managing the logic inline. The example installs the package via a `file:` dependency and the client/test suite import the shared helpers directly.
 - When generating TLS certs for local WSS, include `127.0.0.1` in the SAN so the handshake succeeds; the client connects with `rejectUnauthorized=false` because endpoint trust is established through NCC-02 `k`, not the certificate chain.
 - Reset configs between integration tests (sidecar/client) to avoid leakage across cases that deliberately mutate TTLs or `k` values.
+- The integration suite now runs two resolver instances in parallel and exercises group-wrapped NCC-05 locators, so log outputs that mention the new endpoints help debug concurrency or gossip failures.
+- Use `config.json`'s `relayBindHost`/`relayWssBindHost` when the environment disallows binding directly on `relayHost`, so the relay can listen on `0.0.0.0` while clients still reach it via the loopback URI.
 - If Tor control is enabled, the sidecar now creates a v3 onion service for the relay port, caches the key material (so the address survives restarts), and publishes `ws://<onion>.onion` in NCC-05 locators (no `k` tag is needed for those entries). The relay remains unaware of Tor.
+- Run `npm run clean-configs` whenever you update TLS material or flip `NCC06_NCC02_KEY_SOURCE=cert`; that script removes and regenerates the deterministic sidecar/client configs.
 
 ## Pitfalls
 

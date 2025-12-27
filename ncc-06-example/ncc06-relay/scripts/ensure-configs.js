@@ -25,14 +25,32 @@ const serviceNpub = nip19.npubEncode(servicePk);
 const locatorFriendSk = crypto.createHash('sha256').update(LOCATOR_FRIEND_SEED).digest('hex');
 const locatorFriendPk = getPublicKey(locatorFriendSk);
 
+const NCC02_KEY_SOURCE = process.env.NCC06_NCC02_KEY_SOURCE || 'test';
+const TEST_KEY = 'TESTKEY:relay-local-dev-1';
+
+const computeCertFingerprint = () => {
+  try {
+    const certPath = path.resolve(__dirname, '..', rootConfig.relayTlsCert || './certs/server.crt');
+    const certData = readFileSync(certPath);
+    return `CERTFP:${crypto.createHash('sha256').update(certData).digest('hex')}`;
+  } catch (err) {
+    console.warn('[setup] Could not compute certificate fingerprint:', err.message);
+    return TEST_KEY;
+  }
+};
+
+const derivedFingerprint = NCC02_KEY_SOURCE === 'cert' ? computeCertFingerprint() : TEST_KEY;
+
 const defaultSidecarConfig = {
   serviceSk,
   servicePk,
   serviceNpub,
   relayUrl: RELAY_URL,
-  ncc02ExpectedKey: 'TESTKEY:relay-local-dev-1',
+  ncc02ExpectedKey: derivedFingerprint,
+  ncc02ExpectedKeySource: NCC02_KEY_SOURCE,
   ncc02ExpSeconds: 1209600,
   ncc05TtlSeconds: 3600,
+  publicationRelays: [RELAY_URL],
   serviceId: 'relay',
   locatorId: 'relay-locator',
   torControl: {
@@ -54,6 +72,8 @@ const defaultClientConfig = {
   ncc02ExpectedKey: defaultSidecarConfig.ncc02ExpectedKey,
   serviceId: defaultSidecarConfig.serviceId,
   locatorId: defaultSidecarConfig.locatorId,
+  publicationRelays: [RELAY_URL],
+  staleFallbackSeconds: 600,
   torPreferred: false,
   ncc05TimeoutMs: 5000,
   locatorSecretKey: locatorFriendSk,

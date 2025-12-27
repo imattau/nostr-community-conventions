@@ -40,82 +40,35 @@ let storedServiceRecord = null;
 let storedAttestation = null;
 let onionEndpoint = null;
 
+function getPublicationRelays() {
+  const configured = sidecarConfig.publicationRelays || [];
+  return [...new Set([RELAY_URL, ...configured.filter(Boolean)])];
+}
+
+const PUBLICATION_RELAYS = getPublicationRelays();
 
 async function connectAndPublish() {
-  log(`Connecting to relay at ${RELAY_URL}...`);
-  const ws = new WebSocket(RELAY_URL);
+  log(`Preparing to publish service material for SERVICE_NPUB=${SERVICE_NPUB} to relays: ${PUBLICATION_RELAYS.join(', ')}`);
+  onionEndpoint = await createOnionEndpoint();
 
-  ws.onopen = async () => {
-    log(`Connected to relay. Publishing events for SERVICE_NPUB=${SERVICE_NPUB}...`);
-    
-    onionEndpoint = await createOnionEndpoint();
-    
-    // --- Step 1: Publish NCC documents (Stub for now) ---
-    // The kind for NCC documents is not specified in NCC-00.
-    // For now, this step is a placeholder.
-    log('Skipping NCC document publication (kind undefined).');
+  log('Skipping NCC document publication (kind undefined).');
 
-    // --- Step 2: Publish NCC-02 Service Record (30059) ---
-    await publishNCC02(ws);
+  const events = [];
+  stageServiceRecord(events);
+  const locatorPayload = stageLocator(events);
+  stageEncryptedLocator(events, locatorPayload);
+  stageAttestation(events);
+  stageRevocation(events);
 
-    // --- Step 3: Publish NCC-05 Locator (30058) ---
-    await publishNCC05(ws);
-
-    // --- Step 4 & 5: Optional: Publish Attestation (30060) and Revocation (30061) ---
-    // These require the ID of the NCC-02 event, so we'll pass it if we get it back from the relay.
-    // For simplicity in this minimal example, we won't wait for the relay's OK before publishing these,
-    // but in a real-world scenario, you might want to ensure NCC-02 is stored first.
-    // We'll just demonstrate the publishing.
-    await publishAttestation(ws);
-    await publishRevocation(ws);
-
-    log('All events published. Disconnecting from relay in 5 seconds.');
-    setTimeout(() => {
-        ws.close();
-        process.exit(0);
-    }, 5000);
-  };
-
-  ws.onmessage = event => {
-    const message = parseNostrMessage(event.data.toString());
-    if (!message) return;
-
-    const [type, ...payload] = message;
-
-    if (type === 'OK') {
-      const [eventId, accepted, msg] = payload;
-      log(`Relay response for event ${eventId}: Accepted=${accepted}, Message="${msg}"`);
-    } else if (type === 'NOTICE') {
-      const [msg] = payload;
-      warn(`Relay NOTICE: ${msg}`);
-    } else {
-      log(`Received unhandled message type: ${type}`);
-    }
-  };
-
-  ws.onerror = err => {
-    error('WebSocket error:', err);
-    process.exit(1);
-  };
-
-  ws.onclose = () => {
-    log('Disconnected from relay.');
-    process.exit(0);
-  };
+  await publishEventsToPublicationSet(events);
+  log('All events published. Disconnecting in 5 seconds.');
+  setTimeout(() => process.exit(0), 5000);
 }
 
-async function publishEvent(ws, event) {
-    const alreadySigned = event && typeof event.id === 'string' && typeof event.sig === 'string';
-    const signedEvent = alreadySigned ? event : finalizeEvent(event, PRIVATE_KEY);
-    log(`Publishing event kind ${signedEvent.kind} (ID: ${signedEvent.id})`);
-    ws.send(JSON.stringify(["EVENT", signedEvent]));
-}
-
-async function publishNCC02(ws) {
+function stageServiceRecord(events) {
   const configuredSeconds = Number(sidecarConfig.ncc02ExpSeconds) || 3600;
   const expirySeconds = Math.max(60, configuredSeconds);
   const expiryDays = expirySeconds / 86400;
-
   try {
     storedServiceRecord = ncc02Builder.createServiceRecord({
       serviceId: sidecarConfig.serviceId,
@@ -123,166 +76,217 @@ async function publishNCC02(ws) {
       fingerprint: sidecarConfig.ncc02ExpectedKey,
       expiryDays
     });
-    await publishEvent(ws, storedServiceRecord);
+    events.push(storedServiceRecord);
+    log(`Prepared NCC-02 service record (ID: ${storedServiceRecord.id})`);
   } catch (err) {
     error('Failed to build NCC-02 service record:', err);
   }
 }
 
 function buildLocatorPayload() {
-    const createdAt = Math.floor(Date.now() / 1000);
-    const endpoints = [];
+  const createdAt = Math.floor(Date.now() / 1000);
+  const endpoints = [];
 
-    if (rootConfig.relayWssUrl) {
-        endpoints.push(createEndpoint({
-            url: rootConfig.relayWssUrl,
-            protocol: "wss",
-            family: "ipv4",
-            priority: 1,
-            type: "clearnet",
-            includeK: true
-        }));
-    }
-    if (rootConfig.relayUrl) {
-        endpoints.push(createEndpoint({
-            url: rootConfig.relayUrl,
-            protocol: "ws",
-            family: "ipv4",
-            priority: 10,
-            type: "clearnet",
-            includeK: false
-        }));
-    }
+  if (rootConfig.relayWssUrl) {
+    endpoints.push(createEndpoint({
+      url: rootConfig.relayWssUrl,
+      protocol: "wss",
+      family: "ipv4",
+      priority: 1,
+      type: "clearnet",
+      includeK: true
+    }));
+  }
+  if (rootConfig.relayUrl) {
+    endpoints.push(createEndpoint({
+      url: rootConfig.relayUrl,
+      protocol: "ws",
+      family: "ipv4",
+      priority: 10,
+      type: "clearnet",
+      includeK: false
+    }));
+  }
 
-    if (onionEndpoint) {
-        endpoints.push({
-            url: `ws://${onionEndpoint.address}:${onionEndpoint.servicePort}`,
-            protocol: "ws",
-            family: "onion",
-            priority: 5,
-            type: "onion"
-        });
-    }
+  if (onionEndpoint) {
+    endpoints.push({
+      url: `ws://${onionEndpoint.address}:${onionEndpoint.servicePort}`,
+      protocol: "ws",
+      family: "onion",
+      priority: 5,
+      type: "onion"
+    });
+  }
 
-    return {
-        ttl: sidecarConfig.ncc05TtlSeconds,
-        updated_at: createdAt,
-        endpoints
-    };
+  return {
+    ttl: sidecarConfig.ncc05TtlSeconds,
+    updated_at: createdAt,
+    endpoints
+  };
 }
 
 function createEndpoint({ url, protocol, family, priority, type, includeK }) {
-    const endpoint = {
-        url,
-        protocol,
-        family,
-        priority,
-        type
-    };
-    if (includeK) {
-        endpoint.k = sidecarConfig.ncc02ExpectedKey;
-    }
-    return endpoint;
+  const endpoint = {
+    url,
+    protocol,
+    family,
+    priority,
+    type
+  };
+  if (includeK) {
+    endpoint.k = sidecarConfig.ncc02ExpectedKey;
+  }
+  return endpoint;
 }
 
-async function publishEncryptedLocator(ws, payload) {
-    const recipientPubkey = clientConfig.locatorFriendPubkey;
-    if (!recipientPubkey) {
-        warn('No locator friend pubkey configured; skipping encrypted locator.');
-        return;
-    }
+function stageLocator(events) {
+  const createdAt = Math.floor(Date.now() / 1000);
+  const expiration = createdAt + sidecarConfig.ncc05TtlSeconds;
+  const locatorContent = buildLocatorPayload();
 
-    const hexToUint8 = hex => new Uint8Array(Buffer.from(hex, 'hex'));
-    const signerKey = hexToUint8(PRIVATE_KEY);
-    const conversationKey = nip44.getConversationKey(signerKey, recipientPubkey);
-    const encryptedContent = nip44.encrypt(JSON.stringify(payload), conversationKey);
+  const event = {
+    kind: 30058,
+    pubkey: PUBLIC_KEY,
+    created_at: createdAt,
+    tags: [
+      ["d", sidecarConfig.locatorId],
+      ["expiration", expiration.toString()]
+    ],
+    content: JSON.stringify(locatorContent)
+  };
 
-    const createdAt = Math.floor(Date.now() / 1000);
-    const event = {
-        kind: 30058,
-        pubkey: PUBLIC_KEY,
-        created_at: createdAt,
-        tags: [
-            ["d", sidecarConfig.locatorId],
-            ["recipient", recipientPubkey],
-            ["encryption", "nip-44"]
-        ],
-        content: encryptedContent
-    };
-
-    await publishEvent(ws, event);
+  events.push(finalizeEvent(event, PRIVATE_KEY));
+  log(`Prepared NCC-05 locator (ID: ${event.id})`);
+  return locatorContent;
 }
 
-async function publishNCC05(ws) {
-    const kind = 30058; // NCC-05 Locator
-    const createdAt = Math.floor(Date.now() / 1000);
-    const expiration = createdAt + sidecarConfig.ncc05TtlSeconds;
-    const locatorContent = buildLocatorPayload();
+function stageEncryptedLocator(events, locatorPayload) {
+  const recipientPubkey = clientConfig.locatorFriendPubkey;
+  if (!recipientPubkey) {
+    warn('No locator friend pubkey configured; skipping encrypted locator.');
+    return;
+  }
 
-    const event = {
-        kind,
-        pubkey: PUBLIC_KEY,
-        created_at: createdAt,
-        tags: [
-            ["d", sidecarConfig.locatorId],
-            ["expiration", expiration.toString()]
-        ],
-        content: JSON.stringify(locatorContent)
-    };
+  const hexToUint8 = hex => new Uint8Array(Buffer.from(hex, 'hex'));
+  const signerKey = hexToUint8(PRIVATE_KEY);
+  const conversationKey = nip44.getConversationKey(signerKey, recipientPubkey);
+  const encryptedContent = nip44.encrypt(JSON.stringify(locatorPayload), conversationKey);
+  const createdAt = Math.floor(Date.now() / 1000);
 
-    await publishEvent(ws, event);
-    await publishEncryptedLocator(ws, locatorContent);
+  const event = {
+    kind: 30058,
+    pubkey: PUBLIC_KEY,
+    created_at: createdAt,
+    tags: [
+      ["d", sidecarConfig.locatorId],
+      ["recipient", recipientPubkey],
+      ["encryption", "nip-44"]
+    ],
+    content: encryptedContent
+  };
+
+  events.push(finalizeEvent(event, PRIVATE_KEY));
+  log(`Prepared encrypted NCC-05 locator for ${recipientPubkey} (ID: ${event.id})`);
 }
 
-async function publishAttestation(ws) {
-    if (!storedServiceRecord) {
-        warn('Skipping attestation publish; service record not available yet.');
-        return;
-    }
-    try {
-        storedAttestation = ncc02Builder.createAttestation(
-            PUBLIC_KEY,
-            sidecarConfig.serviceId,
-            storedServiceRecord.id,
-        );
-        await publishEvent(ws, storedAttestation);
-    } catch (err) {
-        error('Failed to build NCC-02 attestation:', err);
-    }
+function stageAttestation(events) {
+  if (!storedServiceRecord) {
+    warn('Skipping attestation publish; service record not available yet.');
+    return;
+  }
+  try {
+    storedAttestation = ncc02Builder.createAttestation(
+      PUBLIC_KEY,
+      sidecarConfig.serviceId,
+      storedServiceRecord.id,
+    );
+    events.push(storedAttestation);
+    log(`Prepared NCC-02 attestation (ID: ${storedAttestation.id})`);
+  } catch (err) {
+    error('Failed to build NCC-02 attestation:', err);
+  }
 }
 
-async function publishRevocation(ws) {
-    if (!storedAttestation) {
-        warn('Skipping revocation publish; attestation event missing.');
-        return;
-    }
-    try {
-        const revocationEvent = ncc02Builder.createRevocation(
-            storedAttestation.id,
-            'Automated revocation for test harness'
-        );
-    await publishEvent(ws, revocationEvent);
+function stageRevocation(events) {
+  if (!storedAttestation) {
+    warn('Skipping revocation publish; attestation event missing.');
+    return;
+  }
+  try {
+    const revocationEvent = ncc02Builder.createRevocation(
+      storedAttestation.id,
+      'Automated revocation for test harness'
+    );
+    events.push(revocationEvent);
+    log(`Prepared NCC-02 revocation (ID: ${revocationEvent.id})`);
   } catch (err) {
     error('Failed to build NCC-02 revocation:', err);
   }
 }
 
-async function createOnionEndpoint() {
-    const relayPort = Number(rootConfig.relayPort || 7000);
+async function publishEventsToPublicationSet(events) {
+  for (const relayUrl of PUBLICATION_RELAYS) {
     try {
-        const endpoint = await ensureOnionEndpoint({
-            torControl: sidecarConfig.torControl,
-            cacheFile: sidecarConfig.torControl?.serviceFile,
-            relayPort
-        });
-        if (endpoint) {
-            log(`Onion endpoint enabled: ws://${endpoint.address}:${endpoint.servicePort}`);
-        }
-        return endpoint;
+      await publishEventsToRelay(relayUrl, events);
     } catch (err) {
-        warn('Onion endpoint could not be created:', err.message);
-        return null;
+      warn(`Failed to publish events to ${relayUrl}: ${err.message}`);
     }
+  }
+}
+
+async function publishEventsToRelay(relayUrl, events) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(relayUrl);
+    const timeout = setTimeout(() => {
+      ws.close();
+    }, 4000);
+
+    ws.onopen = () => {
+      log(`Publishing ${events.length} events to ${relayUrl}`);
+      for (const event of events) {
+        ws.send(JSON.stringify(['EVENT', event]));
+      }
+    };
+
+    ws.onmessage = msg => {
+      const message = parseNostrMessage(msg.data.toString());
+      if (!message) return;
+      if (message[0] === 'OK') {
+        const [ , eventId, accepted, info ] = message;
+        log(`Relay ${relayUrl} response for ${eventId}: Accepted=${accepted}, Message="${info}"`);
+      } else if (message[0] === 'NOTICE') {
+        warn(`relay ${relayUrl} NOTICE: ${message[1]}`);
+      }
+    };
+
+    ws.once('error', err => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    ws.onclose = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+  });
+}
+
+async function createOnionEndpoint() {
+  const relayPort = Number(rootConfig.relayPort || 7000);
+  try {
+    const endpoint = await ensureOnionEndpoint({
+      torControl: sidecarConfig.torControl,
+      cacheFile: sidecarConfig.torControl?.serviceFile,
+      relayPort
+    });
+    if (endpoint) {
+      log(`Onion endpoint enabled: ws://${endpoint.address}:${endpoint.servicePort}`);
+    }
+    return endpoint;
+  } catch (err) {
+    warn('Onion endpoint could not be created:', err.message);
+    return null;
+  }
 }
 
 connectAndPublish();

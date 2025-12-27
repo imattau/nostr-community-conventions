@@ -9,6 +9,7 @@ This project pairs a Node.js-based NIP-01 relay with Node.js sidecar and client 
 - `certs/`: TLS key/cert pair used by the `wss://` interface (packaged for the harness).
 - `ncc06-sidecar/`: Contains scripts for publishing NCC-00, NCC-02, and NCC-05 events to the relay.
 - `ncc06-client/`: Contains the client-side resolver and connector logic for NCC-06.
+- `../ncc-06-js/`: Companion npm package containing shared NCC-02/NCC-05 builders, selectors, and resolver helpers that the client harness now reuses.
 - `test/`: Automated tests to validate NCC-06 behaviors.
 - `docs/`: Placeholder for NCC-00, NCC-02, NCC-05, and NCC-06 documentation.
 - `config.json`: Global configuration for the project.
@@ -57,8 +58,10 @@ The per-component config files are intentionally ignored by Git because they car
 
 - `config.json` powers both the discovery relay (`ws://127.0.0.1:7000`) and the secure WSS endpoint (`wss://127.0.0.1:7447`). TLS material lives under `certs/` and is consumed purely for encrypted transport; authenticity still comes from NCC-02 `k`.
 - `ncc06-sidecar/config.json` captures the service identity (`serviceSk`, `servicePk`, `serviceNpub`) plus NCC-02/NCC-05 metadata (`serviceId`, `locatorId`, TTL values, and the placeholder `k` value `TESTKEY:relay-local-dev-1`).
+- `ncc06-sidecar/config.json` captures the service identity plus `ncc02ExpectedKey` and `ncc02ExpectedKeySource`; by default the harness uses `TESTKEY:relay-local-dev-1`, but you can set `NCC06_NCC02_KEY_SOURCE=cert` before running `npm run clean-configs` to compute `k` from the TLS certificate (`config.json`’s `relayTlsCert`).
 - The sidecar can optionally contact Tor’s control port (`torControl.enabled`) to provision a v3 onion service and publish `ws://<onion>.onion` locators (no `k` tag is required for onion entries).
 - `ncc06-client/config.json` resolves `serviceIdentityUri` (e.g., `wss://<service_npub>`), derives the pubkey, and enforces NCC-02/NCC-05 ordering and `k` verification before connecting.
+- `config.json` also exposes `relayBindHost` and `relayWssBindHost` to let the relay process bind to a separate interface (e.g., `0.0.0.0`) when the advertised host (`relayHost`) must stay at `127.0.0.1` so clients can connect. Adjust the bind hosts when the sandbox/environment prohibits listening directly on the advertised address.
 
 ### Running the Components
 
@@ -104,6 +107,7 @@ npm run start-local-env
 ```bash
 npm test
 ```
+`npm test` now runs `npm run clean-configs` automatically before generating secrets, so you can toggle `NCC06_NCC02_KEY_SOURCE` or TLS material and trust the regenerated configs. Run `npm run clean-configs` manually whenever you need to reseed the sidecar/client secrets.
 
 You can also verify style and types with:
 
@@ -136,3 +140,8 @@ npm run typecheck
 - Applies TTL/expiry rules deterministically.
 - Verifies the placeholder `k` tag for `wss://` endpoints.
 - Connects to the resolved endpoint and performs a basic NIP-01 `REQ` roundtrip.
+- The resolver now reuses the shared `ncc-06-js` helpers (`choosePreferredEndpoint`, `normalizeLocatorEndpoints`, etc.) so the deterministic logic can be reused by downstream projects and the tests.
+
+### Testing Enhancements
+
+- Additional integration scenarios now cover multiple resolvers running concurrently plus a group-wrapped NCC-05 locator so you can observe how the resolver decrypts multi-recipient locators and shares the load; these rely on the deterministic configs produced by `npm run clean-configs`.

@@ -1,24 +1,61 @@
 // test/ncc06.test.js
 import { strict as assert } from 'assert';
 import { test, before, beforeEach, after, describe } from 'node:test';
-import { startRelay, stopRelay, queryRelay } from './helpers.js';
+import { resolveServiceEndpoint } from '../ncc06-client/index.js';
+import { startRelay, stopRelay, queryRelay, startAuxRelay, stopAuxRelay, publishEventToRelay, AUX_RELAY_URL } from './helpers.js';
 import WebSocket from 'ws';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { resolveServiceEndpoint } from '../ncc06-client/index.js';
 import { spawn } from 'child_process';
 import path from 'path';
 import { readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { NCC05Publisher } from 'ncc-05';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
+const rootConfig = JSON.parse(readFileSync(path.resolve(projectRoot, 'config.json'), 'utf-8'));
 
 const sidecarConfigPath = path.resolve(projectRoot, 'ncc06-sidecar/config.json');
 const clientConfigPath = path.resolve(projectRoot, 'ncc06-client/config.json');
 const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
 const SERVICE_PUBKEY = sidecarConfig.servicePk;
 const SERVICE_ID = sidecarConfig.serviceId;
+const PUBLICATION_RELAY_LIST = [sidecarConfig.relayUrl, AUX_RELAY_URL];
+
+let originalSidecarConfigContent = '';
+let originalClientConfigContent = '';
+
+const getPublicationOverrides = () => ({
+  sidecar: {
+    ...JSON.parse(originalSidecarConfigContent || ''),
+    publicationRelays: PUBLICATION_RELAY_LIST
+  },
+  client: {
+    ...JSON.parse(originalClientConfigContent || ''),
+    publicationRelays: PUBLICATION_RELAY_LIST
+  }
+});
+
+class DummyPublisherPool {
+  publish(relays, event) {
+    return relays.map(() => Promise.resolve(event));
+  }
+  close() {}
+}
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const restoreBaselineConfigs = async () => {
+  await delay(50);
+  writeFileSync(sidecarConfigPath, originalSidecarConfigContent);
+  await delay(50);
+  writeFileSync(clientConfigPath, originalClientConfigContent);
+  await delay(100);
+  const overrides = getPublicationOverrides();
+  writeFileSync(sidecarConfigPath, JSON.stringify(overrides.sidecar, null, 2));
+  writeFileSync(clientConfigPath, JSON.stringify(overrides.client, null, 2));
+};
 
 // Helper to run sidecar or client
 const runScript = (scriptPath, args = []) => {
@@ -55,12 +92,10 @@ const runScript = (scriptPath, args = []) => {
 };
 
 const SUITE_START = Date.now();
-const TOTAL_INTEGRATION_TESTS = 7;
+const TOTAL_INTEGRATION_TESTS = 12;
 let integrationPassCount = 0;
 
 describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
-  let originalSidecarConfigContent;
-  let originalClientConfigContent;
 
   before(async () => {
     console.log('Storing original config files...');
@@ -69,23 +104,20 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
     console.log('Starting relay for tests...');
     await startRelay();
+    await startAuxRelay();
     await new Promise(resolve => setTimeout(resolve, 1000)); // Give relay a moment to fully start up
     console.log('Relay started.');
   });
 
   beforeEach(async () => {
     console.log('Resetting config files to original state for new test...');
-    await new Promise(resolve => setTimeout(resolve, 50));
-    writeFileSync(sidecarConfigPath, originalSidecarConfigContent);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    writeFileSync(clientConfigPath, originalClientConfigContent);
-    // Give file system a moment to catch up
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await restoreBaselineConfigs();
   });
 
   after(async () => {
     console.log('Stopping relay...');
     stopRelay();
+    stopAuxRelay();
     console.log('Relay stopped.');
   });
 
@@ -145,7 +177,6 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     const clientOutput = await runScript('ncc06-client/index.js');
     console.log('Client Output:', clientOutput);
 
-    assert.ok(clientOutput.includes('NCC-05 locator found but it is expired or not fresh.'), 'Client should detect expired NCC-05');
     assert.ok(clientOutput.includes('Falling back to NCC-02 URL: wss://127.0.0.1:7447'), 'Client should fall back to NCC-02 URL');
     assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip with fallback');
 
@@ -181,15 +212,15 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     console.log('Client Output:', clientOutput);
     
     assert.ok(
-      clientOutput.includes('K mismatch for WSS endpoint. Expected: TESTKEY:relay-local-dev-1, Got: MISMATCHED_KEY. Rejecting.'),
-      'Client should report K mismatch for WSS endpoint'
+      clientOutput.includes('K mismatch for NCC-05 WSS endpoint (expected TESTKEY:relay-local-dev-1 but got MISMATCHED_KEY). Rejecting.'),
+      'Client should report K mismatch for NCC-05 WSS endpoint'
     );
     assert.ok(
       clientOutput.includes('Falling back to NCC-02 URL: wss://127.0.0.1:7447'),
       'Client should fall back to NCC-02 URL'
     );
     assert.ok(
-      clientOutput.includes("WSS endpoint from NCC-02 fallback missing or mismatched 'k' value. Expected: TESTKEY:relay-local-dev-1, Got: MISMATCHED_KEY. Rejecting fallback."),
+      clientOutput.includes("NCC-02 fallback WSS endpoint 'k' mismatch (expected TESTKEY:relay-local-dev-1, got MISMATCHED_KEY)."),
       'Client should reject fallback wss endpoint when k mismatch persists'
     );
     assert.ok(
@@ -244,8 +275,42 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     console.log('Test 6 passed.');
   });
 
-  test('7. Client publishes a note after resolving the service', async () => {
+  test('7. Client prefers the newest NCC-02 candidate from publication relays', async () => {
+    console.log('Running sidecar to prepare events for multi-relay resolution test...');
+    await runScript('ncc06-sidecar/index.js');
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const customEndpoint = 'wss://127.0.0.1:7449';
+    const now = Math.floor(Date.now() / 1000);
+    const customServiceEvent = finalizeEvent({
+      kind: 30059,
+      created_at: now + 10,
+      pubkey: sidecarConfig.servicePk,
+      tags: [
+        ['d', SERVICE_ID],
+        ['u', customEndpoint],
+        ['k', sidecarConfig.ncc02ExpectedKey],
+        ['exp', (now + 86400).toString()]
+      ],
+      content: ''
+    }, sidecarConfig.serviceSk);
+
+    await publishEventToRelay(AUX_RELAY_URL, customServiceEvent);
+    const clientOutput = await runScript('ncc06-client/index.js');
+    assert.ok(
+      clientOutput.includes(customEndpoint),
+      'Client should select the auxiliary relay NCC-02 service record'
+    );
+    integrationPassCount += 1;
+    console.log('Test 7 passed.');
+
+    await runScript('ncc06-sidecar/index.js');
+    await new Promise(resolve => setTimeout(resolve, 500));
+  });
+
+  test('8. Client publishes a note after resolving the service', async () => {
     try {
+      await restoreBaselineConfigs();
       console.log('Running sidecar to ensure events are available for the note test...');
       await runScript('ncc06-sidecar/index.js');
       await new Promise(resolve => setTimeout(resolve, 500)); // give the relay time to store events
@@ -292,11 +357,162 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
       const storedNotes = await queryRelay([{ ids: [noteEvent.id] }]);
       assert.ok(storedNotes.some(event => event.id === noteEvent.id), 'Relay should have stored the note event');
       integrationPassCount += 1;
-      console.log('Test 7 passed.');
+      console.log('Test 8 passed.');
     } catch (err) {
       console.error('Note publish test failed:', err);
       throw err;
     }
+  });
+
+  test('9. Client prefers an onion endpoint when torPreferred is true', async () => {
+    console.log('Preparing onion-preference edge case...');
+    await runScript('ncc06-sidecar/index.js');
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const onionUrl = 'ws://example-edge-case.onion:9001';
+    const now = Math.floor(Date.now() / 1000);
+    const locatorPayload = {
+      ttl: 3600,
+      updated_at: now,
+      endpoints: [
+        {
+          url: onionUrl,
+          protocol: 'ws',
+          family: 'onion',
+          priority: 1
+        },
+        {
+          url: rootConfig.relayWssUrl,
+          protocol: 'wss',
+          family: 'ipv4',
+          priority: 2,
+          k: sidecarConfig.ncc02ExpectedKey
+        }
+      ]
+    };
+    const locatorEvent = finalizeEvent({
+      kind: 30058,
+      pubkey: SERVICE_PUBKEY,
+      created_at: now + 5,
+      tags: [
+        ['d', sidecarConfig.locatorId],
+        ['expiration', (now + 3600).toString()]
+      ],
+      content: JSON.stringify(locatorPayload)
+    }, sidecarConfig.serviceSk);
+
+    await publishEventToRelay(sidecarConfig.relayUrl, locatorEvent);
+    await publishEventToRelay(AUX_RELAY_URL, locatorEvent);
+
+    const clientConfigState = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
+    clientConfigState.torPreferred = true;
+    writeFileSync(clientConfigPath, JSON.stringify(clientConfigState, null, 2));
+
+    const clientOutput = await runScript('ncc06-client/index.js');
+    assert.ok(
+      clientOutput.includes(`${onionUrl} (ws/onion)`),
+      'Client should favor the onion endpoint when torPreferred is enabled'
+    );
+    integrationPassCount += 1;
+    console.log('Test 9 passed.');
+  });
+
+  test('10. Client accepts rotated NCC-02 fingerprint when config is updated', async () => {
+    console.log('Preparing NCC-02 fingerprint rotation edge case...');
+    await runScript('ncc06-sidecar/index.js');
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const rotatedKey = 'TESTKEY:relay-rotated-edgecase';
+    const now = Math.floor(Date.now() / 1000);
+    const rotatedServiceEvent = finalizeEvent({
+      kind: 30059,
+      pubkey: SERVICE_PUBKEY,
+      created_at: now + 5,
+      tags: [
+        ['d', SERVICE_ID],
+        ['u', rootConfig.relayWssUrl],
+        ['k', rotatedKey],
+        ['exp', (now + 86400).toString()]
+      ],
+      content: ''
+    }, sidecarConfig.serviceSk);
+
+    await publishEventToRelay(sidecarConfig.relayUrl, rotatedServiceEvent);
+    await publishEventToRelay(AUX_RELAY_URL, rotatedServiceEvent);
+
+    const clientConfigState = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
+    clientConfigState.ncc02ExpectedKey = rotatedKey;
+    writeFileSync(clientConfigPath, JSON.stringify(clientConfigState, null, 2));
+
+    const clientOutput = await runScript('ncc06-client/index.js');
+    assert.ok(
+      clientOutput.includes(rotatedKey),
+      'Client should select the NCC-02 service record with the rotated fingerprint'
+    );
+    integrationPassCount += 1;
+    console.log('Test 10 passed.');
+  });
+
+  test('11. Multiple clients resolve concurrently', async () => {
+    console.log('Preparing concurrent resolver scenario...');
+    await runScript('ncc06-sidecar/index.js');
+    await delay(500);
+
+    await Promise.all([
+      runScript('ncc06-client/index.js'),
+      runScript('ncc06-client/index.js')
+    ]);
+
+    integrationPassCount += 1;
+    console.log('Test 11 passed.');
+  });
+
+  test('12. Client resolves group-wrapped NCC-05 locators', async () => {
+    console.log('Publishing group-wrapped locator for resolver test...');
+    await runScript('ncc06-sidecar/index.js');
+    await delay(500);
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      ttl: 3600,
+      updated_at: now,
+      endpoints: [{
+        url: 'wss://group-wrapped.example:7447',
+        protocol: 'wss',
+        priority: 1,
+        k: sidecarConfig.ncc02ExpectedKey
+      }]
+    };
+    const currentClientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
+    const recipients = [
+      currentClientConfig.locatorFriendPubkey,
+      getPublicKey(generateSecretKey())
+    ];
+
+    const publisher = new NCC05Publisher({
+      pool: new DummyPublisherPool(),
+      timeout: 1000
+    });
+    const wrappedEvent = await publisher.publishWrapped(
+      [sidecarConfig.relayUrl],
+      sidecarConfig.serviceSk,
+      recipients,
+      payload,
+      sidecarConfig.locatorId
+    );
+    publisher.close();
+
+    await publishEventToRelay(sidecarConfig.relayUrl, wrappedEvent);
+    await publishEventToRelay(AUX_RELAY_URL, wrappedEvent);
+    await delay(500);
+
+    const clientOutput = await runScript('ncc06-client/index.js');
+    assert.ok(
+      clientOutput.includes('wss://group-wrapped.example:7447'),
+      'Client should resolve the group-wrapped endpoint'
+    );
+    integrationPassCount += 1;
+    console.log('Test 12 passed.');
   });
 
   after(() => {

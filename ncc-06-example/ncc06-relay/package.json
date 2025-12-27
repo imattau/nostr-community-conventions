@@ -5,9 +5,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "clean-configs": "node scripts/clean-configs.js",
     "ensure-configs": "node scripts/ensure-configs.js",
     "ensure-certs": "node scripts/ensure-certs.js",
-    "pretest": "npm run ensure-configs && npm run ensure-certs",
+    "pretest": "npm run clean-configs && npm run ensure-configs && npm run ensure-certs",
     "test": "node --test",
     "relay": "node scripts/run-relay.js",
     "relay:build": "node scripts/run-relay.js --build-only",
@@ -26,7 +27,8 @@
     "nostr-tools": "^2.19.4",
     "npm-run-all": "^4.1.5",
     "selfsigned": "^5.4.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "ncc-06-js": "file:../../ncc-06-js"
   },
   "devDependencies": {
     "@types/node": "^20.7.2",
