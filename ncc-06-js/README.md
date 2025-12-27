@@ -8,6 +8,7 @@ Reusable helpers extracted from the NCC-06 example relay, sidecar, and client im
 - **NCC-05 helpers** (`buildLocatorPayload`, `normalizeLocatorEndpoints`, `validateLocatorFreshness`) that assemble locator payloads, parse stored JSON, and enforce TTL/`updated_at` freshness rules.
 - **Deterministic NCC-06 resolution** via `choosePreferredEndpoint` and `resolveServiceEndpoint`, which query bootstrap relays, prefer fresh NCC-05 locators, verify `k` fingerprints for `wss://`, and fall back to NCC-02 `u` values.
 - **External endpoint helpers** (`buildExternalEndpoints`, `detectGlobalIPv6`, `getPublicIPv4`) so sidecars can declare onion/IPv6/IPv4 reachability in a reproducible order without making the relay probe the network.
+- **Scheduling helpers** (`scheduleWithJitter`) for applying bounded jitter to recurring NCC-02/NCC-05 timers without ever publishing outside the declared window.
 - **TLS/key utilities** (`ensureSelfSignedCert`, `generateKeypair`, `toNpub`, `fromNsec`, `generateExpectedK`, `validateExpectedKFormat`) that mirror the key and fingerprint management used by the example sidecar.
 - **Lightweight protocol helpers** (`parseNostrMessage`, `serializeNostrMessage`, `createReqMessage`) for downstream code that wants to reuse the same framing logic as the example client.
 

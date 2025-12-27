@@ -48,7 +48,7 @@ npm run ensure-certs
 All configuration is managed in `config.json` files.
 
 - `config.json` (root): Global settings, including default relay ports, TLS paths, and logging controls.
-- `ncc06-sidecar/config.json`: Sidecar-only settings covering the service keypair, NCC-02/NCC-05 metadata, and optional Tor control values.
+- `ncc06-sidecar/config.json`: Sidecar-only settings covering the service keypair, NCC-02/NCC-05 metadata, `publishRelays`, and optional Tor control values.
 - `ncc06-sidecar/config-manager.js`: Provides `loadConfig`, `saveConfig`, and `updateConfig` helpers so administrative tools can mutate sidecar settings programmatically while preserving the generated JSON file.
 - `ncc06-sidecar/config-manager.js` exports `loadConfig`, `saveConfig`, and `updateConfig` so dashboards, APIs, or CLI helpers can read and mutate the generated `config.json` without overwriting manual edits. Wrap `updateConfig` to validate new values, then rerun `npm run sidecar:publish` to push the updated events.
 - `ncc06-client/config.json`: Client-only settings such as the service identity URI, expected `k`, TTL overrides, and locator secrets.
@@ -60,6 +60,7 @@ The per-component config files are intentionally ignored by Git because they car
 
 - `config.json` powers both the discovery relay (`ws://127.0.0.1:7000`) and the secure WSS endpoint (`wss://127.0.0.1:7447`). TLS material lives under `certs/` and is consumed purely for encrypted transport; authenticity still comes from NCC-02 `k`.
 - `ncc06-sidecar/config.json` captures the service identity (`serviceSk`, `servicePk`, `serviceNpub`), NCC-02/NCC-05 metadata, and the new `k` block. `k.mode` lets you choose `tls_spki` (default when `wss://` endpoints exist), `static`, or `generate`, plus the supporting `certPath`, `value`, or `persistPath` values. The harness already seeds the TLS fingerprint for local dev, but you can override via `NCC06_K_MODE` / `NCC06_NCC02_KEY_SOURCE`.
+- The sidecar can run as a repeating daemon when you set `NCC06_SIDE_CAR_MODE=daemon`. In that mode it republished NCC-05 locators and refreshes NCC-02 service records ahead of their TTL/expiry; use `sidecar.jitterRatio` in the config to tune the 0–0.15 jitter window applied to each timer. Without the daemon flag the script still publishes once and exits as before.
 - The sidecar can optionally contact Tor’s control port (`torControl.enabled`) to provision a v3 onion service and publish `ws://<onion>.onion` locators (no `k` tag is required for onion entries).
 - `ncc06-client/config.json` resolves `serviceIdentityUri` (e.g., `wss://<service_npub>`), derives the pubkey, and enforces NCC-02/NCC-05 ordering and `k` verification before connecting.
 - `config.json` also exposes `relayBindHost` and `relayWssBindHost` to let the relay process bind to a separate interface (e.g., `0.0.0.0`) when the advertised host (`relayHost`) must stay at `127.0.0.1` so clients can connect. Adjust the bind hosts when the sandbox/environment prohibits listening directly on the advertised address.

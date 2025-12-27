@@ -84,6 +84,7 @@ const defaultSidecarConfig = {
   ncc02ExpSeconds: 1209600,
   ncc05TtlSeconds: 3600,
   publicationRelays: [RELAY_URL],
+  publishRelays: [RELAY_URL],
   serviceId: 'relay',
   locatorId: 'relay-locator',
   torControl: {

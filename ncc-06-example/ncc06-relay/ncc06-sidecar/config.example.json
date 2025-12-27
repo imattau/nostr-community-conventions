@@ -11,6 +11,7 @@
   },
   "ncc02ExpSeconds": 1209600,
   "ncc05TtlSeconds": 3600,
+  "jitterRatio": 0.15,
   "serviceId": "relay",
   "locatorId": "relay-locator",
   "torControl": {

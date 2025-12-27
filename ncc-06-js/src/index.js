@@ -7,3 +7,4 @@ export * from './keys.js';
 export * from './tls.js';
 export * from './k.js';
 export * from './external-endpoints.js';
+export * from './schedule.js';

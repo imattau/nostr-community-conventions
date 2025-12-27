@@ -8,7 +8,7 @@ import { parseNostrMessage } from '../lib/protocol.js';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
-import { buildExternalEndpoints, getExpectedK } from 'ncc-06-js';
+import { buildExternalEndpoints, getExpectedK, scheduleWithJitter } from 'ncc-06-js';
 import { loadConfig as loadSidecarConfig } from './config-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,9 +46,11 @@ if (!PRIVATE_KEY || !PUBLIC_KEY || !SERVICE_NPUB) {
 const ncc02Builder = new NCC02Builder(PRIVATE_KEY);
 let storedServiceRecord = null;
 let storedAttestation = null;
+let locatorTimer = null;
+let serviceTimer = null;
 
 function getPublicationRelays() {
-  const configured = sidecarConfig.publicationRelays || [];
+  const configured = sidecarConfig.publishRelays ?? sidecarConfig.publicationRelays ?? [];
   return [...new Set([RELAY_URL, ...configured.filter(Boolean)])];
 }
 
@@ -67,7 +69,12 @@ async function connectAndPublish() {
 
   await publishEventsToPublicationSet(events);
   log('All events published. Disconnecting in 5 seconds.');
-  setTimeout(() => process.exit(0), 5000);
+  if (!shouldRunDaemon()) {
+    setTimeout(() => process.exit(0), 5000);
+  } else {
+    scheduleServiceRefresh();
+    scheduleLocatorRepublish(locatorPayload.ttl || sidecarConfig.ncc05TtlSeconds);
+  }
 }
 
 function stageServiceRecord(events) {
@@ -200,6 +207,7 @@ async function publishEventsToPublicationSet(events) {
   for (const relayUrl of PUBLICATION_RELAYS) {
     try {
       await publishEventsToRelay(relayUrl, events);
+      log(`Published ${events.length} events to ${relayUrl}`);
     } catch (err) {
       warn(`Failed to publish events to ${relayUrl}: ${err.message}`);
     }
@@ -244,3 +252,53 @@ async function publishEventsToRelay(relayUrl, events) {
 }
 
 connectAndPublish();
+
+if (shouldRunDaemon()) {
+  const jitterRatio = Math.max(0, Number(sidecarConfig.jitterRatio ?? 0.15));
+  const ncc02ExpirySeconds = Math.max(60, Number(sidecarConfig.ncc02ExpSeconds) || 3600);
+  const ncc05TtlSeconds = Math.max(60, Number(sidecarConfig.ncc05TtlSeconds) || 3600);
+
+  scheduleServiceRefresh(ncc02ExpirySeconds, jitterRatio);
+  scheduleLocatorRepublish(ncc05TtlSeconds, jitterRatio);
+}
+
+function shouldRunDaemon() {
+  return process.env.NCC06_SIDE_CAR_MODE === 'daemon';
+}
+
+function scheduleLocatorRepublish(baseSeconds, jitterRatio) {
+  if (!shouldRunDaemon() || baseSeconds <= 0) return;
+  const baseMs = Math.max(1000, baseSeconds * 1000);
+  const delay = scheduleWithJitter(baseMs, jitterRatio);
+  locatorTimer = setTimeout(async () => {
+    await republishLocator();
+    scheduleLocatorRepublish(baseSeconds, jitterRatio);
+  }, delay);
+}
+
+function scheduleServiceRefresh(baseSeconds, jitterRatio) {
+  if (!shouldRunDaemon()) return;
+  const baseMs = Math.max(1000, baseSeconds * 1000);
+  const delay = scheduleWithJitter(baseMs, jitterRatio);
+  serviceTimer = setTimeout(async () => {
+    await refreshServiceRecord();
+    scheduleServiceRefresh(baseSeconds, jitterRatio);
+  }, delay);
+}
+
+async function republishLocator() {
+  log('Republishing NCC-05 locator');
+  const events = [];
+  const locatorPayload = await stageLocator(events);
+  stageEncryptedLocator(events, locatorPayload);
+  await publishEventsToPublicationSet(events);
+}
+
+async function refreshServiceRecord() {
+  log('Refreshing NCC-02 service record');
+  const events = [];
+  stageServiceRecord(events);
+  stageAttestation(events);
+  stageRevocation(events);
+  await publishEventsToPublicationSet(events);
+}
