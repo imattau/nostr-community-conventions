@@ -369,6 +369,10 @@ body.mode-power {
   font-size: 0.8rem;
   cursor: pointer;
   border: 1px solid var(--border);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .p-btn-sm { padding: 4px 8px; font-size: 0.75rem; }
 .p-btn-accent { background: #238636; color: white; }

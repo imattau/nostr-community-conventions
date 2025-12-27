@@ -111,6 +111,7 @@ app.delete("/api/drafts/:id", async (req, res) => {
 
 const distPath = join(__dirname, "dist");
 app.use(express.static(distPath));
+app.use("/docs", express.static(join(__dirname, "docs")));
 
 function normalizeEventId(value) {
   if (!value) return "";
