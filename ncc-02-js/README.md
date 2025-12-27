@@ -26,7 +26,7 @@ npm install ncc-02-js
 import { NCC02Resolver } from 'ncc-02-js';
 
 // Initialize with relay URLs and optional trusted CA pubkeys
-const resolver = new NCC02Resolver(['wss://relay.damus.io'], {
+const resolver = new NCC02Resolver(['wss://192.0.2.1:443'], {
   trustedCAPubkeys: ['npub1...'] // Trusted third-party certifiers
 });
 

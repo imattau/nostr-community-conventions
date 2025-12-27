@@ -276,12 +276,11 @@ Experimental and subject to change. Clients are free to adopt partially or not a
 ### A.1 Service Publisher
 
 ```text
-service_id = "api"
-endpoint_uri = "https://example.net:8443"
+service_id = "media"
+endpoint_uri = "https://203.0.113.45:8443"
 endpoint_key_fp = spki_hash(endpoint_tls_cert)
 expiry = now + 14 days
-
-### A.1 Service Publisher
+```
 
 Publish a signed, parameterised replaceable event containing the required tags.
 
