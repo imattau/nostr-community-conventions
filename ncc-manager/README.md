@@ -25,6 +25,13 @@ The globally installed CLI also respects `--host`, `--port`, and `--no-open`:
 ncc-manager --host 0.0.0.0 --port 4322 --no-open
 ```
 
+## Documentation
+
+- [Architecture Overview](docs/architecture.md) - System design and data flow.
+- [Nostr Event Kinds](docs/event-kinds.md) - Details on Kind 30050, 30051, 30052, and 30053.
+- [Internal API](docs/api.md) - Documentation for the local REST API.
+- [Chain Validation](docs/validation.md) - Explanation of the NCC validation logic.
+
 ## Development
 
 ```bash
