@@ -28,7 +28,7 @@ npm install ncc-05-js
 import { NCC05Publisher, NCC05Payload } from 'ncc-05-js';
 
 const publisher = new NCC05Publisher();
-const relays = ['wss://relay.damus.io', 'wss://nos.lol'];
+const relays = ['wss://relay.damus.io', 'wss://npub1base64userpubkey...'];
 const mySecretKey = '...'; // Hex string or Uint8Array
 
 const payload: NCC05Payload = {
@@ -206,7 +206,7 @@ interface NCC05Endpoint {
 ### `NCC05Resolver`
 
 *   `constructor(options?)`
-    *   `bootstrapRelays`: `string[]` (Default: `['wss://relay.damus.io', 'wss://nos.lol']`)
+    *   `bootstrapRelays`: `string[]` (Default: `['wss://relay.damus.io', 'wss://npub1...']`)
     *   `timeout`: `number` (ms) (Default: `10000`)
     *   `pool`: `SimplePool` (optional)
 *   `resolve(targetPubkey, secretKey?, identifier?, options?)`: `Promise<NCC05Payload | null>`

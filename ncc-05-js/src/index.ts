@@ -189,7 +189,7 @@ export class NCC05Resolver {
     constructor(options: ResolverOptions = {}) {
         this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
-        this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://nos.lol'];
+        this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://npub1...'];
         this.timeout = options.timeout || 10000;
     }
 
