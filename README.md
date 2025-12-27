@@ -1,4 +1,4 @@
-# NCC-05: Identity-Bound Service Locator Resolution
+# ncc-05-js: Identity-Bound Service Locator Resolution
 
 **Status:** Draft  
 **Category:** Discovery / Resolution  

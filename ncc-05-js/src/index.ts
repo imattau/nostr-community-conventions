@@ -4,7 +4,7 @@
  * This library implements the NCC-05 convention for publishing and resolving
  * dynamic service endpoints (IP, Port, Onion) bound to Nostr identities.
  * 
- * @module ncc-05
+ * @module ncc-05-js
  */
 
 import { 

@@ -1,4 +1,4 @@
-# NCC-05 Proof of Concept
+# ncc-05-js Proof of Concept
 
 This example demonstrates the implementation of **NCC-05: Identity-Bound Service Locator Resolution**.
 
