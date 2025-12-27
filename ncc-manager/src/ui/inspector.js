@@ -75,7 +75,7 @@ export function renderInspector(container, item, state, options = {}) {
     }
 
     const title = item.title || eventTagValue(item.tags, "title") || "Untitled";
-    const status = normalizeStatus(item.status || "published");
+    const status = normalizeStatus(item.status);
     const author = item.author_pubkey || item.author || item.pubkey || (item._isLocal ? state.signerPubkey : "") || "Unknown";
     const ensureTs = (val) => (val > 1e12 ? val : val * 1000) || 0;
     const ts = ensureTs(item.updated_at || item.created_at);
