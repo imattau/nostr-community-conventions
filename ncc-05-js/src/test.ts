@@ -85,6 +85,21 @@ async function test() {
         process.exit(1);
     }
 
+    // Test NCC-06 relay URL handling (at least should not throw validation error)
+    console.log('Testing NCC-06 relay URL string handling...');
+    const ncc06Relay = `wss://${npub}`;
+    try {
+        const ncc06Resolver = new NCC05Resolver({ bootstrapRelays: [ncc06Relay], timeout: 100 });
+        await ncc06Resolver.resolve(pk, sk);
+    } catch (e: any) {
+        if (e.message.includes('Invalid URL')) {
+            console.error('FAILED: NCC-06 relay URL rejected as invalid.');
+            process.exit(1);
+        }
+        // Timeout or connection error is expected and fine
+    }
+    console.log('NCC-06 relay URL string handling passed.');
+
     // Test Friend-to-Friend resolution
     console.log('Testing Friend-to-Friend resolution...');
     const skA = generateSecretKey();
