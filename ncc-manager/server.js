@@ -19,6 +19,11 @@ const __dirname = dirname(__filename);
 const pkg = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8"));
 const APP_VERSION = pkg.version;
 
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+  console.log(APP_VERSION);
+  process.exit(0);
+}
+
 const app = express();
 const PORT = Number(process.env.PORT || 5179);
 const HOST = process.env.HOST || "127.0.0.1";
