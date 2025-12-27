@@ -626,6 +626,7 @@ async function persistRelayEvents(events) {
     // Also save a draft representation locally
     const draft = payloadToDraft(event);
     draft.source = "relay";
+    draft.status = "published";
     draft.event_id = event.id; // Ensure event_id matches the actual Nostr event ID
     const timestamp = event.created_at || nowSeconds();
     draft.updated_at = timestamp * 1000;
@@ -801,6 +802,7 @@ async function publishDraft(draft, kind, shouldAnnounce = false) {
     const updated = {
       ...publishableDraft,
       event_id: event.id,
+      status: "published",
       author_pubkey: signer.pubkey,
       published_at: publishableDraft.published_at || nowSeconds()
       // raw_event and raw_tags are no longer stored directly in the draft object

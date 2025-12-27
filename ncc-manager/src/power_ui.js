@@ -910,6 +910,13 @@ function openEndorsementModal(nccItem) {
     `;
     document.body.appendChild(modal);
 
+    modal.addEventListener("click", (e) => {
+        const actionBtn = e.target.closest("[data-action]");
+        if (actionBtn && actionBtn.dataset.action === "close-modal") {
+            modal.remove();
+        }
+    });
+
     document.getElementById("m-end-submit").onclick = async () => {
         const roles = document.getElementById("m-end-roles").value.split(",").map(s => s.trim()).filter(Boolean);
         const impl = document.getElementById("m-end-impl").value.trim();
@@ -966,6 +973,13 @@ function openNsrModal(nccItem) {
         </div>
     `;
     document.body.appendChild(modal);
+
+    modal.addEventListener("click", (e) => {
+        const actionBtn = e.target.closest("[data-action]");
+        if (actionBtn && actionBtn.dataset.action === "close-modal") {
+            modal.remove();
+        }
+    });
 
     document.getElementById("m-nsr-submit").onclick = async () => {
         const auth = document.getElementById("m-nsr-auth").value.trim();
@@ -1187,6 +1201,13 @@ function openAnnouncementModal(item, _eventId) {
         </div>
     `;
     document.body.appendChild(modal);
+
+    modal.addEventListener("click", (e) => {
+        const actionBtn = e.target.closest("[data-action]");
+        if (actionBtn && actionBtn.dataset.action === "close-modal") {
+            modal.remove();
+        }
+    });
 
     document.getElementById("m-announce-submit").onclick = async () => {
         const content = document.getElementById("m-announce-content").value.trim();

@@ -54,7 +54,8 @@ export function renderExplorer(container, state, options = {}) {
             let identity = item.event_id || item.id;
             const isDraft = (item.status || "").toLowerCase() !== "published";
             
-            if (isDraft) {
+            // If it's a draft AND doesn't have a published event ID yet, use a draft-specific identity
+            if (isDraft && !item.event_id) {
                 const cleanD = (item.d || "").replace(/^draft:/, "");
                 if (cleanD) {
                     identity = `draft-group:${item.kind}:${cleanD}`;
