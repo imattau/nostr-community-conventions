@@ -1,6 +1,11 @@
 // src/utils.js
 import { marked } from "marked";
 
+/**
+ * Escapes HTML special characters.
+ * @param {string} value 
+ * @returns {string}
+ */
 export function esc(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -9,6 +14,13 @@ export function esc(value) {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Shortens a Nostr pubkey or event ID for display.
+ * @param {string} value 
+ * @param {number} head 
+ * @param {number} tail 
+ * @returns {string}
+ */
 export function shortenKey(value, head = 6, tail = 4) {
   if (!value) return "";
   if (value.length <= head + tail + 1) return value;
@@ -16,6 +28,11 @@ export function shortenKey(value, head = 6, tail = 4) {
   return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
+/**
+ * Formats a timestamp into a human-readable relative time string.
+ * @param {number} timestamp 
+ * @returns {string}
+ */
 export function formatCacheAge(timestamp) {
   if (!timestamp) return "just now";
   const delta = Date.now() - timestamp;
@@ -30,12 +47,22 @@ const markdownOptions = {
   mangle: false
 };
 
+/**
+ * Renders markdown content to HTML.
+ * @param {string} content 
+ * @returns {string}
+ */
 export function renderMarkdown(content) {
   if (!content) return "";
   const raw = marked.parse(content, markdownOptions);
   return raw; // Temporarily bypass sanitizeHtml(raw, markdownSanitizeOptions);
 }
 
+/**
+ * Splits a comma-separated string into a trimmed array.
+ * @param {string} value 
+ * @returns {string[]}
+ */
 export function splitList(value) {
   return (value || "")
     .split(",")
@@ -43,14 +70,28 @@ export function splitList(value) {
     .filter(Boolean);
 }
 
+/**
+ * Returns a unique array of elements.
+ * @param {Array} list 
+ * @returns {Array}
+ */
 export function uniq(list) {
   return [...new Set(list.filter(Boolean))];
 }
 
+/**
+ * Returns the current time in seconds.
+ * @returns {number}
+ */
 export function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * Extracts digits from an NCC identifier.
+ * @param {string} value 
+ * @returns {string}
+ */
 export function stripNccNumber(value) {
   if (!value) return "";
   const trimmed = String(value).trim().toLowerCase();
@@ -58,6 +99,11 @@ export function stripNccNumber(value) {
   return withoutPrefix.replace(/\D/g, "");
 }
 
+/**
+ * Builds an ncc-XX identifier from a numeric string.
+ * @param {string} numberValue 
+ * @returns {string}
+ */
 export function buildNccIdentifier(numberValue) {
   const digits = stripNccNumber(numberValue);
   if (!digits) return "";
