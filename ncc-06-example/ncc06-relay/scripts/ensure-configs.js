@@ -30,6 +30,7 @@ const locatorFriendSk = crypto.createHash('sha256').update(LOCATOR_FRIEND_SEED).
 const locatorFriendPk = getPublicKey(locatorFriendSk);
 
 const NCC02_KEY_SOURCE = process.env.NCC06_NCC02_KEY_SOURCE || 'cert';
+const NCC06_RELAY_MODE = process.env.NCC06_RELAY_MODE || 'public';
 const SIDE_CAR_DIR = path.resolve(projectRoot, 'ncc06-sidecar');
 const defaultExternalEndpoints = {
   ipv4: {
@@ -74,6 +75,11 @@ const expectedK = getExpectedK(
   { baseDir: SIDE_CAR_DIR }
 );
 
+const determineRelayMode = () => {
+  const normalized = String(NCC06_RELAY_MODE).toLowerCase();
+  return normalized === 'private' ? 'private' : 'public';
+};
+
 const defaultSidecarConfig = {
   serviceSk,
   servicePk,
@@ -85,6 +91,7 @@ const defaultSidecarConfig = {
   ncc05TtlSeconds: 3600,
   publicationRelays: [RELAY_URL],
   publishRelays: [RELAY_URL],
+  relayMode: determineRelayMode(),
   serviceId: 'relay',
   locatorId: 'relay-locator',
   torControl: {

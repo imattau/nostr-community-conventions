@@ -8,7 +8,12 @@ import { parseNostrMessage } from '../lib/protocol.js';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
-import { buildExternalEndpoints, getExpectedK, scheduleWithJitter } from 'ncc-06-js';
+import {
+  buildExternalEndpoints,
+  getExpectedK,
+  getRelayMode,
+  scheduleWithJitter
+} from 'ncc-06-js';
 import { loadConfig as loadSidecarConfig } from './config-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,6 +60,11 @@ function getPublicationRelays() {
 }
 
 const PUBLICATION_RELAYS = getPublicationRelays();
+const relayMode = getRelayMode(sidecarConfig);
+const isPrivateRelay = relayMode === 'private';
+if (isPrivateRelay) {
+  warn('Relay is configured in private mode; NCC-05 locators will be marked private.');
+}
 
 async function connectAndPublish() {
   log(`Preparing to publish service material for SERVICE_NPUB=${SERVICE_NPUB} to relays: ${PUBLICATION_RELAYS.join(', ')}`);
@@ -129,7 +139,8 @@ async function stageLocator(events) {
     created_at: createdAt,
     tags: [
       ["d", sidecarConfig.locatorId],
-      ["expiration", expiration.toString()]
+      ["expiration", expiration.toString()],
+      ...(isPrivateRelay ? [['private', 'true']] : [])
     ],
     content: JSON.stringify(locatorContent)
   };
@@ -269,6 +280,10 @@ function shouldRunDaemon() {
 
 function scheduleLocatorRepublish(baseSeconds, jitterRatio) {
   if (!shouldRunDaemon() || baseSeconds <= 0) return;
+  if (isPrivateRelay) {
+    warn('Locator republish disabled in private mode.');
+    return;
+  }
   const baseMs = Math.max(1000, baseSeconds * 1000);
   const delay = scheduleWithJitter(baseMs, jitterRatio);
   locatorTimer = setTimeout(async () => {
@@ -288,6 +303,10 @@ function scheduleServiceRefresh(baseSeconds, jitterRatio) {
 }
 
 async function republishLocator() {
+  if (isPrivateRelay) {
+    warn('Skipping NCC-05 republish because relay is private.');
+    return;
+  }
   log('Republishing NCC-05 locator');
   const events = [];
   const locatorPayload = await stageLocator(events);

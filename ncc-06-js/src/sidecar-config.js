@@ -11,6 +11,20 @@ const DEFAULT_TOR_CONTROL = {
   timeout: 5000
 };
 
+const RELAY_MODE_PUBLIC = 'public';
+const RELAY_MODE_PRIVATE = 'private';
+
+function normalizeRelayMode(mode) {
+  if (!mode) {
+    return RELAY_MODE_PUBLIC;
+  }
+  const value = String(mode).toLowerCase();
+  if (value !== RELAY_MODE_PUBLIC && value !== RELAY_MODE_PRIVATE) {
+    throw new Error(`relayMode must be "${RELAY_MODE_PUBLIC}" or "${RELAY_MODE_PRIVATE}"`);
+  }
+  return value;
+}
+
 function uniqueList(items) {
   const seen = new Set();
   return items.filter(item => {
@@ -22,6 +36,15 @@ function uniqueList(items) {
     seen.add(normalized);
     return true;
   });
+}
+
+export function getRelayMode(config = {}) {
+  return normalizeRelayMode(config.relayMode);
+}
+
+export function setRelayMode(config = {}, mode) {
+  const normalized = normalizeRelayMode(mode);
+  return { ...config, relayMode: normalized };
 }
 
 /**
@@ -42,6 +65,7 @@ export function buildSidecarConfig({
   externalEndpoints = {},
   k = {},
   baseDir = process.cwd(),
+  relayMode,
   ncc02ExpectedKeySource
 } = {}) {
   if (!serviceSk || !servicePk || !serviceNpub) {
@@ -58,6 +82,7 @@ export function buildSidecarConfig({
     ...(publishRelays ?? normalizedPublicationRelays)
   ]);
   const keySource = ncc02ExpectedKeySource ?? k.mode ?? 'auto';
+  const normalizedRelayMode = normalizeRelayMode(relayMode);
 
   return {
     serviceSk,
@@ -74,7 +99,8 @@ export function buildSidecarConfig({
     ncc02ExpectedKeySource: keySource,
     externalEndpoints,
     torControl,
-    k
+    k,
+    relayMode: normalizedRelayMode
   };
 }
 

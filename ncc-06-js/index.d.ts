@@ -214,6 +214,7 @@ declare module 'ncc-06-js' {
     externalEndpoints?: Record<string, unknown>;
     k?: KConfig;
     baseDir?: string;
+    relayMode?: 'public' | 'private';
     ncc02ExpectedKeySource?: string;
   }
   export interface SidecarConfig {
@@ -232,8 +233,11 @@ declare module 'ncc-06-js' {
     externalEndpoints: Record<string, unknown>;
     torControl: Record<string, unknown>;
     k: KConfig;
+    relayMode: 'public' | 'private';
   }
   export function buildSidecarConfig(options: SidecarConfigOptions): SidecarConfig;
+  export function getRelayMode(config?: { relayMode?: string }): 'public' | 'private';
+  export function setRelayMode(config?: Record<string, unknown>, mode: 'public' | 'private'): Record<string, unknown>;
 
   export interface ClientConfigOptions {
     relayUrl: string;

@@ -16,6 +16,9 @@
    - Store the service keypair (`serviceSk/servicePk/serviceNpub`) in sidecar config and reuse it to sign NCC-02/05 events.  
    - Publish NCC-02 with `d`, `u`, `k`, `exp`; keep the `k` placeholder consistent until you switch to real TLS fingerprints later.  
    - Publish NCC-05 with `ttl`, `updated_at`, and a prioritized endpoint list, giving `wss` entries higher priority but leaving fallback `ws`/onion entries for robustness.
+3. **Control relay exposure via modes.**  
+   - `relayMode` (or `NCC06_RELAY_MODE`) lets you classify the service as `public` (default—publish NCC-05 locators) or `private` (skip NC-05 locator/endpoint publication while still emitting NCC-02 + attest/revoke material).  
+   - Private mode keeps the service record available for clients that already know the endpoint while avoiding advertising connectors to the wider network; the sidecar still enforces attestation/revocation workflows so trust decisions remain visible.
 
 3. **Relay needs both WS and WSS interfaces for tests.**  
    - A plain `ws://127.0.0.1:7000` suffices for discovery/filter testing, but `wss://127.0.0.1:7447` is necessary to exercise the `k` pinning workflow.  

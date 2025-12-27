@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import { strict as assert } from 'assert';
-import { buildSidecarConfig, buildClientConfig } from '../src/sidecar-config.js';
+import {
+  buildSidecarConfig,
+  buildClientConfig,
+  getRelayMode,
+  setRelayMode
+} from '../src/sidecar-config.js';
 
 test('buildSidecarConfig constructs expected fields based on inputs', () => {
   const cfg = buildSidecarConfig({
@@ -33,4 +38,12 @@ test('buildClientConfig enforces identity URI and relays', () => {
   assert.equal(client.serviceIdentityUri, 'wss://npub');
   assert.equal(client.publicationRelays.length, 2);
   assert.equal(client.ncc02ExpectedKey, 'TESTKEY:abc');
+});
+
+test('getRelayMode default and setter', () => {
+  assert.equal(getRelayMode({}), 'public');
+  assert.equal(getRelayMode({ relayMode: 'private' }), 'private');
+  const config = setRelayMode({}, 'private');
+  assert.equal(config.relayMode, 'private');
+  assert.throws(() => setRelayMode({}, 'unknown'));
 });

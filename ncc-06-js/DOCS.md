@@ -57,6 +57,12 @@ Utilities for locator payload construction and evaluation.
 ### `buildSidecarConfig(options)`
 - Mirrors the example sidecar setup and derives `ncc02ExpectedKey`, `publishRelays`, and `torControl` from operator intent so you do not need to duplicate those scripts.
 
+### `getRelayMode(config)`
+- Returns the normalized `"public"` or `"private"` mode that drives whether the sidecar publishes NCC-05 locators.
+
+### `setRelayMode(config, mode)`
+- Normalizes and writes `"public"` or `"private"` back into the config object so you can persistively toggle the relay’s exposure level.
+
 ### `buildClientConfig(options)`
 - Rehydrates the minimal client config that the example resolver expects; dedupes publication relays, enforces `serviceIdentityUri`, and carries the `expectedK` for NCC-02 pinning.
 
