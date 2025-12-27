@@ -1,6 +1,6 @@
 {
   "name": "ncc-02-js",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Nostr-native service discovery and trust implementation (NCC-02)",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
