@@ -7,7 +7,7 @@ This project pairs a Node.js-based NIP-01 relay with Node.js sidecar and client 
 - `lib/relay.js`: The Node relay implementation delivering a protocol-dumb NIP-01 server that stores events and serves filters.
 - `scripts/run-relay.js`: Launches the Node relay using `config.json`.
 - `certs/`: TLS key/cert pair used by the `wss://` interface (packaged for the harness).
-- `ncc06-sidecar/`: Contains scripts for publishing NCC-00, NCC-02, and NCC-05 events to the relay.
+- `ncc06-sidecar/`: Contains scripts for publishing NCC-00, NCC-02, and NCC-05 events to the relay, plus the `external-endpoints` helpers that assemble onion/IPv6/IPv4 locator lists from operator-configured reachability.
 - `ncc06-client/`: Contains the client-side resolver and connector logic for NCC-06.
 - `../ncc-06-js/`: Companion npm package containing shared NCC-02/NCC-05 builders, selectors, and resolver helpers that the client harness now reuses.
 - `test/`: Automated tests to validate NCC-06 behaviors.

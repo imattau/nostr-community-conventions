@@ -17,4 +17,18 @@
     "serviceFile": "./onion-service.json",
     "timeout": 5000
   }
+  ,
+  "externalEndpoints": {
+    "ipv4": {
+      "enabled": true,
+      "protocol": "wss",
+      "address": "127.0.0.1",
+      "port": 7447,
+      "publicSources": ["https://api.ipify.org?format=json"]
+    },
+    "ipv6": {
+      "enabled": false,
+      "protocol": "wss"
+    }
+  }
 }

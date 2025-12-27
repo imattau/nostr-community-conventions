@@ -11,6 +11,9 @@ const projectRoot = path.resolve(__dirname, '..');
 const rootConfigPath = path.resolve(projectRoot, 'config.json');
 const rootConfig = JSON.parse(readFileSync(rootConfigPath, 'utf-8'));
 const RELAY_URL = rootConfig.relayUrl || 'ws://127.0.0.1:7000';
+const RELAY_HOST = rootConfig.relayHost || '127.0.0.1';
+const RELAY_PORT = rootConfig.relayPort || 7000;
+const RELAY_WSS_PORT = rootConfig.relayWssPort || 7447;
 
 const sidecarConfigPath = path.resolve(projectRoot, 'ncc06-sidecar/config.json');
 const clientConfigPath = path.resolve(projectRoot, 'ncc06-client/config.json');
@@ -61,6 +64,19 @@ const defaultSidecarConfig = {
     servicePort: 80,
     serviceFile: './onion-service.json',
     timeout: 5000
+  },
+  externalEndpoints: {
+    ipv4: {
+      enabled: true,
+      protocol: 'wss',
+      address: RELAY_HOST,
+      port: RELAY_WSS_PORT,
+      publicSources: ['https://api.ipify.org?format=json']
+    },
+    ipv6: {
+      enabled: false,
+      protocol: 'wss'
+    }
   }
 };
 

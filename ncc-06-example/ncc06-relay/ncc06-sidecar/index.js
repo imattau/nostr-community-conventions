@@ -8,7 +8,9 @@ import { parseNostrMessage } from '../lib/protocol.js';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
-import { ensureOnionEndpoint } from './onion-service.js';
+import {
+  buildExternalEndpoints
+} from './external-endpoints.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +40,6 @@ const error = (message, ...args) => console.error(`[Sidecar] ERROR: ${message}`,
 const ncc02Builder = new NCC02Builder(PRIVATE_KEY);
 let storedServiceRecord = null;
 let storedAttestation = null;
-let onionEndpoint = null;
 
 function getPublicationRelays() {
   const configured = sidecarConfig.publicationRelays || [];
@@ -49,13 +50,11 @@ const PUBLICATION_RELAYS = getPublicationRelays();
 
 async function connectAndPublish() {
   log(`Preparing to publish service material for SERVICE_NPUB=${SERVICE_NPUB} to relays: ${PUBLICATION_RELAYS.join(', ')}`);
-  onionEndpoint = await createOnionEndpoint();
-
   log('Skipping NCC document publication (kind undefined).');
 
   const events = [];
   stageServiceRecord(events);
-  const locatorPayload = stageLocator(events);
+  const locatorPayload = await stageLocator(events);
   stageEncryptedLocator(events, locatorPayload);
   stageAttestation(events);
   stageRevocation(events);
@@ -83,41 +82,8 @@ function stageServiceRecord(events) {
   }
 }
 
-function buildLocatorPayload() {
+function createLocatorPayload(endpoints) {
   const createdAt = Math.floor(Date.now() / 1000);
-  const endpoints = [];
-
-  if (rootConfig.relayWssUrl) {
-    endpoints.push(createEndpoint({
-      url: rootConfig.relayWssUrl,
-      protocol: "wss",
-      family: "ipv4",
-      priority: 1,
-      type: "clearnet",
-      includeK: true
-    }));
-  }
-  if (rootConfig.relayUrl) {
-    endpoints.push(createEndpoint({
-      url: rootConfig.relayUrl,
-      protocol: "ws",
-      family: "ipv4",
-      priority: 10,
-      type: "clearnet",
-      includeK: false
-    }));
-  }
-
-  if (onionEndpoint) {
-    endpoints.push({
-      url: `ws://${onionEndpoint.address}:${onionEndpoint.servicePort}`,
-      protocol: "ws",
-      family: "onion",
-      priority: 5,
-      type: "onion"
-    });
-  }
-
   return {
     ttl: sidecarConfig.ncc05TtlSeconds,
     updated_at: createdAt,
@@ -125,24 +91,19 @@ function buildLocatorPayload() {
   };
 }
 
-function createEndpoint({ url, protocol, family, priority, type, includeK }) {
-  const endpoint = {
-    url,
-    protocol,
-    family,
-    priority,
-    type
-  };
-  if (includeK) {
-    endpoint.k = sidecarConfig.ncc02ExpectedKey;
-  }
-  return endpoint;
-}
-
-function stageLocator(events) {
+async function stageLocator(events) {
   const createdAt = Math.floor(Date.now() / 1000);
+  const endpoints = await buildExternalEndpoints({
+    tor: sidecarConfig.torControl,
+    ipv6: sidecarConfig.externalEndpoints?.ipv6,
+    ipv4: sidecarConfig.externalEndpoints?.ipv4,
+    wsPort: rootConfig.relayPort,
+    wssPort: rootConfig.relayWssPort,
+    ncc02ExpectedKey: sidecarConfig.ncc02ExpectedKey,
+    publicIpv4Sources: sidecarConfig.externalEndpoints?.ipv4?.publicSources
+  });
   const expiration = createdAt + sidecarConfig.ncc05TtlSeconds;
-  const locatorContent = buildLocatorPayload();
+  const locatorContent = createLocatorPayload(endpoints);
 
   const event = {
     kind: 30058,
@@ -156,7 +117,7 @@ function stageLocator(events) {
   };
 
   events.push(finalizeEvent(event, PRIVATE_KEY));
-  log(`Prepared NCC-05 locator (ID: ${event.id})`);
+  log(`Prepared NCC-05 locator (ID: ${event.id}) with ${locatorContent.endpoints.length} endpoints`);
   return locatorContent;
 }
 
@@ -269,24 +230,6 @@ async function publishEventsToRelay(relayUrl, events) {
       resolve();
     };
   });
-}
-
-async function createOnionEndpoint() {
-  const relayPort = Number(rootConfig.relayPort || 7000);
-  try {
-    const endpoint = await ensureOnionEndpoint({
-      torControl: sidecarConfig.torControl,
-      cacheFile: sidecarConfig.torControl?.serviceFile,
-      relayPort
-    });
-    if (endpoint) {
-      log(`Onion endpoint enabled: ws://${endpoint.address}:${endpoint.servicePort}`);
-    }
-    return endpoint;
-  } catch (err) {
-    warn('Onion endpoint could not be created:', err.message);
-    return null;
-  }
 }
 
 connectAndPublish();

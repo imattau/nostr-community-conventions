@@ -37,6 +37,7 @@
 
 - Use `ncc-02-js`/`ncc-05` libraries directly in tests to cover builder/resolver expectations (TTL, gossip, multi-recipient wraps, policy violations).  
 - `ncc-06-js` now hosts the selector helpers (`normalizeLocatorEndpoints`, `choosePreferredEndpoint`) plus the resolver orchestration, so reuse those exports instead of managing the logic inline. The example installs the package via a `file:` dependency and the client/test suite import the shared helpers directly.
+- The new `ncc06-sidecar/external-endpoints.js` helpers centralize how NCC-05 endpoints are declared (operator-only onion, IPv6, IPv4 settings) and keep the locator payload deterministic instead of probing for reachability.
 - When generating TLS certs for local WSS, include `127.0.0.1` in the SAN so the handshake succeeds; the client connects with `rejectUnauthorized=false` because endpoint trust is established through NCC-02 `k`, not the certificate chain.
 - Reset configs between integration tests (sidecar/client) to avoid leakage across cases that deliberately mutate TTLs or `k` values.
 - The integration suite now runs two resolver instances in parallel and exercises group-wrapped NCC-05 locators, so log outputs that mention the new endpoints help debug concurrency or gossip failures.
