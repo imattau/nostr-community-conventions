@@ -304,21 +304,21 @@ async function connectAndTest(endpointUrl) {
 async function main() {
   try {
     const resolvedEndpoint = await resolveServiceEndpoint();
-  if (resolvedEndpoint) {
-    log(`Service endpoint resolved to: ${resolvedEndpoint}`);
-    const testResult = await connectAndTest(resolvedEndpoint);
-    if (testResult) {
-      log('Client successfully resolved, connected, and performed REQ roundtrip.');
+    if (resolvedEndpoint) {
+      log(`Service endpoint resolved to: ${resolvedEndpoint}`);
+      const testResult = await connectAndTest(resolvedEndpoint);
+      if (testResult) {
+        log('Client successfully resolved, connected, and performed REQ roundtrip.');
+      } else {
+        const failureMessage = 'Client failed REQ roundtrip test.';
+        log(failureMessage);
+        error(failureMessage);
+      }
     } else {
-      const failureMessage = 'Client failed REQ roundtrip test.';
+      const failureMessage = 'Failed to resolve service endpoint.';
       log(failureMessage);
       error(failureMessage);
     }
-  } else {
-    const failureMessage = 'Failed to resolve service endpoint.';
-    log(failureMessage);
-    error(failureMessage);
-  }
   } catch (err) {
     error('Client main execution failed:', err);
   } finally {
@@ -326,4 +326,8 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
+
+export { resolveServiceEndpoint };

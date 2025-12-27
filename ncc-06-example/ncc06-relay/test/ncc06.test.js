@@ -2,6 +2,9 @@
 import { strict as assert } from 'assert';
 import { test, before, beforeEach, after, describe } from 'node:test';
 import { startRelay, stopRelay, queryRelay } from './helpers.js';
+import WebSocket from 'ws';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { resolveServiceEndpoint } from '../ncc06-client/index.js';
 import { spawn } from 'child_process';
 import path from 'path';
 import { readFileSync, writeFileSync } from 'fs';
@@ -229,5 +232,59 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
     assert.ok(true, 'queryRelay successfully completed, implying EOSE was received.');
     console.log('Test 6 passed.');
+  });
+
+  test('7. Client publishes a note after resolving the service', async () => {
+    try {
+      console.log('Running sidecar to ensure events are available for the note test...');
+      await runScript('ncc06-sidecar/index.js');
+      await new Promise(resolve => setTimeout(resolve, 500)); // give the relay time to store events
+
+      const endpointUrl = await resolveServiceEndpoint();
+      assert.ok(endpointUrl, 'Client should resolve a concrete service endpoint');
+      console.log(`Resolved endpoint for note test: ${endpointUrl}`);
+
+      const noteSk = generateSecretKey();
+      const notePk = getPublicKey(noteSk);
+      const noteEvent = finalizeEvent({
+        kind: 1,
+        created_at: Math.floor(Date.now() / 1000),
+        pubkey: notePk,
+        tags: [['p', SERVICE_PUBKEY]],
+        content: 'integration test note'
+      }, noteSk);
+
+      const wsOptions = endpointUrl.startsWith('wss://') ? { rejectUnauthorized: false } : {};
+      const ws = new WebSocket(endpointUrl, wsOptions);
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timed out waiting for relay OK')), 3000);
+        ws.on('open', () => {
+          ws.send(JSON.stringify(['EVENT', noteEvent]));
+        });
+        ws.on('message', data => {
+          try {
+            const messageText = typeof data === 'string' ? data : data.toString();
+            const message = JSON.parse(messageText);
+            if (message[0] === 'OK' && message[1] === noteEvent.id) {
+              clearTimeout(timeout);
+              resolve();
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+        ws.once('error', reject);
+      });
+
+      ws.close();
+
+      const storedNotes = await queryRelay([{ ids: [noteEvent.id] }]);
+      assert.ok(storedNotes.some(event => event.id === noteEvent.id), 'Relay should have stored the note event');
+      console.log('Test 7 passed.');
+    } catch (err) {
+      console.error('Note publish test failed:', err);
+      throw err;
+    }
   });
 });
