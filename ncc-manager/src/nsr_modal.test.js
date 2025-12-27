@@ -91,4 +91,29 @@ test('NSR Modal Actions', async (t) => {
         xBtn.click();
         assert.ok(!document.querySelector('.p-modal-overlay'), 'Modal should be removed');
     });
+
+    // --- Subtest: Dropdown for candidates ---
+    await t.test('Should render a dropdown when candidate NCCs are available', () => {
+        // Add another NCC with same 'd' but different ID
+        mockState.eventsById.set('event2', { 
+            id: 'event2', 
+            event_id: 'event2', 
+            kind: 30050, 
+            status: 'published', 
+            d: 'ncc-01', 
+            tags: [['d', 'ncc-01'], ['title', 'Other NCC']],
+            pubkey: 'other-pubkey'
+        });
+        mockState.nccDocs.push('event2');
+
+        openModal();
+        const modal = document.querySelector('.p-modal-overlay');
+        const select = modal.querySelector('select#m-nsr-auth');
+        
+        assert.ok(select, 'Dropdown select should exist');
+        const options = Array.from(select.querySelectorAll('option'));
+        assert.ok(options.some(o => o.value === 'event2'), 'Dropdown should contain event2');
+        
+        modal.remove();
+    });
 });
