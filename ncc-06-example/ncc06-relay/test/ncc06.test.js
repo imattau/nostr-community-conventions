@@ -54,6 +54,10 @@ const runScript = (scriptPath, args = []) => {
   });
 };
 
+const SUITE_START = Date.now();
+const TOTAL_INTEGRATION_TESTS = 7;
+let integrationPassCount = 0;
+
 describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
   let originalSidecarConfigContent;
   let originalClientConfigContent;
@@ -102,6 +106,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     assert.ok(ncc02Event, 'Should find a NCC-02 event');
     assert.equal(ncc02Event.pubkey, SERVICE_PUBKEY, 'NCC-02 event pubkey should match sidecar');
     assert.ok(ncc02Event.tags.some(tag => tag[0] === 'd' && tag[1] === SERVICE_ID), 'NCC-02 event should have #d tag');
+    integrationPassCount += 1;
     console.log('Test 1 passed.');
   });
 
@@ -114,6 +119,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     assert.ok(clientOutput.includes('Fresh NCC-05 locator found.'), 'Client should prefer fresh NCC-05');
     assert.ok(clientOutput.includes('Service endpoint resolved to: wss://127.0.0.1:7447'), 'Client should resolve to NCC-05 endpoint');
     assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip');
+    integrationPassCount += 1;
     console.log('Test 2 passed.');
   });
 
@@ -143,6 +149,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     assert.ok(clientOutput.includes('Falling back to NCC-02 URL: wss://127.0.0.1:7447'), 'Client should fall back to NCC-02 URL');
     assert.ok(clientOutput.includes('REQ roundtrip successful'), 'Client should successfully perform REQ roundtrip with fallback');
 
+    integrationPassCount += 1;
     console.log('Test 3 passed.');
   });
 
@@ -190,6 +197,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
       'Client should stop after untrusted endpoints'
     );
     
+    integrationPassCount += 1;
     console.log('Test 4 passed.');
   });
 
@@ -223,6 +231,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     const revocationEvent = revocationEvents.find(e => e.tags.some(tag => tag[0] === 'e' && tag[1] === attestationEvent.id));
     assert.ok(revocationEvent, 'Should find a revocation referencing the attestation');
 
+    integrationPassCount += 1;
     console.log('Test 5 passed.');
   });
 
@@ -231,6 +240,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     await queryRelay(filters); // queryRelay already waits for EOSE
 
     assert.ok(true, 'queryRelay successfully completed, implying EOSE was received.');
+    integrationPassCount += 1;
     console.log('Test 6 passed.');
   });
 
@@ -281,10 +291,16 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
       const storedNotes = await queryRelay([{ ids: [noteEvent.id] }]);
       assert.ok(storedNotes.some(event => event.id === noteEvent.id), 'Relay should have stored the note event');
+      integrationPassCount += 1;
       console.log('Test 7 passed.');
     } catch (err) {
       console.error('Note publish test failed:', err);
       throw err;
     }
+  });
+
+  after(() => {
+    const durationMs = Date.now() - SUITE_START;
+    console.log(`[Integration Summary] tests run: ${TOTAL_INTEGRATION_TESTS}, passed: ${integrationPassCount}, failed: ${TOTAL_INTEGRATION_TESTS - integrationPassCount}, duration: ${durationMs}ms`);
   });
 });
