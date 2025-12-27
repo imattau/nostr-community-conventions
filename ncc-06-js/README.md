@@ -56,6 +56,10 @@ The package exposes modular helpers so you can keep using your own transport sta
 - `k` is the binding between NCC-02/NCC-05 records and the TLS key that serves `wss://` endpoints. Clients connect with `rejectUnauthorized=false` and enforce trust by comparing the published `k` value to the expected fingerprint before using the endpoint.
 - When migrating to real TLS/SPKI pins, update the sidecar to publish the real fingerprint via `ncc02ExpectedKey` and update the resolver’s `expectedK`. The shared helpers keep the rest of the resolution flow untouched.
 
+## Reference Docs
+
+Detailed API documentation lives in `DOCS.md` for quick lookup of every helper described above.
+
 ## Testing
 
 ```
