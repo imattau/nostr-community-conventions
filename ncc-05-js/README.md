@@ -36,7 +36,7 @@ const payload: NCC05Payload = {
     ttl: 3600,
     updated_at: Math.floor(Date.now() / 1000),
     endpoints: [
-        { type: 'https', uri: 'https://my-service.com', priority: 1, family: 'ipv4' }
+        { type: 'https', uri: '192.168.1.42:443', priority: 1, family: 'ipv4' }
     ]
 };
 
@@ -197,7 +197,7 @@ interface NCC05Payload {
 
 interface NCC05Endpoint {
     type: string;     // e.g., 'tcp', 'http', 'ipfs', 'hyper'
-    uri: string;      // e.g., '10.0.0.1:80', 'https://example.com', 'onion_address:80'
+    uri: string;      // e.g., '10.0.0.1:80', '[2001:db8::1]:443', 'onion_address:80'
     priority: number; // Lower number = higher priority
     family: string;   // 'ipv4', 'ipv6', 'onion', 'unknown'
 }
