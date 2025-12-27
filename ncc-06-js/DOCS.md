@@ -52,6 +52,14 @@ Utilities for locator payload construction and evaluation.
 - **Options** include `bootstrapRelays`, `servicePubkey`, `serviceId`, `locatorId`, `expectedK`, `locatorSecretKey`, `torPreferred`, timeouts, and override hooks.
 - **Returns** `{ endpoint, source, serviceEvent, locatorPayload, selection }`.
 
+## Sidecar config helpers
+
+### `buildSidecarConfig(options)`
+- Mirrors the example sidecar setup and derives `ncc02ExpectedKey`, `publishRelays`, and `torControl` from operator intent so you do not need to duplicate those scripts.
+
+### `buildClientConfig(options)`
+- Rehydrates the minimal client config that the example resolver expects; dedupes publication relays, enforces `serviceIdentityUri`, and carries the `expectedK` for NCC-02 pinning.
+
 ## Key and TLS helpers
 
 ### `generateExpectedK`, `validateExpectedKFormat`
@@ -108,3 +116,7 @@ const delay = scheduleWithJitter(60000); // use this for republish timers
 ```
 
 The helpers are intentionally small, focused on NCC-06 policy, and rely on the calling code for transport/threading so they can be reused inside Node scripts, CLI tools, or downstream SDKs.
+
+## TypeScript definitions
+
+`ncc-06-js` ships an `index.d.ts` file that mirrors the helpers documented above so TypeScript consumers receive accurate typings.

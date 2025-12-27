@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { generateSecretKey, getPublicKey, verifyEvent, finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { KINDS, NCC02Builder, NCC02Error, NCC02Resolver } from 'ncc-02-js';
-import { NCC05Resolver, NCC05Publisher } from 'ncc-05';
+import { NCC05Resolver, NCC05Publisher } from 'ncc-05-js';
 
 // Stub pool that resolves to a pre-signed NCC-05 event.
 class StubPool {

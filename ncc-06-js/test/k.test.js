@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import { computeKFromCertPem, getExpectedK } from '../src/k.js';
-import { readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
+import { readFileSync, rmSync, mkdirSync } from 'fs';
 import path from 'path';
 import os from 'os';
 

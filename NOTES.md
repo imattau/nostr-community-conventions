@@ -24,7 +24,7 @@
 4. **Client resolution path is deterministic.**  
   - Decode the npub from `serviceIdentityUri`, fetch NCC-02 + NCC-05 via REQ, verify `k` tags for `wss`, treat NCC-05 TTL/updated timestamps as authoritative, and fall back to NCC-02 when either NCC-05 is expired or no acceptable endpoint exists.  
   - Reject NCC-02 fallbacks whose `k` values still mismatch, then stop instead of attempting another endpoint.
-  - NCC-05 trust is derived from the event signature: the resolver filters out any locator events whose `verifyEvent` fails or whose `pubkey` doesn’t match the service identity before using the payload, meaning a relay can’t spoof endpoints without compromising the service key. Keep the verification path intact whenever `ncc-05` is updated so this trust anchor is preserved and the client remains resilient to relay divergence.
+  - NCC-05 trust is derived from the event signature: the resolver filters out any locator events whose `verifyEvent` fails or whose `pubkey` doesn’t match the service identity before using the payload, meaning a relay can’t spoof endpoints without compromising the service key. Keep the verification path intact whenever `ncc-05-js` is updated so this trust anchor is preserved and the client remains resilient to relay divergence.
 
 5. **Developer visibility matters.**  
    - Logging should highlight when NCC-05 is used vs. fallback, why endpoints were rejected, and when `EOSE` completes.  
@@ -35,7 +35,7 @@
 
 ## Tips
 
-- Use `ncc-02-js`/`ncc-05` libraries directly in tests to cover builder/resolver expectations (TTL, gossip, multi-recipient wraps, policy violations).  
+- Use `ncc-02-js`/`ncc-05-js` libraries directly in tests to cover builder/resolver expectations (TTL, gossip, multi-recipient wraps, policy violations).  
 - `ncc-06-js` now hosts the selector helpers (`normalizeLocatorEndpoints`, `choosePreferredEndpoint`) plus the resolver orchestration, so reuse those exports instead of managing the logic inline. The example installs the package via a `file:` dependency and the client/test suite import the shared helpers directly.
 - The new `ncc06-sidecar/external-endpoints.js` helpers centralize how NCC-05 endpoints are declared (operator-only onion, IPv6, IPv4 settings) and keep the locator payload deterministic instead of probing for reachability.
 - The sidecar now exposes a `k` config block (mode/certPath/value/persistPath) so TLS SPKI pinning can be the default `wss://` fingerprint; the helper functions compute the `ncc02ExpectedKey` for both NCC-02 and NCC-05 in lockstep.

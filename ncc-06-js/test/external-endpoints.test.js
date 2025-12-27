@@ -46,7 +46,7 @@ test('detectGlobalIPv6 filters private addresses', () => {
 
 test('getPublicIPv4 returns from first reachable source', async () => {
   const original = global.fetch;
-  global.fetch = async (url) => ({
+  global.fetch = async (_url) => ({
     ok: true,
     text: async () => '{"ip":"5.6.7.8"}'
   });

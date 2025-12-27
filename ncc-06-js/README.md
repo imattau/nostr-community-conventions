@@ -11,6 +11,8 @@ Reusable helpers extracted from the NCC-06 example relay, sidecar, and client im
 - **Scheduling helpers** (`scheduleWithJitter`) for applying bounded jitter to recurring NCC-02/NCC-05 timers without ever publishing outside the declared window.
 - **TLS/key utilities** (`ensureSelfSignedCert`, `generateKeypair`, `toNpub`, `fromNsec`, `generateExpectedK`, `validateExpectedKFormat`) that mirror the key and fingerprint management used by the example sidecar.
 - **Lightweight protocol helpers** (`parseNostrMessage`, `serializeNostrMessage`, `createReqMessage`) for downstream code that wants to reuse the same framing logic as the example client.
+- **Sidecar config helpers** (`buildSidecarConfig`, `buildClientConfig`) so you can reuse the same config generation logic the example sidecar/client rely on without copying the scripts.
+- **TypeScript definitions** (`index.d.ts`) that describe every exported helper, making it easier to import from TypeScript consumers.
 
 ## Usage
 

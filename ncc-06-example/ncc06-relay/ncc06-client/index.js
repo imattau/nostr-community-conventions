@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateEvent, verifyEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
-import { NCC05Resolver } from 'ncc-05';
+import { NCC05Resolver } from 'ncc-05-js';
 import { parseNostrMessage, serializeNostrMessage, createReqMessage } from '../lib/protocol.js';
 import { normalizeLocatorEndpoints, choosePreferredEndpoint } from 'ncc-06-js';
 

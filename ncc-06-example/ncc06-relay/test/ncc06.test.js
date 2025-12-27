@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { NCC05Publisher } from 'ncc-05';
+import { NCC05Publisher } from 'ncc-05-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

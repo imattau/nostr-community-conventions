@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { NCC05Resolver } from 'ncc-05';
+import { NCC05Resolver } from 'ncc-05-js';
 import { parseNostrMessage, serializeNostrMessage, createReqMessage } from './protocol.js';
 import { validateNcc02, parseNcc02Tags } from './ncc02.js';
 import { normalizeLocatorEndpoints, validateLocatorFreshness } from './ncc05.js';

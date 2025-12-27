@@ -76,7 +76,7 @@ export async function buildExternalEndpoints({
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.index - b.index;
     })
-    .map(({ index, createdAt, ...endpoint }) => endpoint);
+    .map(({ index: _index, createdAt: _createdAt, ...endpoint }) => endpoint);
 }
 
 /**

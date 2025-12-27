@@ -1,22 +1,24 @@
 {
   "name": "ncc-06-js",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Reusable NCC-06 discovery helpers extracted from the example relay, sidecar, and client.",
   "type": "module",
   "main": "src/index.js",
+  "types": "index.d.ts",
   "scripts": {
     "test": "node --test",
     "lint": "eslint . --ext .js"
   },
   "dependencies": {
     "ncc-02-js": "^0.2.2",
-    "ncc-05": "^1.1.8",
+    "ncc-05-js": "^1.1.9",
     "nostr-tools": "^2.19.4",
     "selfsigned": "^5.4.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^20.7.2",
-    "eslint": "^8.54.0"
+    "eslint": "^8.54.0",
+    "typescript": "^5.5.3"
   }
 }
