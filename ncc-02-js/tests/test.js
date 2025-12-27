@@ -12,13 +12,37 @@ async function runTests() {
 
   const builder = new NCC02Builder(ownerSk);
   const caBuilder = new NCC02Builder(caSk);
-  const resolver = new NCC02Resolver(relay, [caPk]);
+  
+  // Create a mock pool that interfaces with our MockRelay
+  const mockPool = {
+    subscribeMany: (relays, filters, callbacks) => {
+      filters.forEach(async (filter) => {
+        const events = await relay.query(filter);
+        events.forEach((e) => callbacks.onevent(e));
+        callbacks.oneose();
+      });
+      return { close: () => {} };
+    }
+  };
+
+  const resolver = new NCC02Resolver(['ws://mock-relay.local'], { 
+    pool: mockPool,
+    trustedCAPubkeys: [caPk] 
+  });
 
   // --- 1. Service Records & Replacement ---
   console.log('Test: Latest record selection...');
-  const oldEvent = builder.createServiceRecord('api', 'https://old.io', 'fp_old');
+  const oldEvent = builder.createServiceRecord({
+    serviceId: 'api',
+    endpoint: 'https://old.io',
+    fingerprint: 'fp_old'
+  });
   oldEvent.created_at -= 100; 
-  const newEvent = builder.createServiceRecord('api', 'https://new.io', 'fp_new');
+  const newEvent = builder.createServiceRecord({
+    serviceId: 'api',
+    endpoint: 'https://new.io',
+    fingerprint: 'fp_new'
+  });
   
   await relay.publish(oldEvent);
   await relay.publish(newEvent);
@@ -29,9 +53,17 @@ async function runTests() {
 
   // --- 2. Cross-Validation: Service ID ---
   console.log('Test: Mismatched service ID in attestation...');
-  const vaultEvent = builder.createServiceRecord('vault', 'https://v.io', 'fp_v');
+  const vaultEvent = builder.createServiceRecord({
+    serviceId: 'vault',
+    endpoint: 'https://v.io',
+    fingerprint: 'fp_v'
+  });
   await relay.publish(vaultEvent);
-  const badSrvAtt = caBuilder.createAttestation(ownerPk, 'other-service', vaultEvent.id);
+  const badSrvAtt = caBuilder.createAttestation({
+    subjectPubkey: ownerPk,
+    serviceId: 'other-service',
+    serviceEventId: vaultEvent.id
+  });
   await relay.publish(badSrvAtt);
   
   try {
@@ -44,7 +76,11 @@ async function runTests() {
 
   // --- 3. Time Validation: Not Before (NBF) ---
   console.log('Test: Future NBF (Not Before) validation...');
-  const futureAtt = caBuilder.createAttestation(ownerPk, 'vault', vaultEvent.id);
+  const futureAtt = caBuilder.createAttestation({
+    subjectPubkey: ownerPk,
+    serviceId: 'vault',
+    serviceEventId: vaultEvent.id
+  });
   futureAtt.tags.find(t => t[0] === 'nbf')[1] = (Math.floor(Date.now() / 1000) + 1000).toString();
   const signedFutureAtt = finalizeEvent(futureAtt, caSk);
   await relay.publish(signedFutureAtt);
@@ -65,7 +101,11 @@ async function runTests() {
 
   // --- 5. Signature Failures ---
   console.log('Test: Invalid signature detection...');
-  const corruptEvent = builder.createServiceRecord('secure', 'https://s.io', 'fp_s');
+  const corruptEvent = builder.createServiceRecord({
+    serviceId: 'secure',
+    endpoint: 'https://s.io',
+    fingerprint: 'fp_s'
+  });
   corruptEvent.content = 'HACKED'; 
   relay.events.push(corruptEvent); 
   
@@ -87,7 +127,11 @@ async function runTests() {
 
   // --- 7. Robustness: Malformed Data ---
   console.log('Test: Malformed record (missing tags)...');
-  const brokenEvent = builder.createServiceRecord('broken', 'https://b.io', 'fp');
+  const brokenEvent = builder.createServiceRecord({
+    serviceId: 'broken',
+    endpoint: 'https://b.io',
+    fingerprint: 'fp'
+  });
   brokenEvent.tags = brokenEvent.tags.filter(t => t[0] !== 'u');
   const signedBroken = finalizeEvent(brokenEvent, ownerSk);
   await relay.publish(signedBroken);
@@ -99,7 +143,11 @@ async function runTests() {
   }
 
   console.log('Test: Malformed expiry (non-numeric)...');
-  const badExpEvent = builder.createServiceRecord('bad-exp', 'https://e.io', 'fp');
+  const badExpEvent = builder.createServiceRecord({
+    serviceId: 'bad-exp',
+    endpoint: 'https://e.io',
+    fingerprint: 'fp'
+  });
   badExpEvent.tags.find(t => t[0] === 'exp')[1] = 'not-a-number';
   const signedBadExp = finalizeEvent(badExpEvent, ownerSk);
   await relay.publish(signedBadExp);
@@ -112,10 +160,10 @@ async function runTests() {
 
   // --- 8. Relay Failures ---
   console.log('Test: Relay error handling...');
-  const failingRelay = {
-    query: async () => { throw new Error('Network timeout'); }
+  const failingPool = {
+    subscribeMany: () => { throw new Error('Network timeout'); }
   };
-  const failingResolver = new NCC02Resolver(failingRelay);
+  const failingResolver = new NCC02Resolver(['ws://failing'], { pool: failingPool });
   try {
     await failingResolver.resolve(ownerPk, 'api');
   } catch (e) {
@@ -126,9 +174,17 @@ async function runTests() {
   // --- 9. Security: Spoofed Revocation ---
   console.log('Test: Spoofed revocation (DoS protection)...');
   const secureId = 'secure-rev-bypass';
-  const secureEvent = builder.createServiceRecord(secureId, 'https://s.io', 'fp_s');
+  const secureEvent = builder.createServiceRecord({
+    serviceId: secureId,
+    endpoint: 'https://s.io',
+    fingerprint: 'fp_s'
+  });
   await relay.publish(secureEvent);
-  const secureAtt = caBuilder.createAttestation(ownerPk, secureId, secureEvent.id);
+  const secureAtt = caBuilder.createAttestation({
+    subjectPubkey: ownerPk,
+    serviceId: secureId,
+    serviceEventId: secureEvent.id
+  });
   await relay.publish(secureAtt);
 
   // Manually construct a fake revocation event that is NOT processed by finalizeEvent (to avoid cache)
@@ -149,6 +205,27 @@ async function runTests() {
     console.log('✅ Passed (Spoofed revocation ignored by resolver)');
   } else {
     throw new Error('Resolver failed to ignore spoofed revocation');
+  }
+
+  // --- 10. Security: Valid Revocation ---
+  console.log('Test: Valid revocation...');
+  const revEvent = caBuilder.createRevocation({ attestationId: secureAtt.id, reason: 'Key compromised' });
+  await relay.publish(revEvent);
+  
+  // Case A: Attestation required -> should fail
+  try {
+    await resolver.resolve(ownerPk, secureId, { requireAttestation: true });
+    throw new Error('Should have failed due to revoked attestation');
+  } catch (e) {
+    if (e.code !== 'POLICY_FAILURE') throw e;
+  }
+
+  // Case B: Attestation optional -> should succeed but with 0 attestations
+  const resRevoked = await resolver.resolve(ownerPk, secureId, { requireAttestation: false });
+  if (resRevoked && resRevoked.attestations.length === 0) {
+    console.log('✅ Passed (Valid revocation honored)');
+  } else {
+    throw new Error('Resolver failed to honor valid revocation');
   }
 
   console.log('\n--- All comprehensive tests passed! ---');

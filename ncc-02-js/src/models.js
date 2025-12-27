@@ -55,17 +55,15 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Certificate Attestation (Kind 30060).
-   * @param {string} subjectPubkey
-   * @param {string} serviceId
-   * @param {string} serviceEventId
-   * @param {string} [level='verified']
-   * @param {number} [validDays=30]
+   * @param {Object} options
+   * @param {string} options.subjectPubkey - The 'subj' tag pubkey.
+   * @param {string} options.serviceId - The 'srv' tag identifier.
+   * @param {string} options.serviceEventId - The 'e' tag referencing the Service Record.
+   * @param {string} [options.level='verified'] - The 'lvl' tag level.
+   * @param {number} [options.validDays=30] - Validity in days.
    */
-  createAttestation(subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30) {
-    // Keeping signature backward compatible for now unless requested, 
-    // but improving internal logic slightly if needed.
-    // Ideally this should also be options object but user only asked for createServiceRecord fix.
-    // I'll leave it to minimize breaking changes scope creep.
+  createAttestation(options) {
+    const { subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30 } = options;
     if (!subjectPubkey) throw new Error('subjectPubkey is required');
     if (!serviceId) throw new Error('serviceId is required');
     if (!serviceEventId) throw new Error('serviceEventId (e tag) is required');
@@ -92,10 +90,12 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Revocation (Kind 30061).
-   * @param {string} attestationId
-   * @param {string} [reason='']
+   * @param {Object} options
+   * @param {string} options.attestationId - The 'e' tag referencing the attestation.
+   * @param {string} [options.reason=''] - Optional reason.
    */
-  createRevocation(attestationId, reason = '') {
+  createRevocation(options) {
+    const { attestationId, reason = '' } = options;
     if (!attestationId) throw new Error('attestationId (e tag) is required');
 
     const tags = [['e', attestationId]];

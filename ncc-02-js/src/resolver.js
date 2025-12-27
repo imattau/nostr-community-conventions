@@ -50,13 +50,15 @@ export class NCC02Resolver {
 
   /**
    * Internal query helper using SimplePool.subscribeMany (since list() is deprecated).
-   * @param {Object} filter 
-   * @returns {Promise<any[]>}
+   * @param {import('nostr-tools').Filter} filter 
+   * @returns {Promise<import('nostr-tools').Event[]>}
    */
   async _query(filter) {
       return new Promise((resolve) => {
+          /** @type {import('nostr-tools').Event[]} */
           const events = [];
           // subscribeMany(relays, filters, callbacks)
+          // @ts-ignore - subscribeMany filters parameter type mismatch with simple Object
           const sub = this.pool.subscribeMany(this.relays, [filter], {
               onevent(e) { events.push(e); },
               oneose() { sub.close(); resolve(events); }

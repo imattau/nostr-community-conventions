@@ -25,12 +25,15 @@ npm install ncc-02-js
 ```javascript
 import { NCC02Resolver } from 'ncc-02-js';
 
-const resolver = new NCC02Resolver(relay, [trustedCAPubkey]);
+// Initialize with relay URLs and optional trusted CA pubkeys
+const resolver = new NCC02Resolver(['wss://relay.damus.io'], {
+  trustedCAPubkeys: ['ca_pubkey_hex']
+});
 
 try {
   const service = await resolver.resolve(ownerPubkey, 'api', {
     requireAttestation: true,
-    minLevel: 'verified'
+    minLevel: 'verified' // 'self', 'verified', 'hardened'
   });
   console.log('Resolved endpoint:', service.endpoint);
 } catch (err) {
@@ -44,20 +47,69 @@ try {
 import { NCC02Builder } from 'ncc-02-js';
 
 const builder = new NCC02Builder(privateKey);
-const event = builder.createServiceRecord('api', 'https://api.example.com', 'sha256:fingerprint');
-// publish event to relays...
+
+// Example 1: IP-based Service
+const event = builder.createServiceRecord({
+  serviceId: 'media',
+  endpoint: 'https://203.0.113.45:8443',
+  fingerprint: 'sha256:fingerprint',
+  expiryDays: 14
+});
+
+// Example 2: Tor Onion Service
+const onionEvent = builder.createServiceRecord({
+  serviceId: 'wallet',
+  endpoint: 'tcp://vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd.onion:80',
+  fingerprint: 'sha256:fingerprint',
+  expiryDays: 7
+});
+// publish events to relays...
 ```
 
-## API
+### 3. Issue an Attestation (CA)
 
-### `NCC02Resolver`
-- `resolve(pubkey, serviceId, options)`: Resolves and verifies a service record.
-- `verifyEndpoint(resolved, actualFingerprint)`: Helper to check if a connected endpoint matches the record.
+```javascript
+const caBuilder = new NCC02Builder(caPrivateKey);
+const attestation = caBuilder.createAttestation({
+  subjectPubkey: ownerPubkey,
+  serviceId: 'api',
+  serviceEventId: serviceRecordEventId,
+  level: 'verified',
+  validDays: 30
+});
+```
 
-### `NCC02Builder`
-- `createServiceRecord(id, uri, fingerprint, expiryDays)`
-- `createAttestation(subject, srv, eventId, level, validDays)`
-- `createRevocation(attestationId, reason)`
+## Trust Model & Security
+
+### Trust Levels
+- `self`: Asserted by the service owner (default if no attestation).
+- `verified`: Attested by a trusted third party.
+- `hardened`: Attested by a third party with stricter verification (e.g., physical proof or long-term history).
+
+### Threat Model
+- **Endpoint Impersonation**: Prevented by binding the endpoint URI to a public key fingerprint (`k` tag).
+- **Man-in-the-Middle (MITM)**: Mitigated via cryptographic pinning of transport-level keys.
+- **Stale Records**: Limited by required expiry (`exp`) and support for revocations.
+- **Relay Censorship**: Mitigated by querying multiple relays (implemented via `SimplePool`).
+
+### Fail-Closed Design
+The library follows a fail-closed principle. If a policy requirement is not met (e.g., `requireAttestation: true` but no valid attestation is found), it throws an `NCC02Error` rather than returning a partially verified record.
+
+## API Reference
+
+### `NCC02Resolver(relays, options)`
+- `relays`: Array of relay URLs.
+- `options.pool`: (Optional) Existing `nostr-tools` SimplePool.
+- `options.trustedCAPubkeys`: (Optional) Array of pubkeys trusted to issue attestations.
+
+#### `resolve(pubkey, serviceId, options)`
+- `options.requireAttestation`: Fails if no trusted attestation is found.
+- `options.minLevel`: Minimum trust level required.
+
+### `NCC02Builder(privateKey)`
+- `createServiceRecord({ serviceId, endpoint, fingerprint, expiryDays })`
+- `createAttestation({ subjectPubkey, serviceId, serviceEventId, level, validDays })`
+- `createRevocation({ attestationId, reason })`
 
 ## License
 
