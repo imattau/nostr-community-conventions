@@ -172,6 +172,30 @@ test('NCC-05 resolver honors TTL freshness and strict mode', async () => {
   expiredResolver.close();
 });
 
+test('NCC-05 resolver shares public locators without secrets', async () => {
+  const sk = generateSecretKey();
+  const pk = getPublicKey(sk);
+  const payload = {
+    ttl: 600,
+    updated_at: Math.floor(Date.now() / 1000),
+    endpoints: [{ url: 'wss://public.example', protocol: 'wss', priority: 1 }]
+  };
+
+  const publicEvent = await createLocatorEvent({ sk, payload });
+  const resolver = new NCC05Resolver({
+    pool: new StubPool(publicEvent),
+    timeout: 1000
+  });
+
+  const resolved = await resolver.resolve(pk, undefined, 'relay-locator', {
+    strict: false,
+    gossip: false
+  });
+  assert.ok(resolved, 'Public locator must resolve without a locator secret');
+  assert.equal(resolved.endpoints[0].url, 'wss://public.example');
+  resolver.close();
+});
+
 test('NCC-05 resolver decrypts wrapped locators for multiple recipients', async () => {
   const publisherSk = generateSecretKey();
   const publisherPk = getPublicKey(publisherSk);
@@ -245,6 +269,9 @@ test('NCC-05 resolver decrypts targeted friend locator records', async () => {
     bootstrapRelays: ['wss://bootstrap.friend'],
     timeout: 1000
   });
+
+  const publicResolveAttempt = await resolver.resolve(publisherPk, undefined, 'relay-locator', { strict: true, gossip: false });
+  assert.equal(publicResolveAttempt, null, 'Friend-to-friend private locator should not resolve without locator secret');
 
   const resolved = await resolver.resolve(publisherPk, friendSk, 'relay-locator', { strict: true, gossip: false });
   assert.ok(resolved, 'Friend-to-friend encrypted locator should be resolvable');

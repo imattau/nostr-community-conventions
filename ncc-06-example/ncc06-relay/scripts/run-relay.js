@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { createRelayServer } from '../lib/relay.js';
+import { ensureTlsCertificates } from './ensure-certs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,7 @@ let shuttingDown = false;
 const run = async () => {
   const configPayload = fs.readFileSync(configPath, 'utf-8');
   const config = JSON.parse(configPayload);
+  await ensureTlsCertificates(config);
   relayInstance = createRelayServer(config);
   await relayInstance.start();
 

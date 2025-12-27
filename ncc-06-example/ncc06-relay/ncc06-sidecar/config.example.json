@@ -1,7 +1,7 @@
 {
-  "serviceSk": "d9e38bbc28840b64635ed3c3145a37adc53f5f7cd9f645a6389007628a2d8083",
-  "servicePk": "600c1bcd48b23ab44565407395c04f799bfe984a1b0fbd7f83ef0c360c98cbe0",
-  "serviceNpub": "npub1vqxphn2gkgatg3t9gpeetsz00xdlaxz2rv8m6lurauxrvryce0sqhfctjw",
+  "serviceSk": "<hex private key>",
+  "servicePk": "<hex public key>",
+  "serviceNpub": "<npub>",
   "relayUrl": "ws://127.0.0.1:7000",
   "ncc02ExpectedKey": "TESTKEY:relay-local-dev-1",
   "ncc02ExpSeconds": 1209600,
