@@ -223,7 +223,9 @@ interface NCC05Endpoint {
     *   `identifier`: `string` (Default: `'addr'`)
     *   `public`: `boolean` (Default: `false`)
     *   `recipientPubkey`: `string` (Default: self)
-*   `publishWrapped(relays, secretKey, recipients, payload, identifier?)`: `Promise<Event>`
+    *   `privateLocator`: `boolean` (Default: `false`) - Adds `["private", "true"]` tag.
+*   `publishWrapped(relays, secretKey, recipients, payload, options?)`: `Promise<Event>`
+    *   `options`: `{ identifier?: string, privateLocator?: boolean }` or `string` (identifier)
 *   `close(relays)`: Closes connections to specific relays (only if pool was created internally).
 
 ## Error Handling
@@ -234,6 +236,11 @@ Errors are typed for granular handling:
 *   `NCC05RelayError`: Failed to publish or query relays.
 *   `NCC05DecryptionError`: Bad key or invalid ciphertext.
 *   `NCC05ArgumentError`: Invalid inputs (e.g. malformed keys).
+
+## Utilities
+
+*   `TAG_PRIVATE`: Constant string `'private'`.
+*   `isPrivateLocator(event: Event): boolean`: Helper to check if an event has the `["private", "true"]` tag.
 
 ## Protocol Details
 

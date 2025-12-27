@@ -18,6 +18,12 @@ import {
     generateSecretKey
 } from 'nostr-tools';
 
+export const TAG_PRIVATE = 'private';
+
+export function isPrivateLocator(event: Event): boolean {
+    return event.tags.some(t => t[0] === TAG_PRIVATE && t[1] === 'true');
+}
+
 // --- Error Classes ---
 
 export class NCC05Error extends Error {
@@ -414,8 +420,18 @@ export class NCC05Publisher {
         secretKey: string | Uint8Array,
         recipients: string[],
         payload: NCC05Payload,
-        identifier: string = 'addr'
+        optionsOrIdentifier: { identifier?: string, privateLocator?: boolean } | string = 'addr'
     ): Promise<Event> {
+        let identifier = 'addr';
+        let privateLocator = false;
+
+        if (typeof optionsOrIdentifier === 'string') {
+            identifier = optionsOrIdentifier;
+        } else {
+            identifier = optionsOrIdentifier.identifier || 'addr';
+            privateLocator = !!optionsOrIdentifier.privateLocator;
+        }
+
         const sk = ensureUint8Array(secretKey);
         const sessionKey = generateSecretKey();
         const sessionKeyHex = Array.from(sessionKey).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -431,10 +447,15 @@ export class NCC05Publisher {
 
         const wrappedContent: WrappedContent = { ciphertext, wraps };
 
+        const tags = [['d', identifier]];
+        if (privateLocator) {
+            tags.push([TAG_PRIVATE, 'true']);
+        }
+
         const eventTemplate = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [['d', identifier]],
+            tags: tags,
             content: JSON.stringify(wrappedContent),
         };
 
@@ -456,7 +477,7 @@ export class NCC05Publisher {
         relays: string[],
         secretKey: string | Uint8Array,
         payload: NCC05Payload,
-        options: { identifier?: string, recipientPubkey?: string, public?: boolean } = {}
+        options: { identifier?: string, recipientPubkey?: string, public?: boolean, privateLocator?: boolean } = {}
     ): Promise<Event> {
         const sk = ensureUint8Array(secretKey);
         const myPubkey = getPublicKey(sk);
@@ -469,11 +490,16 @@ export class NCC05Publisher {
             content = nip44.encrypt(content, conversationKey);
         }
 
+        const tags = [['d', identifier]];
+        if (options.privateLocator) {
+            tags.push([TAG_PRIVATE, 'true']);
+        }
+
         const eventTemplate = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
             pubkey: myPubkey,
-            tags: [['d', identifier]],
+            tags: tags,
             content: content,
         };
 

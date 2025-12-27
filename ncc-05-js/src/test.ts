@@ -1,4 +1,4 @@
-import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group } from './index.js';
+import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group, isPrivateLocator } from './index.js';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
 import { MockRelay } from './mock-relay.js';
 
@@ -174,6 +174,49 @@ async function test() {
     } else {
         console.error('FAILED: Group Wrapping resolution.');
         process.exit(1);
+    }
+
+    // Test Private Locator Tagging
+    console.log('Testing Private Locator Tagging...');
+    const payloadPrivate: NCC05Payload = {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', uri: 'private:1234', priority: 1, family: 'ipv4' }]
+    };
+
+    const privateEvent = await publisher.publish(relays, sk, payloadPrivate, { 
+        identifier: 'private-tag-test', 
+        privateLocator: true 
+    });
+
+    if (isPrivateLocator(privateEvent)) {
+        console.log('Private locator tag correctly applied to standard publish.');
+    } else {
+        console.error('FAILED: Private locator tag missing on standard publish.');
+        process.exit(1);
+    }
+
+    const privateWrappedEvent = await publisher.publishWrapped(
+        relays, sk, [pk], payloadPrivate, 
+        { identifier: 'private-wrapped-test', privateLocator: true }
+    );
+
+    if (isPrivateLocator(privateWrappedEvent)) {
+        console.log('Private locator tag correctly applied to wrapped publish.');
+    } else {
+        console.error('FAILED: Private locator tag missing on wrapped publish.');
+        process.exit(1);
+    }
+
+    // Test Backward Compatibility for publishWrapped
+    const legacyWrappedEvent = await publisher.publishWrapped(
+        relays, sk, [pk], payloadPrivate, 'legacy-wrapped-test'
+    );
+    const dTag = legacyWrappedEvent.tags.find(t => t[0] === 'd')?.[1];
+    if (dTag === 'legacy-wrapped-test' && !isPrivateLocator(legacyWrappedEvent)) {
+         console.log('Legacy publishWrapped signature works correctly.');
+    } else {
+         console.error('FAILED: Legacy publishWrapped signature failed.');
+         process.exit(1);
     }
 
     publisher.close(relays);
