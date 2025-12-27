@@ -27,11 +27,12 @@ import { NCC02Resolver } from 'ncc-02-js';
 
 // Initialize with relay URLs and optional trusted CA pubkeys
 const resolver = new NCC02Resolver(['wss://relay.damus.io'], {
-  trustedCAPubkeys: ['ca_pubkey_hex']
+  trustedCAPubkeys: ['npub1...'] // Trusted third-party certifiers
 });
 
 try {
-  const service = await resolver.resolve(ownerPubkey, 'api', {
+  // ownerPubkey can be hex or npub
+  const service = await resolver.resolve(ownerPubkey, 'media', {
     requireAttestation: true,
     minLevel: 'verified' // 'self', 'verified', 'hardened'
   });
@@ -46,6 +47,7 @@ try {
 ```javascript
 import { NCC02Builder } from 'ncc-02-js';
 
+// Initialize with private key (hex)
 const builder = new NCC02Builder(privateKey);
 
 // Example 1: IP-based Service
@@ -71,8 +73,8 @@ const onionEvent = builder.createServiceRecord({
 ```javascript
 const caBuilder = new NCC02Builder(caPrivateKey);
 const attestation = caBuilder.createAttestation({
-  subjectPubkey: ownerPubkey,
-  serviceId: 'api',
+  subjectPubkey: 'npub1...', // The service owner being certified
+  serviceId: 'media',
   serviceEventId: serviceRecordEventId,
   level: 'verified',
   validDays: 30
