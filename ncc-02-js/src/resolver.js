@@ -36,7 +36,10 @@ export class NCC02Resolver {
    * @param {string[]} relays - List of relay URLs.
    * @param {Object} [options={}]
    * @param {SimplePool} [options.pool] - Shared SimplePool instance.
-   * @param {string[]} [options.trustedCAPubkeys=[]] - List of trusted CA pubkeys.
+   * @param {string[]} [options.trustedCAPubkeys=[]] - List of trusted CA pubkeys (hex or npub).
+   * These are the ONLY pubkeys whose attestation signatures (Kind 30060) will be accepted
+   * by the resolver. This allows you to define your own web of trust or rely on specific
+   * community auditors. If empty, all attestations are ignored (effectively disabling attestation checks).
    */
   constructor(relays, options = {}) {
     if (!Array.isArray(relays)) {
