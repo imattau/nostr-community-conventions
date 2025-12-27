@@ -27,6 +27,7 @@ ncc-manager --host 0.0.0.0 --port 4322 --no-open
 
 ## Documentation
 
+- [User Guide](docs/user-guide.md) - How to use the app to manage conventions.
 - [Architecture Overview](docs/architecture.md) - System design and data flow.
 - [Nostr Event Kinds](docs/event-kinds.md) - Details on Kind 30050, 30051, 30052, and 30053.
 - [Internal API](docs/api.md) - Documentation for the local REST API.
