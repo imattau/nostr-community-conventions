@@ -3,8 +3,10 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 
-import WebSocket, { WebSocketServer } from 'ws';
 import { validateEvent } from 'nostr-tools/pure';
+import * as WS from 'ws';
+const WebSocket = WS.WebSocket ?? WS.default;
+const WebSocketServer = WS.WebSocketServer;
 
 import {
   createEventMessage,

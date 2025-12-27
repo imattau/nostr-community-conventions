@@ -1,28 +1,12 @@
 import os from 'os';
-import { ensureOnionEndpoint } from './onion-service.js';
 
 const IPV4_PRIORITY = 10;
 const IPV6_PRIORITY = 20;
 const ONION_PRIORITY = 30;
 
 /**
- * Return the internal relay URL used for publishing events.
- */
-export function getLocalRelayUrl(config = {}) {
-  const relay = config.relay || {};
-  if (relay.localUrl) {
-    return relay.localUrl;
-  }
-  const host = relay.host || '127.0.0.1';
-  const port = relay.port || 7000;
-  const proto = relay.protocol || 'ws';
-  return `${proto}://${host}:${port}`;
-}
-
-/**
- * Build the externally advertised endpoints for NCC-05.
- * This function does not probe the network; it only emits what the operator configured
- * or what can be derived automatically (onion, IPv6 interface, optional IP lookup).
+ * Build a list of external endpoints that the operator wants to publish.
+ * The helper never probes reachability; it only reflects config + the optional onion helper.
  */
 export async function buildExternalEndpoints({
   tor,
@@ -31,21 +15,18 @@ export async function buildExternalEndpoints({
   wsPort = 7000,
   wssPort = 7447,
   ncc02ExpectedKey,
+  ensureOnionService,
   publicIpv4Sources = ['https://api.ipify.org?format=json']
 } = {}) {
   const endpoints = [];
   const timestamp = Date.now();
-  const addEndpoint = (entry) => {
-    endpoints.push({ ...entry, index: endpoints.length, addedAt: timestamp });
-  };
 
-  if (tor?.enabled) {
+  const addEndpoint = (entry) =>
+    endpoints.push({ ...entry, index: endpoints.length, createdAt: timestamp });
+
+  if (tor?.enabled && typeof ensureOnionService === 'function') {
     try {
-      const onion = await ensureOnionEndpoint({
-        torControl: tor,
-        cacheFile: tor?.serviceFile,
-        relayPort: wsPort
-      });
+      const onion = await ensureOnionService();
       if (onion) {
         addEndpoint({
           url: `ws://${onion.address}:${onion.servicePort}`,
@@ -55,7 +36,7 @@ export async function buildExternalEndpoints({
         });
       }
     } catch (err) {
-      console.warn('[Sidecar] Onion endpoint could not be created:', err.message);
+      console.warn('[NCC06] Onion endpoint could not be created:', err.message);
     }
   }
 
@@ -78,7 +59,7 @@ export async function buildExternalEndpoints({
   if (ipv4?.enabled) {
     const protocol = ipv4.protocol || 'wss';
     const port = ipv4.port || (protocol === 'wss' ? wssPort : wsPort);
-    const address = ipv4.address || await getPublicIPv4({ sources: ipv4.publicSources ?? publicIpv4Sources });
+    const address = ipv4.address || (await getPublicIPv4({ sources: ipv4.publicSources ?? publicIpv4Sources }));
     if (address) {
       addEndpoint({
         url: `${protocol}://${address}:${port}`,
@@ -92,28 +73,26 @@ export async function buildExternalEndpoints({
 
   return endpoints
     .sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority;
-      }
+      if (a.priority !== b.priority) return a.priority - b.priority;
       return a.index - b.index;
     })
-    .map(({ index, addedAt, ...entry }) => entry);
+    .map(({ index, createdAt, ...endpoint }) => endpoint);
 }
 
 /**
- * Enumerate interfaces and return the first global IPv6 address.
+ * Look for the first non-internal, global IPv6 address.
  */
 export function detectGlobalIPv6() {
-  const netIfaces = os.networkInterfaces();
-  for (const ifaceList of Object.values(netIfaces)) {
-    if (!Array.isArray(ifaceList)) continue;
-    for (const addrInfo of ifaceList) {
-      if (addrInfo.family !== 'IPv6' || addrInfo.internal) continue;
-      const value = addrInfo.address.toLowerCase();
+  const interfaces = os.networkInterfaces();
+  for (const iface of Object.values(interfaces)) {
+    if (!Array.isArray(iface)) continue;
+    for (const addr of iface) {
+      if (addr.family !== 'IPv6' || addr.internal) continue;
+      const value = addr.address.toLowerCase();
       if (value.startsWith('::1')) continue;
       if (value.startsWith('fe80')) continue;
       if (value.startsWith('fc00') || value.startsWith('fd00')) continue;
-      if (!(value.startsWith('2') || value.startsWith('3'))) continue;
+      if (!value.startsWith('2') && !value.startsWith('3')) continue;
       return value;
     }
   }
@@ -121,7 +100,7 @@ export function detectGlobalIPv6() {
 }
 
 /**
- * Query public IPv4 discovery endpoints and return the first valid IPv4 string.
+ * Query public IPv4 services to fetch the external IPv4 address.
  */
 export async function getPublicIPv4({ sources = ['https://api.ipify.org?format=json'] } = {}) {
   const matcher = /((25[0-5]|2[0-4]\d|[01]?\d?\d)(\.|$)){4}/;
@@ -129,17 +108,21 @@ export async function getPublicIPv4({ sources = ['https://api.ipify.org?format=j
     try {
       const res = await fetch(source);
       if (!res.ok) continue;
-      const text = await res.text();
-      let payload = text.trim();
-      if (payload.startsWith('{') || payload.startsWith('[')) {
+      const text = (await res.text()).trim();
+      if (text.startsWith('{') || text.startsWith('[')) {
         try {
-          const parsed = JSON.parse(payload);
-          payload = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+          const parsed = JSON.parse(text);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const ip = parsed.ip || parsed.address || parsed.result;
+            if (typeof ip === 'string' && matcher.test(ip)) {
+              return ip;
+            }
+          }
         } catch {
-          // ignore parse errors, fall through to regex
+          // ignore parse errors
         }
       }
-      const match = payload.match(matcher);
+      const match = text.match(matcher);
       if (match) {
         return match[0];
       }
@@ -149,4 +132,3 @@ export async function getPublicIPv4({ sources = ['https://api.ipify.org?format=j
   }
   return null;
 }
-

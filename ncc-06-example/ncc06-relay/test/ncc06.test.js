@@ -25,6 +25,7 @@ const PUBLICATION_RELAY_LIST = [sidecarConfig.relayUrl, AUX_RELAY_URL];
 
 let originalSidecarConfigContent = '';
 let originalClientConfigContent = '';
+let baselineExpectedKey = 'TESTKEY:relay-local-dev-1';
 
 const getPublicationOverrides = () => ({
   sidecar: {
@@ -97,10 +98,14 @@ let integrationPassCount = 0;
 
 describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
 
-  before(async () => {
-    console.log('Storing original config files...');
-    originalSidecarConfigContent = readFileSync(sidecarConfigPath, 'utf-8');
-    originalClientConfigContent = readFileSync(clientConfigPath, 'utf-8');
+before(async () => {
+  console.log('Storing original config files...');
+  originalSidecarConfigContent = readFileSync(sidecarConfigPath, 'utf-8');
+  originalClientConfigContent = readFileSync(clientConfigPath, 'utf-8');
+  const parsedSidecar = JSON.parse(originalSidecarConfigContent);
+  if (parsedSidecar.ncc02ExpectedKey) {
+    baselineExpectedKey = parsedSidecar.ncc02ExpectedKey;
+  }
 
     console.log('Starting relay for tests...');
     await startRelay();
@@ -212,7 +217,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
     console.log('Client Output:', clientOutput);
     
     assert.ok(
-      clientOutput.includes('K mismatch for NCC-05 WSS endpoint (expected TESTKEY:relay-local-dev-1 but got MISMATCHED_KEY). Rejecting.'),
+      clientOutput.includes(`K mismatch for NCC-05 WSS endpoint (expected ${baselineExpectedKey} but got MISMATCHED_KEY). Rejecting.`),
       'Client should report K mismatch for NCC-05 WSS endpoint'
     );
     assert.ok(
@@ -220,7 +225,7 @@ describe('NCC-06 Relay, Sidecar, Client Integration Tests', () => {
       'Client should fall back to NCC-02 URL'
     );
     assert.ok(
-      clientOutput.includes("NCC-02 fallback WSS endpoint 'k' mismatch (expected TESTKEY:relay-local-dev-1, got MISMATCHED_KEY)."),
+      clientOutput.includes(`NCC-02 fallback WSS endpoint 'k' mismatch (expected ${baselineExpectedKey}, got MISMATCHED_KEY).`),
       'Client should reject fallback wss endpoint when k mismatch persists'
     );
     assert.ok(

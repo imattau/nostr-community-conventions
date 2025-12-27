@@ -6,3 +6,4 @@ export * from './protocol.js';
 export * from './keys.js';
 export * from './tls.js';
 export * from './k.js';
+export * from './external-endpoints.js';

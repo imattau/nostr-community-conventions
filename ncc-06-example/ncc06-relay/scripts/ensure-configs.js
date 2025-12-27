@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { getPublicKey, nip19 } from 'nostr-tools';
+import { getExpectedK } from '../../../ncc-06-js/src/k.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,29 +29,58 @@ const serviceNpub = nip19.npubEncode(servicePk);
 const locatorFriendSk = crypto.createHash('sha256').update(LOCATOR_FRIEND_SEED).digest('hex');
 const locatorFriendPk = getPublicKey(locatorFriendSk);
 
-const NCC02_KEY_SOURCE = process.env.NCC06_NCC02_KEY_SOURCE || 'test';
-const TEST_KEY = 'TESTKEY:relay-local-dev-1';
-
-const computeCertFingerprint = () => {
-  try {
-    const certPath = path.resolve(__dirname, '..', rootConfig.relayTlsCert || './certs/server.crt');
-    const certData = readFileSync(certPath);
-    return `CERTFP:${crypto.createHash('sha256').update(certData).digest('hex')}`;
-  } catch (err) {
-    console.warn('[setup] Could not compute certificate fingerprint:', err.message);
-    return TEST_KEY;
+const NCC02_KEY_SOURCE = process.env.NCC06_NCC02_KEY_SOURCE || 'cert';
+const SIDE_CAR_DIR = path.resolve(projectRoot, 'ncc06-sidecar');
+const defaultExternalEndpoints = {
+  ipv4: {
+    enabled: true,
+    protocol: 'wss',
+    address: RELAY_HOST,
+    port: RELAY_WSS_PORT,
+    publicSources: ['https://api.ipify.org?format=json']
+  },
+  ipv6: {
+    enabled: false,
+    protocol: 'wss'
   }
 };
 
-const derivedFingerprint = NCC02_KEY_SOURCE === 'cert' ? computeCertFingerprint() : TEST_KEY;
+const determineKMode = () => {
+  const envMode = process.env.NCC06_K_MODE;
+  if (envMode) return envMode;
+  if (NCC02_KEY_SOURCE === 'generate') return 'generate';
+  if (NCC02_KEY_SOURCE === 'test') return 'static';
+  return 'tls_spki';
+};
+
+const deriveKConfig = () => {
+  const mode = determineKMode();
+  const config = { mode };
+  if (mode === 'static') {
+    config.value = 'TESTKEY:relay-local-dev-1';
+  } else if (mode === 'tls_spki') {
+    const certPath = path.resolve(__dirname, '..', rootConfig.relayTlsCert || './certs/server.crt');
+    const relativePath = path.relative(SIDE_CAR_DIR, certPath);
+    config.certPath = relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
+  } else if (mode === 'generate') {
+    config.persistPath = './k.txt';
+  }
+  return config;
+};
+
+const kConfig = deriveKConfig();
+const expectedK = getExpectedK(
+  { k: kConfig, externalEndpoints: defaultExternalEndpoints },
+  { baseDir: SIDE_CAR_DIR }
+);
 
 const defaultSidecarConfig = {
   serviceSk,
   servicePk,
   serviceNpub,
   relayUrl: RELAY_URL,
-  ncc02ExpectedKey: derivedFingerprint,
-  ncc02ExpectedKeySource: NCC02_KEY_SOURCE,
+  ncc02ExpectedKey: expectedK,
+  ncc02ExpectedKeySource: kConfig.mode,
   ncc02ExpSeconds: 1209600,
   ncc05TtlSeconds: 3600,
   publicationRelays: [RELAY_URL],
@@ -65,19 +95,8 @@ const defaultSidecarConfig = {
     serviceFile: './onion-service.json',
     timeout: 5000
   },
-  externalEndpoints: {
-    ipv4: {
-      enabled: true,
-      protocol: 'wss',
-      address: RELAY_HOST,
-      port: RELAY_WSS_PORT,
-      publicSources: ['https://api.ipify.org?format=json']
-    },
-    ipv6: {
-      enabled: false,
-      protocol: 'wss'
-    }
-  }
+  externalEndpoints: defaultExternalEndpoints,
+  k: kConfig
 };
 
 const defaultClientConfig = {
@@ -85,7 +104,7 @@ const defaultClientConfig = {
   serviceIdentityUri: `wss://${serviceNpub}`,
   servicePubkey: servicePk,
   serviceNpub,
-  ncc02ExpectedKey: defaultSidecarConfig.ncc02ExpectedKey,
+  ncc02ExpectedKey: expectedK,
   serviceId: defaultSidecarConfig.serviceId,
   locatorId: defaultSidecarConfig.locatorId,
   publicationRelays: [RELAY_URL],
@@ -95,6 +114,7 @@ const defaultClientConfig = {
   locatorSecretKey: locatorFriendSk,
   locatorFriendPubkey: locatorFriendPk
 };
+defaultClientConfig.ncc02ExpectedKeySource = defaultSidecarConfig.ncc02ExpectedKeySource;
 
 const ensureFile = (filePath, payload) => {
   if (existsSync(filePath)) return;

@@ -4,6 +4,11 @@
   "serviceNpub": "<npub>",
   "relayUrl": "ws://127.0.0.1:7000",
   "ncc02ExpectedKey": "TESTKEY:relay-local-dev-1",
+  "k": {
+    "mode": "tls_spki",
+    "certPath": "../certs/server.crt",
+    "persistPath": "./k.txt"
+  },
   "ncc02ExpSeconds": 1209600,
   "ncc05TtlSeconds": 3600,
   "serviceId": "relay",

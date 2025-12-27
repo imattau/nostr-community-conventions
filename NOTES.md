@@ -24,7 +24,7 @@
 4. **Client resolution path is deterministic.**  
   - Decode the npub from `serviceIdentityUri`, fetch NCC-02 + NCC-05 via REQ, verify `k` tags for `wss`, treat NCC-05 TTL/updated timestamps as authoritative, and fall back to NCC-02 when either NCC-05 is expired or no acceptable endpoint exists.  
   - Reject NCC-02 fallbacks whose `k` values still mismatch, then stop instead of attempting another endpoint.
-  - NCC-05 trust is derived from the event signature: the resolver filters out any locator events whose `verifyEvent` fails or whose `pubkey` doesn’t match the service identity before using the payload, meaning a relay can’t spoof endpoints without compromising the service key. Keep the verification path intact whenever `ncc-05` is updated so this trust anchor is preserved.
+  - NCC-05 trust is derived from the event signature: the resolver filters out any locator events whose `verifyEvent` fails or whose `pubkey` doesn’t match the service identity before using the payload, meaning a relay can’t spoof endpoints without compromising the service key. Keep the verification path intact whenever `ncc-05` is updated so this trust anchor is preserved and the client remains resilient to relay divergence.
 
 5. **Developer visibility matters.**  
    - Logging should highlight when NCC-05 is used vs. fallback, why endpoints were rejected, and when `EOSE` completes.  
@@ -38,12 +38,14 @@
 - Use `ncc-02-js`/`ncc-05` libraries directly in tests to cover builder/resolver expectations (TTL, gossip, multi-recipient wraps, policy violations).  
 - `ncc-06-js` now hosts the selector helpers (`normalizeLocatorEndpoints`, `choosePreferredEndpoint`) plus the resolver orchestration, so reuse those exports instead of managing the logic inline. The example installs the package via a `file:` dependency and the client/test suite import the shared helpers directly.
 - The new `ncc06-sidecar/external-endpoints.js` helpers centralize how NCC-05 endpoints are declared (operator-only onion, IPv6, IPv4 settings) and keep the locator payload deterministic instead of probing for reachability.
+- The sidecar now exposes a `k` config block (mode/certPath/value/persistPath) so TLS SPKI pinning can be the default `wss://` fingerprint; the helper functions compute the `ncc02ExpectedKey` for both NCC-02 and NCC-05 in lockstep.
 - When generating TLS certs for local WSS, include `127.0.0.1` in the SAN so the handshake succeeds; the client connects with `rejectUnauthorized=false` because endpoint trust is established through NCC-02 `k`, not the certificate chain.
 - Reset configs between integration tests (sidecar/client) to avoid leakage across cases that deliberately mutate TTLs or `k` values.
 - The integration suite now runs two resolver instances in parallel and exercises group-wrapped NCC-05 locators, so log outputs that mention the new endpoints help debug concurrency or gossip failures.
 - Use `config.json`'s `relayBindHost`/`relayWssBindHost` when the environment disallows binding directly on `relayHost`, so the relay can listen on `0.0.0.0` while clients still reach it via the loopback URI.
 - If Tor control is enabled, the sidecar now creates a v3 onion service for the relay port, caches the key material (so the address survives restarts), and publishes `ws://<onion>.onion` in NCC-05 locators (no `k` tag is needed for those entries). The relay remains unaware of Tor.
 - Run `npm run clean-configs` whenever you update TLS material or flip `NCC06_NCC02_KEY_SOURCE=cert`; that script removes and regenerates the deterministic sidecar/client configs.
+- Wrap `ncc06-sidecar/config-manager.js`’s `updateConfig` when exposing a dashboard or admin API so you can mutate generated settings without losing embedded secrets, then rerun `npm run sidecar:publish` to push the refreshed NCC-02/NCC-05 material.
 
 ## Pitfalls
 

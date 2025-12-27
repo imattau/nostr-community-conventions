@@ -8,9 +8,8 @@ import { parseNostrMessage } from '../lib/protocol.js';
 import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import { NCC02Builder } from 'ncc-02-js';
-import {
-  buildExternalEndpoints
-} from './external-endpoints.js';
+import { buildExternalEndpoints, getExpectedK } from 'ncc-06-js';
+import { loadConfig as loadSidecarConfig } from './config-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,8 +17,19 @@ const __dirname = path.dirname(__filename);
 const rootConfigPath = path.resolve(__dirname, '../config.json');
 const rootConfig = JSON.parse(readFileSync(rootConfigPath, 'utf-8'));
 
-const sidecarConfigPath = path.resolve(__dirname, './config.json');
-const sidecarConfig = JSON.parse(readFileSync(sidecarConfigPath, 'utf-8'));
+const log = (message, ...args) => console.log(`[Sidecar] ${message}`, ...args);
+const warn = (message, ...args) => console.warn(`[Sidecar] WARNING: ${message}`, ...args);
+const error = (message, ...args) => console.error(`[Sidecar] ERROR: ${message}`, ...args);
+
+const sidecarConfig = loadSidecarConfig();
+const computedExpectedK = getExpectedK(sidecarConfig, { baseDir: __dirname });
+let expectedK = computedExpectedK;
+if (sidecarConfig.ncc02ExpectedKey && sidecarConfig.ncc02ExpectedKey !== computedExpectedK) {
+  warn('sidecar config expected key differs from computed value; honoring configured value for this run.');
+  expectedK = sidecarConfig.ncc02ExpectedKey;
+} else {
+  sidecarConfig.ncc02ExpectedKey = computedExpectedK;
+}
 const clientConfigPath = path.resolve(__dirname, '../ncc06-client/config.json');
 const clientConfig = JSON.parse(readFileSync(clientConfigPath, 'utf-8'));
 
@@ -32,10 +42,6 @@ if (!PRIVATE_KEY || !PUBLIC_KEY || !SERVICE_NPUB) {
   console.error("Sidecar service identity is missing. Please ensure 'serviceSk', 'servicePk', and 'serviceNpub' are set in ncc06-sidecar/config.json.");
   process.exit(1);
 }
-
-const log = (message, ...args) => console.log(`[Sidecar] ${message}`, ...args);
-const warn = (message, ...args) => console.warn(`[Sidecar] WARNING: ${message}`, ...args);
-const error = (message, ...args) => console.error(`[Sidecar] ERROR: ${message}`, ...args);
 
 const ncc02Builder = new NCC02Builder(PRIVATE_KEY);
 let storedServiceRecord = null;
@@ -72,7 +78,7 @@ function stageServiceRecord(events) {
     storedServiceRecord = ncc02Builder.createServiceRecord({
       serviceId: sidecarConfig.serviceId,
       endpoint: rootConfig.relayWssUrl || sidecarConfig.relayUrl,
-      fingerprint: sidecarConfig.ncc02ExpectedKey,
+      fingerprint: expectedK,
       expiryDays
     });
     events.push(storedServiceRecord);
@@ -99,8 +105,13 @@ async function stageLocator(events) {
     ipv4: sidecarConfig.externalEndpoints?.ipv4,
     wsPort: rootConfig.relayPort,
     wssPort: rootConfig.relayWssPort,
-    ncc02ExpectedKey: sidecarConfig.ncc02ExpectedKey,
-    publicIpv4Sources: sidecarConfig.externalEndpoints?.ipv4?.publicSources
+    ncc02ExpectedKey: expectedK,
+    publicIpv4Sources: sidecarConfig.externalEndpoints?.ipv4?.publicSources,
+    ensureOnionService: async () => ensureOnionEndpoint({
+      torControl: sidecarConfig.torControl,
+      cacheFile: sidecarConfig.torControl?.serviceFile,
+      relayPort: rootConfig.relayPort
+    })
   });
   const expiration = createdAt + sidecarConfig.ncc05TtlSeconds;
   const locatorContent = createLocatorPayload(endpoints);
