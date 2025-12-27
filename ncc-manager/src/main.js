@@ -129,16 +129,18 @@ async function runGlobalValidation() {
 
   const groupedDocs = new Map();
   docs.forEach(doc => {
-      const d = eventTagValue(doc.tags, 'd');
+      let d = eventTagValue(doc.tags, 'd');
       if (!d) return;
+      d = d.toLowerCase();
       if (!groupedDocs.has(d)) groupedDocs.set(d, []);
       groupedDocs.get(d).push(doc);
   });
   
   const groupedNsrs = new Map();
   rawNsrs.forEach(nsr => {
-      const d = eventTagValue(nsr.tags, 'd');
+      let d = eventTagValue(nsr.tags, 'd');
       if (!d) return;
+      d = d.toLowerCase();
       if (!groupedNsrs.has(d)) groupedNsrs.set(d, []);
       groupedNsrs.get(d).push(nsr);
   });
@@ -152,6 +154,7 @@ async function runGlobalValidation() {
   for (const d of groupedDocs.keys()) {
       const dDocs = groupedDocs.get(d) || [];
       const dNsrs = groupedNsrs.get(d) || [];
+      const upperD = d.toUpperCase();
 
       // Create a unique identifier for the current set of docs and nsrs for this d-tag
       const currentDDocsIds = dDocs.map(doc => doc.id).sort().join(',');
@@ -161,9 +164,9 @@ async function runGlobalValidation() {
       currentValidatedState.set(d, currentStateIdentifier);
 
       // Check if this d-tag's state has changed since last validation
-      if (lastValidatedState.has(d) && lastValidatedState.get(d) === currentStateIdentifier && state.validationResults.has(d.toUpperCase())) {
+      if (lastValidatedState.has(d) && lastValidatedState.get(d) === currentStateIdentifier && state.validationResults.has(upperD)) {
           // No change, reuse previous validation result
-          newValidationResults.set(d.toUpperCase(), state.validationResults.get(d.toUpperCase()));
+          newValidationResults.set(upperD, state.validationResults.get(upperD));
           continue;
       }
 
@@ -173,10 +176,10 @@ async function runGlobalValidation() {
           validationPromises.set(jobId, { resolve, reject });
           worker.postMessage({ id: jobId, targetD: d, rawDocs: dDocs, rawNsrs: dNsrs });
       }).then(result => {
-          newValidationResults.set(d.toUpperCase(), result);
+          newValidationResults.set(upperD, result);
       }).catch(error => {
           console.error(`[Validation] Error for ${d}:`, error);
-          newValidationResults.set(d.toUpperCase(), { d, authoritativeDocId: null, authoritativeNsrId: null, tips: [], forkPoints: [], forkedBranches: [], warnings: [`Error during validation: ${error.message}`] });
+          newValidationResults.set(upperD, { d, authoritativeDocId: null, authoritativeNsrId: null, tips: [], forkPoints: [], forkedBranches: [], warnings: [`Error during validation: ${error.message}`] });
       });
       validationTasks.push(promise);
   }

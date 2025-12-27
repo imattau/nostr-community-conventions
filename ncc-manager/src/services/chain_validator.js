@@ -168,6 +168,8 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
   // Keep only events with matching d and valid signatures.
   // Record warnings for dropped events.
 
+  const normalizedTargetD = targetD.trim().toLowerCase();
+
   // Check docs
   for (const event of rawDocs) {
     const parsed = parseEvent(event);
@@ -175,7 +177,7 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
       result.warnings.push(`Doc ${event.id} signature invalid or malformed.`);
       continue;
     }
-    if (parsed.d !== targetD) continue;
+    if (parsed.d.trim().toLowerCase() !== normalizedTargetD) continue;
     parsedDocs.push(parsed);
   }
 
@@ -186,7 +188,7 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
       result.warnings.push(`NSR ${event.id} signature invalid or malformed.`);
       continue;
     }
-    if (parsed.d !== targetD) continue;
+    if (parsed.d.trim().toLowerCase() !== normalizedTargetD) continue;
     parsedNsrs.push(parsed);
   }
 
@@ -196,9 +198,14 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
   }
 
   // 2. Determine authorised steward
-  // Identify the root document (no supersedes) to establish the initial steward.
+  // Identify the root document (no valid supersedes) to establish the initial steward.
   // Tie-breaking: Prefer status="published", then earliest created_at, then lowest ID.
-  const potentialRoots = parsedDocs.filter(d => !d.supersedes);
+  const potentialRoots = parsedDocs.filter(d => {
+      if (!d.supersedes) return true;
+      // Only treat it as a successor if it supersedes a valid 64-char hex ID.
+      // IDs like 'ncc-01' or other identifiers are ignored for root detection.
+      return d.supersedes.length !== 64; 
+  });
   
   potentialRoots.sort((a, b) => {
     const aPub = a.status === 'published';
@@ -385,15 +392,12 @@ export function validateNccChain(targetD, rawDocs, rawNsrs) {
   }
 
   // 7. Additional Warnings
+  const docIds = new Set(parsedDocs.map(d => d.id));
   parsedDocs.forEach(d => {
       if (d.supersedes === d.id) {
           result.warnings.push(`Doc ${d.id} supersedes itself.`);
       }
-  });
-
-  const docIds = new Set(parsedDocs.map(d => d.id));
-  parsedDocs.forEach(d => {
-      if (d.supersedes && !docIds.has(d.supersedes)) {
+      if (d.supersedes && d.supersedes.length === 64 && !docIds.has(d.supersedes)) {
            result.warnings.push(`Doc ${d.id} supersedes unknown document ${d.supersedes}.`);
       }
   });
