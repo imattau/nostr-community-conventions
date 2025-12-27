@@ -175,6 +175,17 @@ app.get("*", (req, res) => {
   res.sendFile(join(distPath, "index.html"));
 });
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.info(`NCC Manager running at http://${HOST}:${PORT}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[Error] Port ${PORT} is already in use.`);
+    console.error(`Please close the process using this port or specify a different port using the --port flag.`);
+    console.error(`Example: ncc-manager --port ${PORT + 1}\n`);
+    process.exit(1);
+  } else {
+    throw err;
+  }
 });
