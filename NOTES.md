@@ -22,8 +22,9 @@
    - TLS certificates are just opaque keys—locally generated for encryption, optionally bearing a SAN for 127.0.0.1—and their fingerprints are verified through NCC-02 `k`, not Web PKI.
 
 4. **Client resolution path is deterministic.**  
-   - Decode the npub from `serviceIdentityUri`, fetch NCC-02 + NCC-05 via REQ, verify `k` tags for `wss`, treat NCC-05 TTL/updated timestamps as authoritative, and fall back to NCC-02 when either NCC-05 is expired or no acceptable endpoint exists.  
-   - Reject NCC-02 fallbacks whose `k` values still mismatch, then stop instead of attempting another endpoint.
+  - Decode the npub from `serviceIdentityUri`, fetch NCC-02 + NCC-05 via REQ, verify `k` tags for `wss`, treat NCC-05 TTL/updated timestamps as authoritative, and fall back to NCC-02 when either NCC-05 is expired or no acceptable endpoint exists.  
+  - Reject NCC-02 fallbacks whose `k` values still mismatch, then stop instead of attempting another endpoint.
+  - NCC-05 trust is derived from the event signature: the resolver filters out any locator events whose `verifyEvent` fails or whose `pubkey` doesn’t match the service identity before using the payload, meaning a relay can’t spoof endpoints without compromising the service key. Keep the verification path intact whenever `ncc-05` is updated so this trust anchor is preserved.
 
 5. **Developer visibility matters.**  
    - Logging should highlight when NCC-05 is used vs. fallback, why endpoints were rejected, and when `EOSE` completes.  
