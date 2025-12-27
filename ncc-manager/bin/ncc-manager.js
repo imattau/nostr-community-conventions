@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "child_process";
+import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import open from "open";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load version from package.json
+const pkg = JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+const APP_VERSION = pkg.version;
 
 const args = process.argv.slice(2);
 const options = {
@@ -21,6 +29,7 @@ Options:
   --port <port>  Port to bind the server to (default: 5179)
   --host <host>  Host to bind the server to (default: 127.0.0.1)
   --no-open      Do not open the browser automatically
+  -v, --version  Display the version number
   --help         Display this help message
 `;
 
@@ -28,6 +37,10 @@ for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
   if (arg === "--help") {
     console.log(helpMessage);
+    process.exit(0);
+  }
+  if (arg === "--version" || arg === "-v") {
+    console.log(APP_VERSION);
     process.exit(0);
   }
   if (arg === "--port" && args[i + 1]) {
@@ -53,8 +66,6 @@ for (let i = 0; i < args.length; i += 1) {
   extras.push(arg);
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const serverPath = path.join(__dirname, "..", "server.js");
 
 const env = {

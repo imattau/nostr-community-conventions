@@ -2,6 +2,7 @@ import express from "express";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import http from "http";
 import {
   upsertDraft,
   deleteDraft,
@@ -175,9 +176,7 @@ app.get("*", (req, res) => {
   res.sendFile(join(distPath, "index.html"));
 });
 
-const server = app.listen(PORT, HOST, () => {
-  console.info(`NCC Manager running at http://${HOST}:${PORT}`);
-});
+const server = http.createServer(app);
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
@@ -188,4 +187,8 @@ server.on('error', (err) => {
   } else {
     throw err;
   }
+});
+
+server.listen(PORT, HOST, () => {
+  console.info(`NCC Manager running at http://${HOST}:${PORT}`);
 });
