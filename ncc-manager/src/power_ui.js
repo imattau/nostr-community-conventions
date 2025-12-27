@@ -48,6 +48,7 @@ const COMMANDS = [
             eventBus.emit('open-new-ncc');
         }
     },
+    { id: "docs", title: "View Documentation", run: () => window.open("/docs/user-guide.md", "_blank") },
     { id: "reload", title: "Reload", kb: "Ctrl+R", run: () => window.location.reload() }
 ];
 
@@ -84,8 +85,10 @@ export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFun
           </div>
         </div>
           <div class="p-top-right">
+             <a href="/docs/user-guide.md" target="_blank" class="p-btn-ghost p-btn-sm desktop-only" title="View Documentation">Docs</a>
              <button class="p-btn-ghost p-btn-sm desktop-only" data-action="toggle-inspector" title="Toggle Inspector Sidepanel">Inspector</button>
              <div class="p-mobile-nav" style="padding-right: 8px">
+                <a href="/docs/user-guide.md" target="_blank" class="p-btn-ghost">Docs</a>
                 <button class="p-btn-ghost" data-action="toggle-inspector">Inspector</button>
              </div>
              <div id="p-top-signer" class="p-signer-status"></div>

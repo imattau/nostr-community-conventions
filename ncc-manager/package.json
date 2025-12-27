@@ -17,6 +17,7 @@
     "server.js",
     "src",
     "bin",
+    "docs",
     "README.md",
     "LICENSE"
   ],
