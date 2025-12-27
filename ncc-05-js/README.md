@@ -1,267 +1,250 @@
-# ncc-05
+# ncc-05-js
 
-Nostr Community Convention 05 - Identity-Bound Service Locator Resolution
+**Nostr Community Convention 05 (NCC-05)** implementation for JavaScript/TypeScript.
+
+This library provides a standard way to publish and resolve **Identity-Bound Service Locators** on the Nostr network. It allows Nostr identities to dynamically publish endpoints (IPs, domains, Tor .onion addresses) that can be resolved by others, effectively functioning as a decentralized, identity-based DNS.
+
+## Features
+
+*   **Identity-Bound:** Records are signed by Nostr identities (`npub`), ensuring authenticity.
+*   **Privacy-Focused:** Supports NIP-44 encryption (public, self-encrypted, targeted, and multi-recipient).
+*   **Dynamic:** Updates propagate instantly across relays (Kind 30058 replaceable events).
+*   **Resilient:** Supports NIP-65 gossip for decentralized discovery, finding the relays where the target user actually publishes.
+*   **Flexible:** Works with any endpoint type (TCP, UDP, HTTP, Onion, etc.).
+*   **Efficient:** Supports sharing a `SimplePool` instance for connection management.
+*   **Typed:** Written in TypeScript with full type definitions.
 
 ## Installation
 
-You can install this library using npm:
-
 ```bash
-npm install ncc-05
+npm install ncc-05-js
 ```
 
-## Configuration
+## Quick Start
 
-### Relays
-
-The `NCC05Resolver` uses a set of bootstrap relays to discover service locators. By default, it uses `['wss://relay.damus.io', 'wss://nos.lol']`. You can provide your own list of relays during initialization:
+### 1. Publishing a Service Locator
 
 ```typescript
-import { NCC05Resolver } from 'ncc-05';
-
-const customRelays = ['wss://relay.example.com', 'wss://another.relay.io'];
-const resolver = new NCC05Resolver({ bootstrapRelays: customRelays });
-```
-
-The `NCC05Publisher` requires you to specify the relays to which you want to publish events for each `publish` or `publishWrapped` call:
-
-```typescript
-import { NCC05Publisher } from 'ncc-05';
+import { NCC05Publisher, NCC05Payload } from 'ncc-05-js';
 
 const publisher = new NCC05Publisher();
-const relaysToPublishTo = ['wss://relay.example.com'];
-// ... then call publisher.publish(relaysToPublishTo, ...)
+const relays = ['wss://relay.damus.io', 'wss://nos.lol'];
+const mySecretKey = '...'; // Hex string or Uint8Array
+
+const payload: NCC05Payload = {
+    v: 1,
+    ttl: 3600,
+    updated_at: Math.floor(Date.now() / 1000),
+    endpoints: [
+        { type: 'https', uri: 'https://my-service.com', priority: 1, family: 'ipv4' }
+    ]
+};
+
+// Publish a public record
+try {
+    await publisher.publish(relays, mySecretKey, payload, { public: true });
+    console.log('Service published!');
+} catch (error) {
+    console.error('Publishing failed:', error);
+}
+
+publisher.close(relays);
 ```
 
-### Shared SimplePool
+### 2. Resolving a Service Locator
 
-Both `NCC05Resolver` and `NCC05Publisher` can optionally share a `nostr-tools` `SimplePool` instance. This is useful for managing relay connections more efficiently across your application.
+```typescript
+import { NCC05Resolver } from 'ncc-05-js';
+
+const resolver = new NCC05Resolver();
+const targetPubkey = 'npub1...'; // or hex
+
+try {
+    const record = await resolver.resolve(targetPubkey);
+    
+    if (record) {
+        console.log('Found endpoints:', record.endpoints);
+    } else {
+        console.log('No service record found.');
+    }
+} catch (error) {
+    console.error('Resolution failed:', error);
+}
+
+resolver.close();
+```
+
+---
+
+## Detailed Usage
+
+### Configuration
+
+Both `NCC05Resolver` and `NCC05Publisher` accept configuration objects.
+
+#### Shared Connection Pool
+For efficiency, especially in long-running applications or when using other Nostr libraries, you should share a single `SimplePool` instance.
 
 ```typescript
 import { SimplePool } from 'nostr-tools';
-import { NCC05Resolver, NCC05Publisher } from 'ncc-05';
+import { NCC05Resolver, NCC05Publisher } from 'ncc-05-js';
 
 const pool = new SimplePool();
 
 const resolver = new NCC05Resolver({ pool });
 const publisher = new NCC05Publisher({ pool });
 
-// Remember to close the pool when done if you created it externally
-// pool.close(); 
+// ... usage ...
+
+// You are responsible for closing the pool if you passed it in
+// pool.close(usedRelays); 
 ```
 
-## Usage
-
-This library is designed for both resolving and publishing identity-bound service locators.
-
-### 1. Resolving a Service Locator
-
-You can resolve a service locator for a user's identity using the `NCC05Resolver`. This involves specifying the target user's public key, your (optional) secret key for decryption, and a service identifier.
+#### Custom Relays & Timeouts
 
 ```typescript
-import { NCC05Resolver, NCC05Payload, NCC05TimeoutError } from 'ncc-05';
-import { SimplePool } from 'nostr-tools';
-
-// Optional: Share an existing connection pool to manage relay connections
-const pool = new SimplePool(); 
-const resolver = new NCC05Resolver({ 
-    pool,
-    timeout: 10000 // Custom timeout in milliseconds (default is 10000)
+const resolver = new NCC05Resolver({
+    // Relays to start looking at (Bootstrap relays)
+    bootstrapRelays: ['wss://relay.custom.com'], 
+    // Timeout for resolution in milliseconds (Default: 10000)
+    timeout: 5000 
 });
-
-// The target user's public key (can be 'npub1...' (bech32 encoded) or a hex string)
-const targetPubkey = 'npub1w9...'; 
-
-// Your secret key (hex string or Uint8Array) is required if the record is encrypted for you.
-// If the record is public or encrypted for the targetPubkey itself, your secretKey is not strictly needed.
-const mySecretKey = "your_hex_secret_key"; 
-
-// The 'd' tag identifier for the service (default is 'addr')
-const serviceIdentifier = 'chat.example.com'; 
-
-try {
-    const payload: NCC05Payload | null = await resolver.resolve(targetPubkey, mySecretKey, serviceIdentifier, { 
-        gossip: true,   // Attempt NIP-65 relay discovery
-        strict: false   // If true, expired records return null; otherwise, a warning is logged.
-    });
-
-    if (payload) {
-        console.log('Resolved Service Locator Payload:', payload);
-        // Example output structure:
-        // {
-        //   v: 1,
-        //   ttl: 3600,
-        //   updated_at: 1678886400,
-        //   endpoints: [
-        //     { type: 'tcp', uri: '192.168.1.100:8080', priority: 10, family: 'ipv4' },
-        //     { type: 'onion', uri: 'vww6y4qj7y3t45b5.onion:443', priority: 20, family: 'onion' }
-        //   ],
-        //   caps: ['auth', 'upload'],
-        //   notes: 'Main chat service instance'
-        // }
-    } else {
-        console.log('Service locator not found or could not be resolved.');
-    }
-} catch (e) {
-    if (e instanceof NCC05TimeoutError) {
-        console.error('Resolution timed out:', e.message);
-    } else {
-        console.error('An error occurred during resolution:', e);
-    }
-} finally {
-    // It's good practice to close the resolver when you're done if it created its own pool.
-    // If you passed an external pool, you manage its lifecycle.
-    resolver.close(); 
-}
-
-// Close the external pool if you instantiated it.
-// pool.close();
 ```
 
-### 2. Publishing a Service Locator
+### Publishing Records
 
-You can publish a service locator using the `NCC05Publisher`. This allows you to broadcast your service's endpoints to the Nostr network, either publicly, encrypted for yourself, or encrypted for a specific recipient.
+The `NCC05Publisher` supports different privacy levels using NIP-44 encryption.
+
+#### Public Records (Unencrypted)
+Readable by anyone.
 
 ```typescript
-import { NCC05Publisher, NCC05Payload } from 'ncc-05';
-import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
-
-const publisher = new NCC05Publisher();
-const relaysToPublishTo = ['wss://relay.damus.io', 'wss://relay.nostr.band'];
-
-// Your secret key (should be a hex string or Uint8Array)
-const publisherSecretKey = 'your_publisher_secret_key_hex'; 
-
-const servicePayload: NCC05Payload = {
-    v: 1, // Payload version
-    ttl: 3600, // Time-to-live in seconds
-    updated_at: Math.floor(Date.now() / 1000), // Current timestamp
-    endpoints: [
-        { type: 'tcp', uri: '1.2.3.4:8080', priority: 10, family: 'ipv4' },
-        { type: 'http', uri: 'https://myservice.com', priority: 5, family: 'ipv4' }
-    ],
-    caps: ['login', 'status'], // Optional capabilities
-    notes: 'My primary service instance' // Optional notes
-};
-
-// --- Publish a public record (not encrypted) ---
-try {
-    const publicEvent = await publisher.publish(relaysToPublishTo, publisherSecretKey, servicePayload, {
-        identifier: 'my-public-service',
-        public: true // Set to true for public, unencrypted records
-    });
-    console.log('Public record published:', publicEvent.id);
-} catch (e) {
-    console.error('Failed to publish public record:', e);
-}
-
-// --- Publish a record encrypted for yourself (self-encrypted) ---
-try {
-    // This record can only be decrypted by the publisherSecretKey
-    const selfEncryptedEvent = await publisher.publish(relaysToPublishTo, publisherSecretKey, servicePayload, {
-        identifier: 'my-private-service',
-        // public: false is default, recipientPubkey also defaults to publisher's pubkey
-    });
-    console.log('Self-encrypted record published:', selfEncryptedEvent.id);
-} catch (e) {
-    console.error('Failed to publish self-encrypted record:', e);
-}
-
-// --- Publish a record encrypted for a specific recipient ---
-try {
-    const recipientPubkey = getPublicKey(generateSecretKey()); // Example recipient
-    const recipientEncryptedEvent = await publisher.publish(relaysToPublishTo, publisherSecretKey, servicePayload, {
-        identifier: 'service-for-friend',
-        recipientPubkey: recipientPubkey // Encrypts content for this recipient
-    });
-    console.log('Recipient-encrypted record published:', recipientEncryptedEvent.id);
-} catch (e) {
-    console.error('Failed to publish recipient-encrypted record:', e);
-}
-
-// --- Publish a record wrapped for multiple recipients ---
-try {
-    const groupMembers = [
-        getPublicKey(generateSecretKey()), // Member 1
-        getPublicKey(generateSecretKey()), // Member 2
-    ];
-    const wrappedEvent = await publisher.publishWrapped(relaysToPublishTo, publisherSecretKey, groupMembers, servicePayload, 'shared-service');
-    console.log('Wrapped record published for multiple recipients:', wrappedEvent.id);
-} catch (e) {
-    console.error('Failed to publish wrapped record:', e);
-} finally {
-    publisher.close(relaysToPublishTo); // Close connections used by this publisher instance
-}
+await publisher.publish(relays, secretKey, payload, { 
+    identifier: 'my-service', // 'd' tag
+    public: true 
+});
 ```
 
-## Error Handling
+#### Private Records (Self-Encrypted)
+Only readable by you (the publisher). Useful for personal device syncing or private configuration.
 
-The library exports specific error classes for granular handling:
-- `NCC05Error`: Base class for all NCC-05 specific errors.
-- `NCC05RelayError`: Communication failure with Nostr relays.
-- `NCC05TimeoutError`: Operation exceeded the specified timeout.
-- `NCC05DecryptionError`: Failed to decrypt the record (invalid keys or content).
-- `NCC05ArgumentError`: Invalid arguments provided (e.g., malformed keys).
+```typescript
+await publisher.publish(relays, secretKey, payload, { 
+    identifier: 'my-device' 
+    // public: false is default
+    // recipient defaults to self if omitted
+});
+```
 
-## Description
+#### Targeted Records
+Readable only by a specific recipient.
 
-This library implements Nostr Community Convention 05 (NCC-05) for identity-bound service locator resolution. NCC-05 defines a standard way for Nostr identities to publish and discover dynamic service endpoints (like IP addresses, ports, or Tor .onion addresses) using Nostr kind `30058` events. This allows applications to resolve a standardized service locator for a given user's Nostr public key and a specified service identifier.
+```typescript
+await publisher.publish(relays, secretKey, payload, { 
+    identifier: 'for-alice',
+    recipientPubkey: 'alice_hex_pubkey' 
+});
+```
 
-It integrates with [NIP-05 (Nostr Identity)](https://github.com/nostr-protocol/nips/blob/master/05.md) by allowing resolution based on NIP-05 verified identities and leveraging NIP-65 for relay discovery.
+#### Wrapped Records (Multi-Recipient)
+Readable by a group of users. Uses a "wrapping" pattern where the payload is encrypted with a random session key, and that session key is encrypted individually for each recipient.
 
-## How it works
+```typescript
+const recipients = ['hex_pubkey_1', 'hex_pubkey_2', 'hex_pubkey_3'];
 
-NCC-05 leverages Nostr to store and retrieve service locator records. When `resolve` is called, the library performs the following steps:
+await publisher.publishWrapped(
+    relays, 
+    secretKey, 
+    recipients, 
+    payload, 
+    'team-service'
+);
+```
 
-1.  **Identity Resolution**: Converts `npub` formatted public keys to their hexadecimal representation.
-2.  **Relay Discovery (Optional NIP-65)**: If enabled, attempts to discover additional relays from the target user's NIP-65 (kind `10002`) event, ensuring a broader search for their records.
-3.  **Querying for `kind:30058` records**: It queries known Nostr relays (bootstrap and potentially NIP-65 discovered) for `kind:30058` events authored by the target public key and matching the provided 'd' tag identifier.
-4.  **Filtering and Validation**: Discovered records are filtered for valid signatures and the correct author. The latest valid record is selected.
-5.  **Decryption**: If the content is encrypted (using NIP-44), it attempts to decrypt it using the provided secret key. It supports both single-recipient (self-encrypted or targeted) and multi-recipient "wrapped" encryption patterns.
-6.  **Payload Parsing and Validation**: The decrypted content is parsed as an `NCC05Payload` and validated for structural integrity and freshness (checking `ttl` against `updated_at`).
-7.  **Resolution**: The most appropriate and valid `NCC05Payload` is returned.
+### Resolving Records
 
-## Tor & Privacy (Onion Services)
-...
+The `NCC05Resolver` finds the latest valid record for a given user and identifier.
+
+```typescript
+const payload = await resolver.resolve(
+    targetPubkey, // npub or hex
+    mySecretKey,  // Required if the record is encrypted for you (can be null/undefined if public)
+    'my-service', // The 'd' tag identifier (default: 'addr')
+    { 
+        gossip: true, // Enable NIP-65 relay discovery (Highly Recommended)
+        strict: false // If true, returns null for expired records instead of just logging a warning
+    }
+);
+```
+
+**Note on Keys:** All methods accept keys as either **Hex Strings** or **Uint8Array**.
+
 ## API Reference
 
-### `NCC05Resolver`
-- `new NCC05Resolver(options?: ResolverOptions)`: Constructor.
-- `resolve(targetPubkey: string, secretKey?: string | Uint8Array, identifier: string = 'addr', options?: { strict?: boolean, gossip?: boolean }): Promise<NCC05Payload | null>`: Finds and decrypts a locator record.
-- `close(): void`: Closes pool connections.
+### `NCC05Payload`
 
-### `NCC05Publisher`
-- `new NCC05Publisher(options?: PublisherOptions)`: Constructor.
-- `publish(relays: string[], secretKey: string | Uint8Array, payload: NCC05Payload, options?: { identifier?: string, recipientPubkey?: string, public?: boolean }): Promise<Event>`: Publishes a standard or targeted record.
-- `publishWrapped(relays: string[], secretKey: string | Uint8Array, recipients: string[], payload: NCC05Payload, identifier: string = 'addr'): Promise<Event>`: Publishes a multi-recipient record.
-- `close(relays: string[]): void`: Closes connections to specified relays.
-
-### `NCC05Group`
-- `createGroupIdentity()`: Generates a shared group keypair.
-- `resolveAsGroup(...)`: Helper for shared-nsec resolution.
-
-### Interfaces
-
-#### `NCC05Payload`
-
-The structure of the resolved service locator data:
+The core data structure representing the service locator.
 
 ```typescript
-export interface NCC05Payload {
-    v: number;                 // Payload version (currently 1)
-    ttl: number;               // Time-to-live in seconds
-    updated_at: number;        // Unix timestamp of the last update
-    endpoints: NCC05Endpoint[];// List of available endpoints
-    caps?: string[];           // Optional capability identifiers supported by the service
+interface NCC05Payload {
+    v: number;                 // Version (always 1)
+    ttl: number;               // Time-to-live (seconds)
+    updated_at: number;        // Unix timestamp
+    endpoints: NCC05Endpoint[];
+    caps?: string[];           // Optional capabilities (e.g. ['upload', 'stream'])
     notes?: string;            // Optional human-readable notes
 }
 
-export interface NCC05Endpoint {
-    type: 'tcp' | 'udp' | string; // Protocol type, e.g., 'tcp', 'udp', 'http'
-    uri: string;                  // The URI string, e.g., '1.2.3.4:8080' or '[2001:db8::1]:9000'
-    priority: number;             // Priority for selection (lower is higher priority)
-    family: 'ipv4' | 'ipv6' | 'onion' | string; // Network family for routing hints
+interface NCC05Endpoint {
+    type: string;     // e.g., 'tcp', 'http', 'ipfs', 'hyper'
+    uri: string;      // e.g., '10.0.0.1:80', 'https://example.com', 'onion_address:80'
+    priority: number; // Lower number = higher priority
+    family: string;   // 'ipv4', 'ipv6', 'onion', 'unknown'
 }
 ```
 
+### `NCC05Resolver`
+
+*   `constructor(options?)`
+    *   `bootstrapRelays`: `string[]` (Default: `['wss://relay.damus.io', 'wss://nos.lol']`)
+    *   `timeout`: `number` (ms) (Default: `10000`)
+    *   `pool`: `SimplePool` (optional)
+*   `resolve(targetPubkey, secretKey?, identifier?, options?)`: `Promise<NCC05Payload | null>`
+    *   `gossip`: `boolean` - Fetch target's relay list (NIP-65) to find where they publish.
+    *   `strict`: `boolean` - Enforce TTL expiration strictly.
+*   `close()`: Closes connections (only if pool was created internally).
+
+### `NCC05Publisher`
+
+*   `constructor(options?)`
+    *   `pool`: `SimplePool` (optional)
+    *   `timeout`: `number` (ms) (Default: `5000`)
+*   `publish(relays, secretKey, payload, options?)`: `Promise<Event>`
+    *   `identifier`: `string` (Default: `'addr'`)
+    *   `public`: `boolean` (Default: `false`)
+    *   `recipientPubkey`: `string` (Default: self)
+*   `publishWrapped(relays, secretKey, recipients, payload, identifier?)`: `Promise<Event>`
+*   `close(relays)`: Closes connections to specific relays (only if pool was created internally).
+
+## Error Handling
+
+Errors are typed for granular handling:
+
+*   `NCC05TimeoutError`: Relay operations took too long.
+*   `NCC05RelayError`: Failed to publish or query relays.
+*   `NCC05DecryptionError`: Bad key or invalid ciphertext.
+*   `NCC05ArgumentError`: Invalid inputs (e.g. malformed keys).
+
+## Protocol Details
+
+This library implements **NCC-05**, which uses Nostr **Kind 30058** (Parametrized Replaceable Event) to store service locators.
+
+It leverages:
+*   **NIP-01:** Basic protocol flow.
+*   **NIP-19:** bech32-encoded entities (npub, nsec).
+*   **NIP-44:** Encryption (XChaCha20-Poly1305).
+*   **NIP-65:** Relay discovery (Gossip).
+
 ## License
+
+CC0-1.0
