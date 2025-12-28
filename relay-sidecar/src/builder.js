@@ -1,9 +1,11 @@
 import { buildNcc02ServiceRecord, buildLocatorPayload } from 'ncc-06-js';
 
 export function buildRecords(config, inventory) {
+  const isPrivate = config.service_mode === 'private';
+
   // 1. Build NCC-02 Service Record
-  // We use the first endpoint as the 'u' value fallback if possible
-  const primaryEndpoint = inventory[0]?.url || '';
+  // In private mode, we typically don't publish a 'u' tag (endpoint) in the NCC-02 record.
+  const primaryEndpoint = isPrivate ? undefined : (inventory[0]?.url || '');
   const primaryK = inventory[0]?.k || null;
 
   const ncc02Event = buildNcc02ServiceRecord({
@@ -20,21 +22,26 @@ export function buildRecords(config, inventory) {
     ttl: config.ncc05TtlHours * 3600
   });
 
-  // Build the NCC-05 Event manually or via a helper if added later
-  // For now, we'll build it here using the same identity
   const createdAt = Math.floor(Date.now() / 1000);
   const expiration = createdAt + locatorPayload.ttl;
+  
+  const tags = [
+    ['d', config.locatorId],
+    ['expiration', expiration.toString()]
+  ];
+
+  if (isPrivate) {
+    tags.push(['private', 'true']);
+  }
   
   const ncc05EventTemplate = {
     kind: 30058,
     pubkey: config.publicKey,
     created_at: createdAt,
-    tags: [
-      ['d', config.locatorId],
-      ['expiration', expiration.toString()]
-    ],
+    tags,
     content: JSON.stringify(locatorPayload)
   };
+
 
   // Note: finalizedEvent will be done in the app/publisher to ensure fresh timestamps if needed
   

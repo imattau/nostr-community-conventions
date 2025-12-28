@@ -1,12 +1,25 @@
 import crypto from 'crypto';
-import { scheduleWithJitter } from 'ncc-06-js';
+import { scheduleWithJitter, ensureSelfSignedCert } from 'ncc-06-js';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
-import { setState } from './db.js';
+import { setState, addLog } from './db.js';
 
 export async function runPublishCycle(config, state) {
   console.log(`[App] Starting publish cycle for ${config.npub || 'service'}`);
+
+  // 0. Optional: Generate Self-Signed Cert
+  if (config.generate_self_signed) {
+    try {
+      const cert = await ensureSelfSignedCert({
+        targetDir: './certs',
+        altNames: config.endpoints.map(e => new URL(e.url).hostname).filter(h => h !== 'localhost')
+      });
+      addLog('info', 'Self-signed certificate ensured', { certPath: cert.certPath });
+    } catch (err) {
+      addLog('error', `Failed to generate self-signed cert: ${err.message}`);
+    }
+  }
 
   // 1. Inventory
   const inventory = await buildInventory(config.endpoints);

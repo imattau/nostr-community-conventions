@@ -192,7 +192,42 @@ export default function App() {
                     })}
                   />
                 </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-slate-900 rounded border border-slate-700">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        className="rounded text-blue-600"
+                        checked={setupData.config.service_mode === 'private'}
+                        onChange={(e) => setSetupData({
+                          ...setupData,
+                          config: { ...setupData.config, service_mode: e.target.checked ? 'private' : 'public' }
+                        })}
+                      />
+                      <span className="text-xs font-medium">Private Mode</span>
+                    </label>
+                    <p className="text-[10px] text-slate-500 mt-1">Hides endpoint in NCC-02</p>
+                  </div>
+
+                  <div className="p-3 bg-slate-900 rounded border border-slate-700">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        className="rounded text-blue-600"
+                        checked={setupData.config.generate_self_signed}
+                        onChange={(e) => setSetupData({
+                          ...setupData,
+                          config: { ...setupData.config, generate_self_signed: e.target.checked }
+                        })}
+                      />
+                      <span className="text-xs font-medium">Auto-TLS</span>
+                    </label>
+                    <p className="text-[10px] text-slate-500 mt-1">Generate self-signed cert</p>
+                  </div>
+                </div>
               </div>
+
 
               <button 
                 onClick={completeSetup}
