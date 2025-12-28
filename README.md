@@ -90,9 +90,9 @@ A service (e.g. a relay, API, or media server) that opts into this convention by
 
 The Nostr public key (`npub`) that uniquely identifies the service.
 
-### Sidecar Resolver / Publisher
+### Sidecar Publisher
 
-An out-of-band component operated alongside the service, responsible for publishing and maintaining NCC-02 and NCC-05 records for the service's own identity.
+A dedicated companion component operated alongside the service. It is the primary actor responsible for enabling NCC-06 compliance by publishing and maintaining NCC-02 and NCC-05 records for the service's identity.
 
 ### Publication Relay Set
 
