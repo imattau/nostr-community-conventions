@@ -44,18 +44,15 @@ export async function resolveServiceEndpoint(options = {}) {
 
   // 1. Resolve NCC-02 Service Record using the library
   let serviceRecord;
+  const resolver = ncc02Resolver || new NCC02Resolver(bootstrapRelays, { pool });
   try {
-    const resolver = ncc02Resolver || new NCC02Resolver(bootstrapRelays, { pool });
-    serviceRecord = await resolver.resolve(servicePubkey, serviceId, {
-       // We can pass options if needed, e.g. minLevel
-    });
+    serviceRecord = await resolver.resolve(servicePubkey, serviceId, {});
   } catch (err) {
-    // Map library errors or rethrow?
-    // The library throws generic Error or NCC02Error.
-    // We can just let it propagate or wrap.
-    // Existing code threw "No valid NCC-02 service record available".
-    // We'll let the library error bubble up as it provides more detail.
     throw err;
+  } finally {
+    if (!ncc02Resolver) {
+      resolver.close();
+    }
   }
   
   // 2. Resolve NCC-05 Locator
