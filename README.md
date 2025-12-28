@@ -90,7 +90,7 @@ A service (e.g. a relay, API, or media server) that opts into this convention by
 
 The Nostr public key (`npub`) that uniquely identifies the service.
 
-### Sidecar Publisher
+### Sidecar
 
 A dedicated companion component operated alongside the service. It is the primary actor responsible for enabling NCC-06 compliance by publishing and maintaining NCC-02 and NCC-05 records for the service's identity.
 
@@ -150,7 +150,7 @@ Publishing attestations or revocations is OPTIONAL.
 ### 5. Self-Describing Behaviour
 
 - The service MUST return its own NCC-02 and NCC-05 records when queried via standard Nostr filters
-- Self-publication MAY be performed by a sidecar resolver or equivalent process
+- Self-publication MAY be performed by a Sidecar or equivalent process
 
 ### 6. Client Resolution Neutrality
 
@@ -298,7 +298,7 @@ Services MUST remain neutral and MUST NOT enforce these rules.
 
 ## Sidecar Trust and Publication Responsibilities
 
-A sidecar resolver or publisher operating under this profile MUST, when publishing NCC-02 Service Records:
+A Sidecar operating under this profile MUST, when publishing NCC-02 Service Records:
 
 - Publish a valid `k` tag identifying the service endpoint’s cryptographic key where applicable
 - Ensure the published `k` corresponds to the key actually presented by the endpoint
@@ -455,7 +455,7 @@ This appendix describes a minimal, working-shaped system that conforms to NCC-06
 The reference implementation consists of three logical components:
 
 1. A protocol-dumb service (e.g. a NIP-01 relay)
-2. A sidecar publisher for NCC-02 and NCC-05 records
+2. A Sidecar for NCC-02 and NCC-05 records
 3. A policy-aware client
 
 Each component is intentionally simple and narrowly scoped.
@@ -481,7 +481,7 @@ The service MAY store its own NCC-02 and NCC-05 records, but MUST NOT be treated
 
 ---
 
-### A.2 Sidecar Publisher
+### A.2 Sidecar
 
 The sidecar is an out-of-band process operated alongside the service. It is responsible for **asserting service state**, not enforcing it.
 
