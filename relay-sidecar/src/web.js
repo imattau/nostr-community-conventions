@@ -5,24 +5,19 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin } from './db.js';
 import { checkTor } from './tor-check.js';
-import { generateKeypair, toNsec, fromNpub } from 'ncc-06-js';
+import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4 } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export async function startWebServer(initialPort = 3000) {
-  const server = fastify({ logger: false }); // Reduce noise during port hunting
-
-  await server.register(cors, { origin: true });
-
-  // API Routes
-  server.get('/api/setup/status', async () => {
-    return { initialized: isInitialized() };
-  });
-
+...
   server.get('/api/tor/status', async () => {
     return await checkTor();
+  });
+
+  server.get('/api/network/probe', async () => {
+    const ipv6 = detectGlobalIPv6();
+    const ipv4 = await getPublicIPv4();
+    return { ipv6, ipv4 };
   });
 
   server.post('/api/setup/init', async (request, reply) => {

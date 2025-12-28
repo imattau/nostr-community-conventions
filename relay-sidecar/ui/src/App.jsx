@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle, Cpu, Smartphone, QrCode } from 'lucide-react';
+import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle, Cpu, Smartphone, QrCode, Network, Monitor, Radio } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { nip19, nip04, SimplePool } from 'nostr-tools';
 import { QRCodeSVG } from 'qrcode.react';
@@ -12,6 +12,7 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [torStatus, setTorStatus] = useState(null);
+  const [networkProbe, setNetworkProbe] = useState({ ipv4: null, ipv6: null });
   const [admins, setAdmins] = useState([]);
   const [inviteNpub, setInviteNpub] = useState('');
   const [loginMode, setLoginMode] = useState('nip07');
@@ -33,7 +34,8 @@ export default function App() {
       ncc05_ttl_hours: 12,
       authorized_recipients: [],
       service_mode: 'public',
-      generate_self_signed: false
+      generate_self_signed: false,
+      primary_protocol_preference: 'ip' // 'ip' or 'onion'
     }
   });
 
@@ -43,10 +45,21 @@ export default function App() {
     if (initialized) fetchAdmins();
   }, [initialized]);
 
+  useEffect(() => {
+    if (step === 3) probeNetwork();
+  }, [step]);
+
   const fetchAdmins = async () => {
     try {
       const res = await axios.get(`${API_BASE}/admins`);
       setAdmins(res.data);
+    } catch (e) {}
+  };
+
+  const probeNetwork = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/network/probe`);
+      setNetworkProbe(res.data);
     } catch (e) {}
   };
 
@@ -117,8 +130,6 @@ export default function App() {
     setNip46Uri(uri);
     setLoginMode('nip46');
 
-    console.log("[NIP-46] Listening for connection on", relays);
-
     const sub = pool.subscribeMany(relays, [{
       kinds: [24133],
       '#p': [pk]
@@ -127,10 +138,8 @@ export default function App() {
         try {
           const decrypted = await nip04.decrypt(sk, event.pubkey, event.content);
           const response = JSON.parse(decrypted);
-          console.log("[NIP-46] Received message:", response);
           
           if (response.method === 'connect' || response.result) {
-            console.log("[NIP-46] Connected! Admin Pubkey:", event.pubkey);
             setSetupData(prev => ({ ...prev, adminPubkey: event.pubkey }));
             setConnectionStatus('connected');
             sub.close();
@@ -179,28 +188,31 @@ export default function App() {
 
   if (initialized) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className="min-h-screen bg-gray-50 p-8 font-sans">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">NCC-06 Sidecar Admin</h1>
-          <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-            <h2 className="text-xl font-semibold mb-4 flex items-center">
-              <CheckCircle className="text-green-500 mr-2" /> System Running
+          <h1 className="text-3xl font-bold mb-8 text-slate-900 tracking-tight">NCC-06 Sidecar Admin</h1>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+            <h2 className="text-xl font-semibold mb-4 flex items-center text-slate-800">
+              <CheckCircle className="text-green-500 mr-2" /> System Healthy
             </h2>
-            <p className="text-gray-600 mb-4">Your relay is being kept NCC-06 compliant.</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 bg-blue-50 rounded border border-blue-100">
-                <p className="text-sm text-blue-600 font-medium">Service Identity</p>
-                <p className="font-mono text-xs truncate text-blue-800">{setupData.serviceNpub || 'Configured'}</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <p className="text-[10px] uppercase tracking-wider text-blue-600 font-bold mb-1">Service Identity</p>
+                <p className="font-mono text-xs truncate text-blue-900">{setupData.serviceNpub || 'Configured'}</p>
               </div>
-              <div className="p-4 bg-gray-50 rounded border border-gray-200">
-                <p className="text-sm text-gray-600 font-medium">Tor Status</p>
-                <p className="text-sm">{torStatus?.running ? 'Connected' : 'Not Detected'}</p>
+              <div className="p-4 bg-purple-50 rounded-xl border border-purple-100">
+                <p className="text-[10px] uppercase tracking-wider text-purple-600 font-bold mb-1">Endpoints</p>
+                <p className="text-xs font-medium text-purple-900">Auto-detecting IP & Onion</p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-[10px] uppercase tracking-wider text-gray-600 font-bold mb-1">Tor Status</p>
+                <p className="text-xs font-medium text-gray-900">{torStatus?.running ? 'Connected' : 'Not Detected'}</p>
               </div>
             </div>
           </div>
 
-          <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-            <h2 className="text-xl font-semibold mb-4 flex items-center">
+          <div className="mt-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+            <h2 className="text-xl font-semibold mb-4 flex items-center text-slate-800">
               <Shield className="text-blue-500 mr-2" /> Manage Team
             </h2>
             
@@ -210,11 +222,11 @@ export default function App() {
                 placeholder="npub1..."
                 value={inviteNpub}
                 onChange={(e) => setInviteNpub(e.target.value)}
-                className="flex-1 bg-gray-50 border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none"
+                className="flex-1 bg-gray-50 border border-gray-300 rounded-xl p-2.5 text-sm focus:border-blue-500 outline-none transition-all"
               />
               <button 
                 onClick={inviteAdmin}
-                className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-blue-700 transition-colors"
+                className="bg-blue-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors shadow-sm"
               >
                 Send Invite
               </button>
@@ -222,16 +234,16 @@ export default function App() {
 
             <div className="space-y-3">
               {admins.map(admin => (
-                <div key={admin.pubkey} className="flex items-center justify-between p-3 bg-gray-50 rounded border border-gray-200">
+                <div key={admin.pubkey} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
                   <div>
-                    <p className="font-mono text-xs text-gray-600 truncate max-w-xs">{admin.pubkey}</p>
-                    <span className={`text-[10px] uppercase font-bold ${admin.status === 'active' ? 'text-green-600' : 'text-amber-600'}`}>
+                    <p className="font-mono text-xs text-slate-700 truncate max-w-xs">{admin.pubkey}</p>
+                    <span className={`text-[10px] uppercase font-black tracking-widest ${admin.status === 'active' ? 'text-green-600' : 'text-amber-600'}`}>
                       {admin.status}
                     </span>
                   </div>
                   <button 
                     onClick={() => removeAdmin(admin.pubkey)}
-                    className="text-red-600 hover:text-red-800 text-xs font-medium"
+                    className="text-red-500 hover:text-red-700 text-xs font-bold uppercase tracking-tighter"
                   >
                     Remove
                   </button>
@@ -245,78 +257,77 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-xl overflow-hidden border border-slate-700">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-center">
-          <h1 className="text-2xl font-bold">NCC-06 Sidecar Setup</h1>
-          <p className="text-blue-100 text-sm mt-1">Configure your relay's discovery layer</p>
+    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-4 font-sans">
+      <div className="max-w-md w-full bg-slate-800 rounded-3xl shadow-2xl overflow-hidden border border-slate-700">
+        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
+          <h1 className="text-2xl font-black tracking-tight">NCC-06 Sidecar</h1>
+          <p className="text-blue-100 text-sm mt-1 font-medium opacity-80">Discovery Layer Setup</p>
         </div>
 
         <div className="p-8">
           {step === 1 && (
-            <div className="space-y-6">
-              <Shield className="w-16 h-16 mx-auto text-blue-400" />
+            <div className="space-y-8 animate-in fade-in zoom-in-95 duration-300">
+              <div className="bg-blue-500/10 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto border border-blue-500/20">
+                <Shield className="w-10 h-10 text-blue-400" />
+              </div>
               <div className="text-center">
-                <h2 className="text-xl font-semibold">Welcome Administrator</h2>
-                <p className="text-slate-400 text-sm mt-2">Connect your personal Nostr identity to manage this sidecar.</p>
+                <h2 className="text-xl font-bold text-slate-100">Welcome Administrator</h2>
+                <p className="text-slate-400 text-sm mt-2 leading-relaxed px-4">Connect your personal Nostr identity to securely manage this service.</p>
               </div>
 
-              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700">
+              <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1.5 rounded-2xl border border-slate-700">
                 <button 
                   onClick={() => setLoginMode('nip07')}
-                  className={`flex-1 flex items-center justify-center py-2 px-3 rounded-lg text-xs font-bold transition-all ${loginMode === 'nip07' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                  className={`flex items-center justify-center py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${loginMode === 'nip07' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  <Cpu className="w-3 h-3 mr-2" /> Extension (NIP-07)
+                  <Cpu className="w-3 h-3 mr-2" /> Extension
                 </button>
                 <button 
                   onClick={() => { setLoginMode('nip46'); if(!nip46Uri) startNIP46(); }}
-                  className={`flex-1 flex items-center justify-center py-2 px-3 rounded-lg text-xs font-bold transition-all ${loginMode === 'nip46' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                  className={`flex items-center justify-center py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${loginMode === 'nip46' ? 'bg-slate-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  <Smartphone className="w-3 h-3 mr-2" /> Remote (NIP-46)
+                  <Smartphone className="w-3 h-3 mr-2" /> Remote
                 </button>
               </div>
 
               {loginMode === 'nip07' ? (
                 <button 
                   onClick={connectNIP07}
-                  className="w-full bg-white text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center shadow-lg"
+                  className="w-full bg-white text-slate-900 font-black text-sm py-4 px-4 rounded-2xl hover:bg-slate-100 transition-all shadow-xl active:scale-[0.98]"
                 >
-                  Login with Extension
+                  LOGIN WITH EXTENSION
                 </button>
               ) : (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="bg-white p-4 rounded-xl flex justify-center shadow-inner">
-                    <QRCodeSVG value={nip46Uri} size={180} />
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="bg-white p-5 rounded-3xl flex justify-center shadow-2xl mx-auto w-fit">
+                    <QRCodeSVG value={nip46Uri} size={160} />
                   </div>
-                  <div className="text-center space-y-2">
+                  <div className="text-center space-y-3">
                     <div className="flex items-center justify-center space-x-2">
                       <div className={`w-2 h-2 rounded-full ${connectionStatus === 'listening' ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
-                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">
-                        {connectionStatus === 'listening' ? 'Waiting for Signer...' : 'Connected'}
+                      <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">
+                        {connectionStatus === 'listening' ? 'Waiting for Signer...' : 'Success'}
                       </p>
                     </div>
-                    <code className="block p-2 bg-slate-900 rounded border border-slate-700 text-[10px] break-all font-mono text-blue-300 select-all cursor-pointer">
+                    <code className="block p-3 bg-slate-900 rounded-xl border border-slate-700 text-[9px] break-all font-mono text-blue-300 select-all leading-tight">
                       {nip46Uri}
                     </code>
                   </div>
-                  
-                  <div className="pt-4 border-t border-slate-700">
-                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2 text-center">Manual Fallback</p>
+                  <div className="pt-4 border-t border-slate-700/50">
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3 text-center">Manual Fallback</p>
                     <div className="flex space-x-2">
                       <input 
                         type="text" 
-                        placeholder="Paste your hex pubkey if not auto-detected"
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-[10px] focus:border-blue-500 outline-none text-white font-mono"
+                        placeholder="Paste pubkey if not detected"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-[10px] focus:border-blue-500 outline-none text-white font-mono"
                         onKeyDown={(e) => { if(e.key === 'Enter') handleNIP46Complete(e.target.value); }}
                       />
                       <button 
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousSibling.value;
-                          if (input) handleNIP46Complete(input);
-                        }}
-                        className="bg-slate-700 px-3 py-1 rounded text-[10px] font-bold"
+                        onClick={(e) => handleNIP46Complete(e.currentTarget.previousSibling.value)}
+                        className="bg-slate-700 px-4 rounded-xl text-[10px] font-black"
                       >
-                        Go
+                        GO
                       </button>
                     </div>
                   </div>
@@ -326,31 +337,31 @@ export default function App() {
           )}
 
           {step === 2 && (
-            <div className="space-y-6">
-              <div className="flex items-center space-x-2 text-blue-400">
-                <Key className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">Service Identity</h2>
+            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center space-x-3 text-blue-400">
+                <Key className="w-6 h-6" />
+                <h2 className="text-xl font-bold text-slate-100">Service Identity</h2>
               </div>
-              <p className="text-slate-400 text-sm">Generate a unique keypair for your relay. This is different from your admin key.</p>
+              <p className="text-slate-400 text-sm leading-relaxed">Generate a unique cryptographic identity for your service. This is distinct from your administrator account.</p>
               
               {!setupData.serviceNsec ? (
                 <button 
                   onClick={generateServiceKey}
-                  className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors shadow-lg"
+                  className="w-full bg-blue-600 text-white font-black text-sm py-4 px-4 rounded-2xl hover:bg-blue-500 transition-all shadow-lg shadow-blue-900/20"
                 >
-                  Generate New Service Key
+                  GENERATE NEW SERVICE KEY
                 </button>
               ) : (
-                <div className="space-y-4">
-                  <div className="p-3 bg-slate-900 rounded border border-slate-700">
-                    <p className="text-xs text-slate-500 uppercase font-bold mb-1">Service NSEC (Save this safely!)</p>
-                    <p className="font-mono text-xs break-all text-orange-400">{setupData.serviceNsec}</p>
+                <div className="space-y-6">
+                  <div className="p-4 bg-slate-900 rounded-2xl border border-slate-700 border-l-4 border-l-orange-500">
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">Private Key (Keep Secret!)</p>
+                    <p className="font-mono text-[10px] break-all text-orange-400 leading-tight">{setupData.serviceNsec}</p>
                   </div>
                   <button 
                     onClick={() => setStep(3)}
-                    className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-500 transition-colors shadow-lg"
+                    className="w-full bg-green-600 text-white font-black text-sm py-4 px-4 rounded-2xl hover:bg-green-500 transition-all shadow-lg"
                   >
-                    I've Saved It, Continue
+                    I'VE SAVED IT, CONTINUE
                   </button>
                 </div>
               )}
@@ -358,79 +369,110 @@ export default function App() {
           )}
 
           {step === 3 && (
-            <div className="space-y-6">
-              <div className="flex items-center space-x-2 text-blue-400">
-                <Globe className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">Tor & Network</h2>
+            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center space-x-3 text-blue-400">
+                <Globe className="w-6 h-6" />
+                <h2 className="text-xl font-bold text-slate-100">Network Discovery</h2>
               </div>
               
-              <div className={`p-4 rounded-lg border ${torStatus?.running ? 'bg-green-900/20 border-green-800' : 'bg-amber-900/20 border-amber-800'}`}>
-                <div className="flex items-start">
-                  {torStatus?.running ? <CheckCircle className="w-5 h-5 text-green-500 mr-2 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-amber-500 mr-2 mt-0.5" />}
-                  <div>
-                    <p className="font-medium text-sm">{torStatus?.running ? 'Tor is active' : 'Tor not detected'}</p>
-                    {!torStatus?.running && (
-                      <p className="text-xs text-amber-200/70 mt-1">{torStatus?.recommendation}</p>
-                    )}
+              <div className="space-y-4">
+                <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Select Primary Discovery Path</p>
+                
+                <div className="grid grid-cols-1 gap-3">
+                  {/* Onion Option */}
+                  <button 
+                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, primary_protocol_preference: 'onion' } }))}
+                    className={`flex items-center p-4 rounded-2xl border transition-all text-left ${setupData.config.primary_protocol_preference === 'onion' ? 'bg-indigo-600/20 border-indigo-500 shadow-indigo-900/20' : 'bg-slate-900/50 border-slate-700 opacity-60 hover:opacity-100'}`}
+                  >
+                    <Radio className={`w-5 h-5 mr-4 ${setupData.config.primary_protocol_preference === 'onion' ? 'text-indigo-400' : 'text-slate-600'}`} />
+                    <div className="flex-1">
+                      <p className="font-bold text-sm">Tor (Onion)</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Location-hiding, DNS-optional.</p>
+                    </div>
+                    {torStatus?.running ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
+                  </button>
+
+                  {/* IP Option */}
+                  <button 
+                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, primary_protocol_preference: 'ip' } }))}
+                    className={`flex items-center p-4 rounded-2xl border transition-all text-left ${setupData.config.primary_protocol_preference === 'ip' ? 'bg-blue-600/20 border-blue-500 shadow-blue-900/20' : 'bg-slate-900/50 border-slate-700 opacity-60 hover:opacity-100'}`}
+                  >
+                    <Radio className={`w-5 h-5 mr-4 ${setupData.config.primary_protocol_preference === 'ip' ? 'text-blue-400' : 'text-slate-600'}`} />
+                    <div className="flex-1">
+                      <p className="font-bold text-sm">Internet Protocol (IP)</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Clearnet. Prefers IPv6, falls back to IPv4.</p>
+                    </div>
+                    {networkProbe.ipv4 ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
+                  </button>
+                </div>
+
+                <div className="p-4 bg-slate-900/80 rounded-2xl border border-slate-700">
+                  <div className="flex items-center space-x-2 text-slate-400 mb-3">
+                    <Monitor className="w-3 h-3" />
+                    <span className="text-[9px] font-black uppercase tracking-tighter">Detected Endpoints</span>
+                  </div>
+                  <div className="space-y-2 font-mono text-[9px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">IPv4:</span>
+                      <span className="text-blue-300">{networkProbe.ipv4 || 'Detecting...'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">IPv6:</span>
+                      <span className="text-blue-300">{networkProbe.ipv6 || 'None detected'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Tor:</span>
+                      <span className={torStatus?.running ? 'text-green-400' : 'text-slate-600'}>
+                        {torStatus?.running ? 'Available' : 'Not running'}
+                      </span>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="pt-4">
+                <button 
+                  onClick={() => setStep(4)}
+                  className="w-full bg-blue-600 text-white font-black text-sm py-4 px-4 rounded-2xl hover:bg-blue-500 transition-all shadow-lg"
+                >
+                  NEXT: SECURITY & PRIVACY
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center space-x-3 text-blue-400">
+                <Settings className="w-6 h-6" />
+                <h2 className="text-xl font-bold text-slate-100">Security & Privacy</h2>
               </div>
 
               <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Primary Endpoint (IP or Onion)</label>
-                  <input 
-                    type="text" 
-                    placeholder="ws://abcdef...onion:80 or wss://1.2.3.4:7447"
-                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm focus:border-blue-500 outline-none text-white font-mono"
-                    onChange={(e) => setSetupData({
-                      ...setupData,
-                      config: { ...setupData.config, endpoints: [{ url: e.target.value, priority: 1 }] }
-                    })}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1 italic">The routable network address where your service is physically listening.</p>
-                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, service_mode: d.config.service_mode === 'private' ? 'public' : 'private' } }))}
+                    className={`p-4 rounded-2xl border transition-all text-left ${setupData.config.service_mode === 'private' ? 'bg-purple-600/20 border-purple-500' : 'bg-slate-900 border-slate-700 opacity-60'}`}
+                  >
+                    <p className="font-bold text-xs">Private Mode</p>
+                    <p className="text-[9px] text-slate-400 mt-1">Encrypted locators.</p>
+                  </button>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-slate-900 rounded border border-slate-700">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="rounded text-blue-600"
-                        checked={setupData.config.service_mode === 'private'}
-                        onChange={(e) => setSetupData({
-                          ...setupData,
-                          config: { ...setupData.config, service_mode: e.target.checked ? 'private' : 'public' }
-                        })}
-                      />
-                      <span className="text-xs font-medium">Private Mode</span>
-                    </label>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">Encrypted locators for recipients.</p>
-                  </div>
-
-                  <div className="p-3 bg-slate-900 rounded border border-slate-700">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="rounded text-blue-600"
-                        checked={setupData.config.generate_self_signed}
-                        onChange={(e) => setSetupData({
-                          ...setupData,
-                          config: { ...setupData.config, generate_self_signed: e.target.checked }
-                        })}
-                      />
-                      <span className="text-xs font-medium">Auto-TLS</span>
-                    </label>
-                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">Generate self-signed cert.</p>
-                  </div>
+                  <button 
+                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, generate_self_signed: !d.config.generate_self_signed } }))}
+                    className={`p-4 rounded-2xl border transition-all text-left ${setupData.config.generate_self_signed ? 'bg-blue-600/20 border-blue-500' : 'bg-slate-900 border-slate-700 opacity-60'}`}
+                  >
+                    <p className="font-bold text-xs">Auto-TLS</p>
+                    <p className="text-[9px] text-slate-400 mt-1">Self-signed cert.</p>
+                  </button>
                 </div>
 
                 {setupData.config.service_mode === 'private' && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Authorized Recipients (npubs, comma separated)</label>
+                  <div className="animate-in fade-in slide-in-from-top-2">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Authorized Recipients (npubs)</label>
                     <textarea 
                       placeholder="npub1..., npub1..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-[10px] font-mono h-20 focus:border-blue-500 outline-none text-white"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-3 text-[10px] font-mono h-24 focus:border-blue-500 outline-none text-white leading-relaxed"
                       onChange={(e) => setSetupData({
                         ...setupData,
                         config: { 
@@ -439,17 +481,19 @@ export default function App() {
                         }
                       })}
                     />
-                    <p className="text-[10px] text-blue-400 mt-1 italic">If empty, only the service owner can decrypt.</p>
+                    <p className="text-[9px] text-indigo-400 mt-2 italic px-1">Separate with commas. If empty, only you can decrypt.</p>
                   </div>
                 )}
               </div>
 
-              <button 
-                onClick={completeSetup}
-                className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors shadow-lg"
-              >
-                Complete Setup
-              </button>
+              <div className="pt-4">
+                <button 
+                  onClick={completeSetup}
+                  className="w-full bg-blue-600 text-white font-black text-sm py-4 px-4 rounded-2xl hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/40"
+                >
+                  FINISH & LAUNCH
+                </button>
+              </div>
             </div>
           )}
         </div>
