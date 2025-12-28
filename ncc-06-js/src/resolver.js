@@ -120,7 +120,9 @@ function determineEndpoint({ serviceRecord, locatorPayload, expectedK, torPrefer
   }
 
   if (ncc02Url) {
-    if (ncc02Url.startsWith('wss://') && expectedK && k && k !== expectedK) {
+    const isSecure = ncc02Url.match(/^(wss|https|tls|tcps):\/\//) || (ncc02Url.includes('://') && ncc02Url.split(':')[0].endsWith('s'));
+    
+    if (isSecure && expectedK && k && k !== expectedK) {
       return {
         endpoint: null,
         source: 'ncc02',

@@ -132,3 +132,25 @@ export async function getPublicIPv4({ sources = ['https://api.ipify.org?format=j
   }
   return null;
 }
+
+export function normalizeRelayUrl(url) {
+  if (!url) return '';
+  let normalized = url.trim();
+  if (normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (!normalized.includes('://')) {
+    normalized = `wss://${normalized}`;
+  }
+  return normalized;
+}
+
+export function normalizeRelays(relays) {
+  if (!Array.isArray(relays)) return [];
+  const normalized = relays
+    .filter(Boolean)
+    .map(normalizeRelayUrl);
+  return [...new Set(normalized)];
+}
+
+

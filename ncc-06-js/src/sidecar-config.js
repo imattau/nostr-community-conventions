@@ -11,6 +11,8 @@ const DEFAULT_TOR_CONTROL = {
   timeout: 5000
 };
 
+import { normalizeRelayUrl, normalizeRelays } from './external-endpoints.js';
+
 const RELAY_MODE_PUBLIC = 'public';
 const RELAY_MODE_PRIVATE = 'private';
 
@@ -18,136 +20,112 @@ function normalizeRelayMode(mode) {
   if (!mode) {
     return RELAY_MODE_PUBLIC;
   }
-  const value = String(mode).toLowerCase();
+  const value = mode.toLowerCase();
   if (value !== RELAY_MODE_PUBLIC && value !== RELAY_MODE_PRIVATE) {
-    throw new Error(`relayMode must be "${RELAY_MODE_PUBLIC}" or "${RELAY_MODE_PRIVATE}"`);
+    throw new Error(`relayMode (or serviceMode) must be "${RELAY_MODE_PUBLIC}" or "${RELAY_MODE_PRIVATE}"`);
   }
   return value;
 }
 
-function uniqueList(items) {
-  const seen = new Set();
-  return items.filter(item => {
-    if (!item) return false;
-    const normalized = item.trim();
-    if (seen.has(normalized)) {
-      return false;
-    }
-    seen.add(normalized);
-    return true;
-  });
+function uniqueList(arr) {
+  return [...new Set(arr.filter(Boolean))];
 }
 
 export function getRelayMode(config = {}) {
-  return normalizeRelayMode(config.relayMode);
+  return normalizeRelayMode(config.relayMode || config.serviceMode);
 }
 
 export function setRelayMode(config = {}, mode) {
   const normalized = normalizeRelayMode(mode);
-  return { ...config, relayMode: normalized };
+  return { ...config, relayMode: normalized, serviceMode: normalized };
 }
 
 /**
- * Build a deployable sidecar config object that mirrors the example's defaults.
+ * Build configuration for the NCC-06 Sidecar.
  */
 export function buildSidecarConfig({
-  serviceSk,
-  servicePk,
-  serviceNpub,
+  secretKey,
+  serviceUrl,
   relayUrl,
   serviceId = 'relay',
   locatorId = 'relay-locator',
   publicationRelays = [],
   publishRelays,
-  ncc02ExpSeconds = 14 * 24 * 60 * 60,
-  ncc05TtlSeconds = DEFAULT_TTL_SECONDS,
-  torControl = DEFAULT_TOR_CONTROL,
-  externalEndpoints = {},
-  k = {},
-  baseDir = process.cwd(),
+  persistPath,
+  certPath,
   relayMode,
-  ncc02ExpectedKeySource
-} = {}) {
-  if (!serviceSk || !servicePk || !serviceNpub) {
-    throw new Error('service keypair must be provided');
+  serviceMode
+}) {
+  if (!secretKey) {
+    throw new Error('secretKey is required');
   }
-  if (!relayUrl) {
-    throw new Error('relayUrl is required');
+  
+  const primaryUrl = serviceUrl || relayUrl;
+  
+  if (!primaryUrl) {
+    throw new Error('serviceUrl (or relayUrl) is required');
   }
 
-  const expectedKey = getExpectedK({ k, externalEndpoints }, { baseDir });
-  const normalizedPublicationRelays = uniqueList([relayUrl, ...publicationRelays]);
+  const normalizedPrimaryUrl = normalizeRelayUrl(primaryUrl);
+  const normalizedPublicationRelays = uniqueList([normalizedPrimaryUrl, ...publicationRelays]);
   const normalizedPublishRelays = uniqueList([
-    relayUrl,
+    normalizedPrimaryUrl,
     ...(publishRelays ?? normalizedPublicationRelays)
   ]);
-  const keySource = ncc02ExpectedKeySource ?? k.mode ?? 'auto';
-  const normalizedRelayMode = normalizeRelayMode(relayMode);
+  
+  const mode = relayMode || serviceMode;
+  const normalizedMode = normalizeRelayMode(mode);
 
   return {
-    serviceSk,
-    servicePk,
-    serviceNpub,
-    relayUrl,
+    secretKey,
+    serviceUrl: normalizedPrimaryUrl,
+    relayUrl: normalizedPrimaryUrl, // Backward compatibility
     serviceId,
     locatorId,
     publicationRelays: normalizedPublicationRelays,
     publishRelays: normalizedPublishRelays,
-    ncc02ExpSeconds,
-    ncc05TtlSeconds,
-    ncc02ExpectedKey: expectedKey,
-    ncc02ExpectedKeySource: keySource,
-    externalEndpoints,
-    torControl,
-    k,
-    relayMode: normalizedRelayMode
+    persistPath,
+    certPath,
+    relayMode: normalizedMode,
+    serviceMode: normalizedMode // Alias
   };
 }
 
 /**
- * Build a client config that matches the NCC-06 example expectations.
+ * Build configuration for the NCC-06 Client.
  */
 export function buildClientConfig({
-  relayUrl,
-  servicePubkey,
-  serviceNpub,
   serviceIdentityUri,
-  locatorSecretKey,
-  locatorFriendPubkey,
+  serviceNpub, // Deprecated, but supported
+  servicePubkey,
+  serviceUrl,
+  relayUrl,
   publicationRelays = [],
-  staleFallbackSeconds = 600,
-  torPreferred = false,
-  ncc05TimeoutMs = 5000,
-  serviceId,
-  locatorId,
-  expectedK
-} = {}) {
-  if (!relayUrl) {
-    throw new Error('relayUrl is required');
+  serviceId = 'relay',
+  locatorId = 'relay-locator',
+  ncc02ExpectedKey
+}) {
+  if (!serviceIdentityUri && !serviceNpub) {
+    throw new Error('serviceIdentityUri (or serviceNpub) is required');
   }
-  const identityUri =
-    serviceIdentityUri || (serviceNpub ? `wss://${serviceNpub}` : undefined);
-  if (!identityUri) {
-    throw new Error('serviceIdentityUri or serviceNpub is required');
+  
+  const primaryUrl = serviceUrl || relayUrl;
+
+  if (!primaryUrl) {
+    throw new Error('serviceUrl (or relayUrl) is required');
   }
-  if (!servicePubkey) {
-    throw new Error('servicePubkey is required');
-  }
-  const publicationList = uniqueList([relayUrl, ...publicationRelays]);
+  
+  const normalizedPrimaryUrl = normalizeRelayUrl(primaryUrl);
+  const publicationList = uniqueList([normalizedPrimaryUrl, ...publicationRelays]);
 
   return {
-    relayUrl,
-    serviceIdentityUri: identityUri,
+    serviceIdentityUri: serviceIdentityUri || (serviceNpub ? `wss://${serviceNpub}` : null),
     servicePubkey,
-    serviceNpub: serviceNpub ?? '',
+    serviceUrl: normalizedPrimaryUrl,
+    relayUrl: normalizedPrimaryUrl, // Backward compatibility
     publicationRelays: publicationList,
-    staleFallbackSeconds,
-    torPreferred,
-    ncc05TimeoutMs,
-    locatorSecretKey,
-    locatorFriendPubkey,
     serviceId,
     locatorId,
-    ncc02ExpectedKey: expectedK
+    ncc02ExpectedKey
   };
 }

@@ -8,22 +8,26 @@ import {
 } from '../src/sidecar-config.js';
 
 test('buildSidecarConfig constructs expected fields based on inputs', () => {
-  const cfg = buildSidecarConfig({
-    serviceSk: 'sk',
-    servicePk: 'pk',
-    serviceNpub: 'npub',
-    relayUrl: 'ws://localhost:7000',
-    k: { mode: 'static', value: 'TESTKEY:abc' },
-    publicationRelays: ['ws://aux:7001'],
-    externalEndpoints: {
-      ipv4: { enabled: true, protocol: 'ws', address: '127.0.0.1', port: 7447 }
-    }
+  const config = buildSidecarConfig({
+    secretKey: 'hex',
+    relayUrl: 'wss://test',
+    relayMode: 'private'
   });
+  assert.equal(config.relayUrl, 'wss://test');
+  assert.equal(config.serviceUrl, 'wss://test');
+  assert.equal(config.relayMode, 'private');
+});
 
-  assert.equal(cfg.serviceSk, 'sk');
-  assert.equal(cfg.ncc02ExpectedKey, 'TESTKEY:abc');
-  assert.deepEqual(cfg.publicationRelays[0], 'ws://localhost:7000');
-  assert.ok(cfg.publishRelays.length >= 1);
+test('buildSidecarConfig supports serviceUrl and serviceMode aliases', () => {
+  const config = buildSidecarConfig({
+    secretKey: 'hex',
+    serviceUrl: 'https://api.example.com',
+    serviceMode: 'private'
+  });
+  assert.equal(config.serviceUrl, 'https://api.example.com');
+  assert.equal(config.relayUrl, 'https://api.example.com');
+  assert.equal(config.serviceMode, 'private');
+  assert.equal(config.relayMode, 'private');
 });
 
 test('buildClientConfig enforces identity URI and relays', () => {
@@ -31,7 +35,7 @@ test('buildClientConfig enforces identity URI and relays', () => {
     relayUrl: 'ws://relay',
     servicePubkey: 'pk',
     serviceNpub: 'npub',
-    expectedK: 'TESTKEY:abc',
+    ncc02ExpectedKey: 'TESTKEY:abc',
     publicationRelays: ['ws://relay', 'ws://aux']
   });
 
