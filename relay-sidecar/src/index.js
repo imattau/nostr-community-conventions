@@ -1,54 +1,60 @@
-import { loadConfig } from './config.js';
-import { loadState } from './state.js';
-import { runPublishCycle, startScheduler } from './app.js';
+import { initDb, isInitialized, getConfig, setState, getState } from './db.js';
+import { startWebServer } from './web.js';
+import { startScheduler } from './app.js';
 import { buildInventory } from './inventory.js';
+import { fromNsec } from 'ncc-06-js';
+import { getPublicKey } from 'nostr-tools/pure';
 
 async function main() {
   const command = process.argv[2] || 'daemon';
-  const config = loadConfig();
-  const state = loadState(config.statePath);
+  
+  // Initialize SQLite
+  initDb('./sidecar.db');
 
-  switch (command) {
-    case 'daemon':
-      console.log(`[Main] Starting NCC-06 Relay Sidecar in daemon mode.`);
-      startScheduler(config, state);
-      break;
-
-    case 'publish':
-      console.log(`[Main] Force publishing records...`);
-      // Force publish by resetting the last publish timestamp in memory for this call
-      await runPublishCycle(config, { ...state, last_full_publish_timestamp: 0 });
+  if (command === 'status') {
+    if (!isInitialized()) {
+      console.log('Sidecar not initialized. Please complete setup via the web interface.');
       process.exit(0);
-      break;
+    }
+    const admin = getConfig('admin_pubkey');
+    const appConfig = getConfig('app_config');
+    console.log(`--- NCC-06 Sidecar Status ---`);
+    console.log(`Admin: ${admin}`);
+    console.log(`Service Config: ${JSON.stringify(appConfig, null, 2)}`);
+    process.exit(0);
+  }
 
-    case 'status':
-      console.log(`--- NCC-06 Sidecar Status ---`);
-      console.log(`Identity: ${config.npub}`);
-      console.log(`Service ID: ${config.serviceId}`);
-      console.log(`Last NCC-02: ${state.last_published_ncc02_id || 'Never'}`);
-      console.log(`Last Success:`);
-      Object.entries(state.last_success_per_relay).forEach(([relay, res]) => {
-        console.log(`  ${relay}: ${res.success ? 'OK' : 'FAIL (' + res.error + ')'} at ${new Date(res.timestamp).toISOString()}`);
-      });
-      process.exit(0);
-      break;
+  // Always start web server for admin UI
+  const port = Number(process.env.ADMIN_PORT || 3000);
+  await startWebServer(port);
 
-    case 'inventory':
-      console.log(`--- Effective Endpoints ---`);
-      const inventory = await buildInventory(config.endpoints);
-      console.table(inventory.map(ep => ({
-        url: ep.url,
-        family: ep.family,
-        priority: ep.priority,
-        k: ep.k ? `${ep.k.slice(0, 10)}...` : 'NONE'
-      })));
-      process.exit(0);
-      break;
+  if (!isInitialized()) {
+    console.log(`[Main] First-run setup required. Visit http://127.0.0.1:${port} to configure.`);
+    return; // Wait for user to complete setup
+  }
 
-    default:
-      console.log(`Unknown command: ${command}`);
-      console.log(`Usage: relay-sidecar [daemon|publish|status|inventory]`);
-      process.exit(1);
+  const appConfig = getConfig('app_config');
+  const serviceNsec = getConfig('service_nsec');
+  
+  const fullConfig = {
+    ...appConfig,
+    secretKey: fromNsec(serviceNsec),
+    publicKey: getPublicKey(fromNsec(serviceNsec)),
+    statePath: './sidecar.db' // Not used as much now with direct DB calls
+  };
+
+  if (command === 'daemon') {
+    console.log(`[Main] Starting NCC-06 Relay Sidecar daemon.`);
+    // Note: We'll need to adapt app.js to use DB for state instead of JSON file
+    // But for MVP we can keep passing a state object and persist it.
+    const state = getState('app_state', {
+      last_published_ncc02_id: null,
+      last_endpoints_hash: null,
+      last_success_per_relay: {},
+      last_full_publish_timestamp: 0
+    });
+    
+    startScheduler(fullConfig, state);
   }
 }
 

@@ -3,10 +3,10 @@ import { scheduleWithJitter } from 'ncc-06-js';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
-import { saveState } from './state.js';
+import { setState } from './db.js';
 
 export async function runPublishCycle(config, state) {
-  console.log(`[App] Starting publish cycle for ${config.npub}`);
+  console.log(`[App] Starting publish cycle for ${config.npub || 'service'}`);
 
   // 1. Inventory
   const inventory = await buildInventory(config.endpoints);
@@ -41,11 +41,12 @@ export async function runPublishCycle(config, state) {
     last_full_publish_timestamp: now
   };
 
-  saveState(config.statePath, newState);
+  setState('app_state', newState);
   console.log(`[App] Cycle complete. Next refresh in ~${config.refreshIntervalMinutes} minutes.`);
   
   return newState;
 }
+
 
 export function startScheduler(config, state) {
   const loop = async () => {
