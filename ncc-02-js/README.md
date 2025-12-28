@@ -43,64 +43,26 @@ try {
   }
 } catch (err) {
   console.error('Resolution failed:', err.code, err.message);
+} finally {
+  resolver.close(); // Clean up WebSocket connections
 }
 ```
 
 ### 2. Publish a Service Record
-
-```javascript
-import { NCC02Builder } from 'ncc-02-js';
-
-// Initialize with private key (hex)
-const builder = new NCC02Builder(privateKey);
-
-// Example 1: Public IP-based Service
-const event = builder.createServiceRecord({
-  serviceId: 'media',
-  endpoint: 'https://203.0.113.45:8443',
-  fingerprint: 'sha256:fingerprint',
-  expiryDays: 14
-});
-
-// Example 2: Private / Invite-Only Service
-const privateEvent = builder.createServiceRecord({
-  serviceId: 'wallet',
-  fingerprint: 'sha256:fingerprint',
-  expiryDays: 7
-});
-// publish events to relays...
-```
-
-### 3. Issue an Attestation (CA)
-
-```javascript
-const caBuilder = new NCC02Builder(caPrivateKey);
-const attestation = caBuilder.createAttestation({
-  subjectPubkey: 'npub1...', // The service owner being certified
-  serviceId: 'media',
-  serviceEventId: serviceRecordEventId,
-  level: 'verified',
-  validDays: 30
-});
-```
-
-## Trust Model & Security
+...
+### Trust Model & Security
 
 ### Trust Levels
 - `self`: Asserted by the service owner (default if no attestation).
 - `verified`: Attested by a trusted third party.
 - `hardened`: Attested by a third party with stricter verification (e.g., physical proof or long-term history).
 
+### Resolution Optimization
+The resolver is designed to be network-efficient. It will only query for attestations (Kind 30060) and revocations (Kind 30061) if the provided policy requires them (e.g., when `requireAttestation` is set to `true` or a `minLevel` higher than `self` is requested).
+
 ### Threat Model
-- **Endpoint Impersonation**: Prevented by binding the endpoint URI to a public key fingerprint (`k` tag).
-- **Man-in-the-Middle (MITM)**: Mitigated via cryptographic pinning of transport-level keys.
-- **Stale Records**: Limited by required expiry (`exp`) and support for revocations.
-- **Relay Censorship**: Mitigated by querying multiple relays (implemented via `SimplePool`).
-
-### Fail-Closed Design
-The library follows a fail-closed principle. If a policy requirement is not met (e.g., `requireAttestation: true` but no valid attestation is found), it throws an `NCC02Error` rather than returning a partially verified record.
-
-## API Reference
+...
+### API Reference
 
 ### `NCC02Resolver(relays, options)`
 - `relays`: Array of relay URLs.
@@ -110,6 +72,10 @@ The library follows a fail-closed principle. If a policy requirement is not met 
 #### `resolve(pubkey, serviceId, options)`
 - `options.requireAttestation`: Fails if no trusted attestation is found.
 - `options.minLevel`: Minimum trust level required.
+
+#### `close()`
+Closes WebSocket connections to all relays. If the resolver was initialized with an external `pool`, this will *not* close the pool; it only untracks the relays for this instance. If the resolver created its own internal pool, it will close it entirely.
+
 
 ### `NCC02Builder(privateKey)`
 - `createServiceRecord({ serviceId, endpoint?, fingerprint?, expiryDays? })`

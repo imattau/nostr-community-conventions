@@ -255,6 +255,58 @@ async function runTests() {
     throw new Error('Failed to resolve private service record correctly.');
   }
 
+  // --- 12. Resource Management: close() ---
+  console.log('Test: Resolver.close() functionality...');
+  let closed = false;
+  const closingPool = {
+    subscribeMany: mockPool.subscribeMany,
+    close: () => { closed = true; }
+  };
+  const closingResolver = new NCC02Resolver(['ws://closing'], { pool: closingPool });
+  // Since we passed pool, ownsPool should be false, so close() shouldn't call pool.close()
+  closingResolver.close();
+  if (closed) throw new Error('Resolver closed a shared pool!');
+  console.log('✅ Passed (Shared pool not closed)');
+  
+  const ownPoolResolver = new NCC02Resolver(['ws://closing']);
+  // We can't easily spy on internal SimplePool, but we can check if the method exists and runs without error.
+  try {
+      ownPoolResolver.close();
+      console.log('✅ Passed (Internal pool closed without error)');
+  } catch (e) {
+      throw new Error('Resolver.close() threw error: ' + e.message);
+  }
+
+  // --- 13. Optimization: Lazy Loading ---
+  console.log('Test: Optimization (Lazy Loading)...');
+  let queryCount = 0;
+  const spyPool = {
+    subscribeMany: (relays, filters, callbacks) => {
+      queryCount++;
+      return mockPool.subscribeMany(relays, filters, callbacks);
+    },
+    close: () => {}
+  };
+  const lazyResolver = new NCC02Resolver(['ws://lazy'], { pool: spyPool });
+  
+  // Publish a simple service record
+  const lazyEvent = builder.createServiceRecord({ serviceId: 'lazy', endpoint: 'https://l.io', fingerprint: 'fp_lazy' });
+  await relay.publish(lazyEvent);
+  
+  queryCount = 0;
+  await lazyResolver.resolve(ownerPk, 'lazy'); // Default options
+  
+  if (queryCount !== 1) throw new Error(`Expected 1 query (Service Record), got ${queryCount}`);
+  console.log('✅ Passed (Skipped attestation fetch)');
+  
+  queryCount = 0;
+  try {
+      await lazyResolver.resolve(ownerPk, 'lazy', { requireAttestation: true });
+  } catch (e) { /* expected failure due to no attestations */ }
+  
+  if (queryCount !== 3) throw new Error(`Expected 3 queries (Service + Att + Rev), got ${queryCount}`);
+  console.log('✅ Passed (Fetched attestations when required)');
+
   console.log('\n--- All comprehensive tests passed! ---');
 }
 

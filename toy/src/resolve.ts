@@ -89,9 +89,9 @@ export async function resolveCard(asUser: 'authorised' | 'unauthorised', present
     }
     
     // Cleanup
-    // ncc02Resolver doesn't have close() if it shares pool?
-    // ncc-05 has close()
+    ncc02Resolver.close();
     if (ncc05Resolver.close) ncc05Resolver.close();
+    pool.close(CONFIG.relays);
     
     return card;
 }

@@ -52,6 +52,15 @@ export class NCC02Resolver {
   }
 
   /**
+   * Closes the connection to the relays if the pool is owned by this resolver.
+   */
+  close() {
+    if (this.ownsPool && this.pool) {
+      this.pool.close(this.relays);
+    }
+  }
+
+  /**
    * Internal query helper using SimplePool.subscribeMany (since list() is deprecated).
    * @param {import('nostr-tools').Filter} filter 
    * @returns {Promise<import('nostr-tools').Event[]>}
@@ -134,42 +143,46 @@ export class NCC02Resolver {
       throw new NCC02Error('EXPIRED', 'Service record has expired');
     }
 
-    let attestations;
-    let revocations;
-    try {
-      [attestations, revocations] = await Promise.all([
-        this._query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
-        this._query({ kinds: [KINDS.REVOCATION] })
-      ]);
-    } catch (err) {
-      throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
-    }
-
     const validAttestations = [];
-    for (const att of attestations) {
-      if (this.trustedCAPubkeys.has(att.pubkey)) {
-        const attTags = Object.fromEntries(att.tags);
-        
-        // Cross-validate subject, service ID, and standard
-        if (attTags.subj !== pubkey) continue;
-        if (attTags.srv !== serviceId) continue;
-        if (standard && attTags.std !== standard) continue;
-        
-        // Trust Level Filtering
-        if (minLevel && !this._isLevelSufficient(attTags.lvl, minLevel)) continue;
 
-        if (this._isAttestationValid(att, attTags, revocations)) {
-          validAttestations.push({
-            pubkey: att.pubkey,
-            level: attTags.lvl,
-            eventId: att.id
-          });
+    // Optimization: Only fetch attestations if policy requires it
+    if (requireAttestation || minLevel === 'verified' || minLevel === 'hardened') {
+      let attestations;
+      let revocations;
+      try {
+        [attestations, revocations] = await Promise.all([
+          this._query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
+          this._query({ kinds: [KINDS.REVOCATION] })
+        ]);
+      } catch (err) {
+        throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
+      }
+
+      for (const att of attestations) {
+        if (this.trustedCAPubkeys.has(att.pubkey)) {
+          const attTags = Object.fromEntries(att.tags);
+          
+          // Cross-validate subject, service ID, and standard
+          if (attTags.subj !== pubkey) continue;
+          if (attTags.srv !== serviceId) continue;
+          if (standard && attTags.std !== standard) continue;
+          
+          // Trust Level Filtering
+          if (minLevel && !this._isLevelSufficient(attTags.lvl, minLevel)) continue;
+
+          if (this._isAttestationValid(att, attTags, revocations)) {
+            validAttestations.push({
+              pubkey: att.pubkey,
+              level: attTags.lvl,
+              eventId: att.id
+            });
+          }
         }
       }
-    }
 
-    if (requireAttestation && validAttestations.length === 0) {
-      throw new NCC02Error('POLICY_FAILURE', `No trusted attestations meet the required policy for ${serviceId}`);
+      if (requireAttestation && validAttestations.length === 0) {
+        throw new NCC02Error('POLICY_FAILURE', `No trusted attestations meet the required policy for ${serviceId}`);
+      }
     }
 
     return {
