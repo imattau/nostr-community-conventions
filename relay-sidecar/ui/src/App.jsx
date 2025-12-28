@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle, Cpu, Smartphone } from 'lucide-react';
+import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle, Cpu, Smartphone, QrCode } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { nip19 } from 'nostr-tools';
+import { nip19, nip04, SimplePool } from 'nostr-tools';
 import { QRCodeSVG } from 'qrcode.react';
 
 const API_BASE = '/api';
@@ -16,6 +16,7 @@ export default function App() {
   const [inviteNpub, setInviteNpub] = useState('');
   const [loginMode, setLoginMode] = useState('nip07');
   const [nip46Uri, setNip46Uri] = useState('');
+  const [tempSk, setTempSk] = useState(null);
 
   const [setupData, setSetupData] = useState({
     adminPubkey: '',
@@ -101,15 +102,43 @@ export default function App() {
     }
   };
 
-  const startNIP46 = () => {
+  const startNIP46 = async () => {
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const metadata = { name: 'NCC-06 Sidecar' };
+    const pool = new SimplePool();
     const relay = 'wss://relay.damus.io';
+    
+    setTempSk(sk);
+    const metadata = { name: 'NCC-06 Sidecar', description: 'Nostr Service Discovery Agent' };
     const uri = `nostrconnect://${pk}?relay=${encodeURIComponent(relay)}&metadata=${encodeURIComponent(JSON.stringify(metadata))}`;
     
     setNip46Uri(uri);
     setLoginMode('nip46');
+
+    console.log("[NIP-46] Listening for connection on", relay);
+
+    const sub = pool.subscribeMany([relay], [{
+      kinds: [24133],
+      '#p': [pk]
+    }], {
+      onevent: async (event) => {
+        try {
+          const decrypted = await nip04.decrypt(sk, event.pubkey, event.content);
+          const response = JSON.parse(decrypted);
+          console.log("[NIP-46] Received message:", response);
+          
+          if (response.method === 'connect' || response.result) {
+            console.log("[NIP-46] Connected! Admin Pubkey:", event.pubkey);
+            setSetupData(prev => ({ ...prev, adminPubkey: event.pubkey }));
+            sub.close();
+            pool.close([relay]);
+            setStep(2);
+          }
+        } catch (e) {
+          console.error("[NIP-46] Decryption failed:", e);
+        }
+      }
+    });
   };
 
   const handleNIP46Complete = (input) => {
@@ -158,7 +187,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-blue-50 rounded border border-blue-100">
                 <p className="text-sm text-blue-600 font-medium">Service Identity</p>
-                <p className="font-mono text-xs truncate">{setupData.serviceNpub || 'Configured'}</p>
+                <p className="font-mono text-xs truncate text-blue-800">{setupData.serviceNpub || 'Configured'}</p>
               </div>
               <div className="p-4 bg-gray-50 rounded border border-gray-200">
                 <p className="text-sm text-gray-600 font-medium">Tor Status</p>
@@ -182,7 +211,7 @@ export default function App() {
               />
               <button 
                 onClick={inviteAdmin}
-                className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-blue-700"
+                className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-blue-700 transition-colors"
               >
                 Send Invite
               </button>
@@ -247,12 +276,12 @@ export default function App() {
               {loginMode === 'nip07' ? (
                 <button 
                   onClick={connectNIP07}
-                  className="w-full bg-white text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center"
+                  className="w-full bg-white text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center shadow-lg"
                 >
                   Login with Extension
                 </button>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
                   <div className="bg-white p-4 rounded-xl flex justify-center shadow-inner">
                     <QRCodeSVG value={nip46Uri} size={180} />
                   </div>
@@ -263,16 +292,8 @@ export default function App() {
                     </code>
                   </div>
                   <div className="pt-2 border-t border-slate-700">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Paste your pubkey after connecting</label>
-                    <div className="flex space-x-2">
-                      <input 
-                        type="text" 
-                        placeholder="hex or npub..."
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-blue-500 outline-none text-white"
-                        onKeyDown={(e) => { if(e.key === 'Enter') handleNIP46Complete(e.target.value); }}
-                        onBlur={(e) => { if(e.target.value) handleNIP46Complete(e.target.value); }}
-                      />
-                    </div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 text-center">Waiting for Amber/Signer...</label>
+                    <p className="text-[10px] text-slate-400 text-center italic">Scan the QR code and approve the connection. Step 2 will begin automatically.</p>
                   </div>
                 </div>
               )}
@@ -290,7 +311,7 @@ export default function App() {
               {!setupData.serviceNsec ? (
                 <button 
                   onClick={generateServiceKey}
-                  className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors"
+                  className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors shadow-lg"
                 >
                   Generate New Service Key
                 </button>
@@ -302,7 +323,7 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => setStep(3)}
-                    className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-500 transition-colors"
+                    className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-500 transition-colors shadow-lg"
                   >
                     I've Saved It, Continue
                   </button>
@@ -322,7 +343,7 @@ export default function App() {
                 <div className="flex items-start">
                   {torStatus?.running ? <CheckCircle className="w-5 h-5 text-green-500 mr-2 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-amber-500 mr-2 mt-0.5" />}
                   <div>
-                    <p className="font-medium">{torStatus?.running ? 'Tor is active' : 'Tor not detected'}</p>
+                    <p className="font-medium text-sm">{torStatus?.running ? 'Tor is active' : 'Tor not detected'}</p>
                     {!torStatus?.running && (
                       <p className="text-xs text-amber-200/70 mt-1">{torStatus?.recommendation}</p>
                     )}
@@ -336,7 +357,7 @@ export default function App() {
                   <input 
                     type="text" 
                     placeholder="wss://relay.yourdomain.com"
-                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm focus:border-blue-500 outline-none"
+                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm focus:border-blue-500 outline-none text-white font-mono"
                     onChange={(e) => setSetupData({
                       ...setupData,
                       config: { ...setupData.config, endpoints: [{ url: e.target.value, priority: 1 }] }
@@ -358,7 +379,7 @@ export default function App() {
                       />
                       <span className="text-xs font-medium">Private Mode</span>
                     </label>
-                    <p className="text-[10px] text-slate-500 mt-1">Hides endpoint in NCC-02</p>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">Encrypted locators for recipients.</p>
                   </div>
 
                   <div className="p-3 bg-slate-900 rounded border border-slate-700">
@@ -374,7 +395,7 @@ export default function App() {
                       />
                       <span className="text-xs font-medium">Auto-TLS</span>
                     </label>
-                    <p className="text-[10px] text-slate-500 mt-1">Generate self-signed cert</p>
+                    <p className="text-[10px] text-slate-500 mt-1 leading-tight">Generate self-signed cert.</p>
                   </div>
                 </div>
 
@@ -383,7 +404,7 @@ export default function App() {
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Authorized Recipients (npubs, comma separated)</label>
                     <textarea 
                       placeholder="npub1..., npub1..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs font-mono h-20 focus:border-blue-500 outline-none text-white"
+                      className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-[10px] font-mono h-20 focus:border-blue-500 outline-none text-white"
                       onChange={(e) => setSetupData({
                         ...setupData,
                         config: { 
@@ -397,11 +418,9 @@ export default function App() {
                 )}
               </div>
 
-
-
               <button 
                 onClick={completeSetup}
-                className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors"
+                className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-500 transition-colors shadow-lg"
               >
                 Complete Setup
               </button>
