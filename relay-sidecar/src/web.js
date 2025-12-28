@@ -3,9 +3,10 @@ import cors from '@fastify/cors';
 import staticFiles from '@fastify/static';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isInitialized, getConfig, setConfig, getLogs } from './db.js';
+import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin } from './db.js';
 import { checkTor } from './tor-check.js';
-import { generateKeypair, toNsec } from 'ncc-06-js';
+import { generateKeypair, toNsec, fromNpub } from 'ncc-06-js';
+import { sendInviteDM } from './dm.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,12 +31,48 @@ export async function startWebServer(initialPort = 3000) {
     }
     const { adminPubkey, serviceNsec, config } = request.body;
     
-    setConfig('admin_pubkey', adminPubkey);
+    addAdmin(adminPubkey, 'active');
     setConfig('service_nsec', serviceNsec);
     setConfig('app_config', config);
     
     return { success: true };
   });
+
+  server.get('/api/admins', async () => {
+    return getAdmins();
+  });
+
+  server.post('/api/admin/invite', async (request, reply) => {
+    const { npub, publicUrl } = request.body;
+    const pubkey = fromNpub(npub);
+    const serviceNsec = getConfig('service_nsec');
+    const appConfig = getConfig('app_config');
+    const serviceNpub = generateKeypair(fromNsec(serviceNsec)).npub; // Wait, we have SK
+
+    const inviteMsg = `You are invited to manage NCC-06 Sidecar for ${serviceNpub}. 
+Login here: ${publicUrl || 'http://' + request.headers.host}`;
+
+    const sent = await sendInviteDM({
+      secretKey: fromNsec(serviceNsec),
+      recipientPubkey: pubkey,
+      message: inviteMsg,
+      relays: appConfig.publication_relays || []
+    });
+
+    if (sent) {
+      addAdmin(pubkey, 'pending');
+      return { success: true };
+    } else {
+      return reply.code(500).send({ error: 'Failed to send DM' });
+    }
+  });
+
+  server.delete('/api/admin/:pubkey', async (request) => {
+    removeAdmin(request.params.pubkey);
+    return { success: true };
+  });
+
+
 
   server.get('/api/service/generate-key', async () => {
     const keys = generateKeypair();

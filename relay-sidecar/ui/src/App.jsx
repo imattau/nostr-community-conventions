@@ -9,7 +9,9 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [torStatus, setTorStatus] = useState(null);
-  
+  const [admins, setAdmins] = useState([]);
+  const [inviteNpub, setInviteNpub] = useState('');
+
   const [setupData, setSetupData] = useState({
     adminPubkey: '',
     serviceNsec: '',
@@ -31,7 +33,37 @@ export default function App() {
   useEffect(() => {
     checkStatus();
     checkTor();
-  }, []);
+    if (initialized) fetchAdmins();
+  }, [initialized]);
+
+  const fetchAdmins = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/admins`);
+      setAdmins(res.data);
+    } catch (e) {}
+  };
+
+  const inviteAdmin = async () => {
+    try {
+      await axios.post(`${API_BASE}/admin/invite`, {
+        npub: inviteNpub,
+        publicUrl: window.location.origin
+      });
+      setInviteNpub('');
+      fetchAdmins();
+      alert("Invite sent!");
+    } catch (e) {
+      alert("Failed to invite: " + e.message);
+    }
+  };
+
+  const removeAdmin = async (pubkey) => {
+    if (!confirm("Remove this admin?")) return;
+    try {
+      await axios.delete(`${API_BASE}/admin/${pubkey}`);
+      fetchAdmins();
+    } catch (e) {}
+  };
 
   const checkStatus = async () => {
     try {
@@ -99,6 +131,47 @@ export default function App() {
                 <p className="text-sm text-gray-600 font-medium">Tor Status</p>
                 <p className="text-sm">{torStatus?.running ? 'Connected' : 'Not Detected'}</p>
               </div>
+            </div>
+          </div>
+
+          <div className="mt-8 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <h2 className="text-xl font-semibold mb-4 flex items-center">
+              <Shield className="text-blue-500 mr-2" /> Manage Team
+            </h2>
+            
+            <div className="flex space-x-2 mb-6">
+              <input 
+                type="text" 
+                placeholder="npub1..."
+                value={inviteNpub}
+                onChange={(e) => setInviteNpub(e.target.value)}
+                className="flex-1 bg-gray-50 border border-gray-300 rounded p-2 text-sm focus:border-blue-500 outline-none"
+              />
+              <button 
+                onClick={inviteAdmin}
+                className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold hover:bg-blue-700"
+              >
+                Send Invite
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {admins.map(admin => (
+                <div key={admin.pubkey} className="flex items-center justify-between p-3 bg-gray-50 rounded border border-gray-200">
+                  <div>
+                    <p className="font-mono text-xs text-gray-600 truncate max-w-xs">{admin.pubkey}</p>
+                    <span className={`text-[10px] uppercase font-bold ${admin.status === 'active' ? 'text-green-600' : 'text-amber-600'}`}>
+                      {admin.status}
+                    </span>
+                  </div>
+                  <button 
+                    onClick={() => removeAdmin(admin.pubkey)}
+                    className="text-red-600 hover:text-red-800 text-xs font-medium"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
