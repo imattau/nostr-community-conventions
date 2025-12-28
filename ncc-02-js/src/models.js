@@ -5,7 +5,7 @@ import { hexToBytes } from 'nostr-tools/utils';
  * NCC-02 Nostr Event Kinds
  */
 export const KINDS = {
-  SERVICE_RECORD: 300059,
+  SERVICE_RECORD: 30059,
   ATTESTATION: 30060,
   REVOCATION: 30061
 };
