@@ -17,6 +17,7 @@ export default function App() {
   const [loginMode, setLoginMode] = useState('nip07');
   const [nip46Uri, setNip46Uri] = useState('');
   const [tempSk, setTempSk] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('idle');
 
   const [setupData, setSetupData] = useState({
     adminPubkey: '',
@@ -106,18 +107,19 @@ export default function App() {
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
     const pool = new SimplePool();
-    const relay = 'wss://relay.damus.io';
+    const relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
     
     setTempSk(sk);
+    setConnectionStatus('listening');
     const metadata = { name: 'NCC-06 Sidecar', description: 'Nostr Service Discovery Agent' };
-    const uri = `nostrconnect://${pk}?relay=${encodeURIComponent(relay)}&metadata=${encodeURIComponent(JSON.stringify(metadata))}`;
+    const uri = `nostrconnect://${pk}?relay=${encodeURIComponent(relays[0])}&metadata=${encodeURIComponent(JSON.stringify(metadata))}`;
     
     setNip46Uri(uri);
     setLoginMode('nip46');
 
-    console.log("[NIP-46] Listening for connection on", relay);
+    console.log("[NIP-46] Listening for connection on", relays);
 
-    const sub = pool.subscribeMany([relay], [{
+    const sub = pool.subscribeMany(relays, [{
       kinds: [24133],
       '#p': [pk]
     }], {
@@ -130,8 +132,9 @@ export default function App() {
           if (response.method === 'connect' || response.result) {
             console.log("[NIP-46] Connected! Admin Pubkey:", event.pubkey);
             setSetupData(prev => ({ ...prev, adminPubkey: event.pubkey }));
+            setConnectionStatus('connected');
             sub.close();
-            pool.close([relay]);
+            pool.close(relays);
             setStep(2);
           }
         } catch (e) {
@@ -286,14 +289,36 @@ export default function App() {
                     <QRCodeSVG value={nip46Uri} size={180} />
                   </div>
                   <div className="text-center space-y-2">
-                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Connection URI</p>
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${connectionStatus === 'listening' ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
+                      <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">
+                        {connectionStatus === 'listening' ? 'Waiting for Signer...' : 'Connected'}
+                      </p>
+                    </div>
                     <code className="block p-2 bg-slate-900 rounded border border-slate-700 text-[10px] break-all font-mono text-blue-300 select-all cursor-pointer">
                       {nip46Uri}
                     </code>
                   </div>
-                  <div className="pt-2 border-t border-slate-700">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 text-center">Waiting for Amber/Signer...</label>
-                    <p className="text-[10px] text-slate-400 text-center italic">Scan the QR code and approve the connection. Step 2 will begin automatically.</p>
+                  
+                  <div className="pt-4 border-t border-slate-700">
+                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2 text-center">Manual Fallback</p>
+                    <div className="flex space-x-2">
+                      <input 
+                        type="text" 
+                        placeholder="Paste your hex pubkey if not auto-detected"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-[10px] focus:border-blue-500 outline-none text-white font-mono"
+                        onKeyDown={(e) => { if(e.key === 'Enter') handleNIP46Complete(e.target.value); }}
+                      />
+                      <button 
+                        onClick={(e) => {
+                          const input = e.currentTarget.previousSibling.value;
+                          if (input) handleNIP46Complete(input);
+                        }}
+                        className="bg-slate-700 px-3 py-1 rounded text-[10px] font-bold"
+                      >
+                        Go
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
