@@ -34,7 +34,7 @@ declare module 'ncc-06-js' {
     type?: string;
     uri?: string;
     value?: string;
-    protocol?: 'ws' | 'wss';
+    protocol?: string;
     family?: 'ipv4' | 'ipv6' | 'onion' | string;
     priority?: number;
     prio?: number;
@@ -65,6 +65,7 @@ declare module 'ncc-06-js' {
   export interface SelectorOptions {
     torPreferred?: boolean;
     expectedK?: string;
+    allowedProtocols?: string[];
   }
   export interface SelectorResult {
     endpoint: LocatorEndpoint | null;
@@ -78,6 +79,15 @@ declare module 'ncc-06-js' {
   ): SelectorResult;
   export { normalizeLocatorEndpoints };
 
+  export interface ResolvedService {
+    endpoint?: string;
+    fingerprint?: string;
+    expiry: number;
+    attestations: any[];
+    eventId: string;
+    pubkey: string;
+  }
+
   export interface ResolverOptions {
     bootstrapRelays: string[];
     servicePubkey: string;
@@ -88,11 +98,8 @@ declare module 'ncc-06-js' {
     locatorSecretKey?: string;
     ncc05TimeoutMs?: number;
     publicationRelayTimeoutMs?: number;
-    queryRelayEvents?: (
-      relays: string[],
-      filter: Record<string, unknown>,
-      options?: { timeoutMs?: number }
-    ) => Promise<NostrEvent[]>;
+    pool?: any;
+    ncc02Resolver?: any;
     resolveLocator?: (options: {
       bootstrapRelays: string[];
       servicePubkey: string;
@@ -100,7 +107,6 @@ declare module 'ncc-06-js' {
       locatorSecretKey?: string;
       timeout?: number;
     }) => Promise<LocatorPayload | null>;
-    throttle?: unknown;
     now?: number;
   }
   export interface ResolverSelection {
@@ -113,7 +119,7 @@ declare module 'ncc-06-js' {
     endpoint: string | null;
     source: 'locator' | 'ncc02' | null;
     locatorPayload: LocatorPayload | null;
-    serviceEvent: NostrEvent;
+    serviceRecord: ResolvedService;
     selection: ResolverSelection;
   }
   export function resolveServiceEndpoint(options: ResolverOptions): Promise<ResolverResult>;
@@ -179,14 +185,14 @@ declare module 'ncc-06-js' {
     };
     ipv4?: {
       enabled?: boolean;
-      protocol?: 'ws' | 'wss';
+      protocol?: string;
       port?: number;
       address?: string;
       publicSources?: string[];
     };
     ipv6?: {
       enabled?: boolean;
-      protocol?: 'ws' | 'wss';
+      protocol?: string;
       port?: number;
     };
     wsPort?: number;
@@ -198,75 +204,58 @@ declare module 'ncc-06-js' {
   export function buildExternalEndpoints(options?: ExternalEndpointOptions): Promise<LocatorEndpoint[]>;
   export function detectGlobalIPv6(): string | null;
   export function getPublicIPv4(options?: { sources?: string[] }): Promise<string | null>;
+  export function normalizeRelayUrl(url: string): string;
+  export function normalizeRelays(relays: string[]): string[];
 
   export interface SidecarConfigOptions {
-    serviceSk: string;
-    servicePk: string;
-    serviceNpub: string;
-    relayUrl: string;
+    secretKey: string;
+    serviceUrl?: string;
+    relayUrl?: string;
     serviceId?: string;
     locatorId?: string;
     publicationRelays?: string[];
     publishRelays?: string[];
-    ncc02ExpSeconds?: number;
-    ncc05TtlSeconds?: number;
-    torControl?: Record<string, unknown>;
-    externalEndpoints?: Record<string, unknown>;
-    k?: KConfig;
-    baseDir?: string;
+    persistPath?: string;
+    certPath?: string;
     relayMode?: 'public' | 'private';
-    ncc02ExpectedKeySource?: string;
+    serviceMode?: 'public' | 'private';
   }
   export interface SidecarConfig {
-    serviceSk: string;
-    servicePk: string;
-    serviceNpub: string;
+    secretKey: string;
+    serviceUrl: string;
     relayUrl: string;
     serviceId: string;
     locatorId: string;
     publicationRelays: string[];
     publishRelays: string[];
-    ncc02ExpSeconds: number;
-    ncc05TtlSeconds: number;
-    ncc02ExpectedKey: string;
-    ncc02ExpectedKeySource: string;
-    externalEndpoints: Record<string, unknown>;
-    torControl: Record<string, unknown>;
-    k: KConfig;
+    persistPath?: string;
+    certPath?: string;
     relayMode: 'public' | 'private';
+    serviceMode: 'public' | 'private';
   }
   export function buildSidecarConfig(options: SidecarConfigOptions): SidecarConfig;
-  export function getRelayMode(config?: { relayMode?: string }): 'public' | 'private';
+  export function getRelayMode(config?: { relayMode?: string, serviceMode?: string }): 'public' | 'private';
   export function setRelayMode(config?: Record<string, unknown>, mode: 'public' | 'private'): Record<string, unknown>;
 
   export interface ClientConfigOptions {
-    relayUrl: string;
-    servicePubkey?: string;
-    serviceNpub?: string;
     serviceIdentityUri?: string;
-    locatorSecretKey?: string;
-    locatorFriendPubkey?: string;
+    serviceNpub?: string;
+    servicePubkey?: string;
+    serviceUrl?: string;
+    relayUrl?: string;
     publicationRelays?: string[];
-    staleFallbackSeconds?: number;
-    torPreferred?: boolean;
-    ncc05TimeoutMs?: number;
     serviceId?: string;
     locatorId?: string;
-    expectedK?: string;
+    ncc02ExpectedKey?: string;
   }
   export interface ClientConfig {
-    relayUrl: string;
     serviceIdentityUri: string;
     servicePubkey: string;
-    serviceNpub: string;
+    serviceUrl: string;
+    relayUrl: string;
     publicationRelays: string[];
-    staleFallbackSeconds: number;
-    torPreferred: boolean;
-    ncc05TimeoutMs: number;
-    locatorSecretKey?: string;
-    locatorFriendPubkey?: string;
-    serviceId?: string;
-    locatorId?: string;
+    serviceId: string;
+    locatorId: string;
     ncc02ExpectedKey?: string;
   }
   export function buildClientConfig(options: ClientConfigOptions): ClientConfig;

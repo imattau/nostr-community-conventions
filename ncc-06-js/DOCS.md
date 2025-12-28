@@ -43,28 +43,29 @@ Utilities for locator payload construction and evaluation.
 
 ## NCC-06 helpers
 
-### `choosePreferredEndpoint(endpoints, { torPreferred?, expectedK? })`
-- Applies NCC-06 policy: prefer `wss://` with matching `k`, favor onion if `torPreferred`, fall back to any `ws://`.
+### `choosePreferredEndpoint(endpoints, { torPreferred?, expectedK?, allowedProtocols? })`
+- Applies NCC-06 policy: favors onion if `torPreferred`, filters by `allowedProtocols` (default: `['wss', 'ws']`), and validates `k` fingerprints for secure protocols (`wss`, `https`, `tls`, etc).
 - Returns `{ endpoint?: NormalizedEndpoint, reason?: string, expected?, actual? }`.
 
 ### `resolveServiceEndpoint(options)`
 - Orchestrates resolution by querying bootstrap relays, preferring NCC-05 locators, and falling back to NCC-02 records.
-- **Options** include `bootstrapRelays`, `servicePubkey`, `serviceId`, `locatorId`, `expectedK`, `locatorSecretKey`, `torPreferred`, timeouts, and override hooks.
-- **Returns** `{ endpoint, source, serviceEvent, locatorPayload, selection }`.
+- **Options** include `bootstrapRelays`, `servicePubkey`, `serviceId`, `locatorId`, `expectedK`, `locatorSecretKey`, `torPreferred`, `allowedProtocols`, timeouts, and override hooks.
+- **Returns** `{ endpoint, source, serviceRecord, locatorPayload, selection }`.
 
 ## Sidecar config helpers
 
 ### `buildSidecarConfig(options)`
-- Mirrors the example sidecar setup and derives `ncc02ExpectedKey`, `publishRelays`, and `torControl` from operator intent so you do not need to duplicate those scripts.
+- Mirrors the example sidecar setup and derives `ncc02ExpectedKey`, `publishRelays`, and `torControl` from operator intent.
+- Supports `serviceUrl` and `serviceMode` as aliases for `relayUrl` and `relayMode`.
 
 ### `getRelayMode(config)`
-- Returns the normalized `"public"` or `"private"` mode that drives whether the sidecar publishes NCC-05 locators.
+- Returns the normalized `"public"` or `"private"` mode based on `relayMode` or `serviceMode`.
 
 ### `setRelayMode(config, mode)`
-- Normalizes and writes `"public"` or `"private"` back into the config object so you can persistively toggle the relay’s exposure level.
+- Normalizes and writes `"public"` or `"private"` back into the config object (setting both `relayMode` and `serviceMode`).
 
 ### `buildClientConfig(options)`
-- Rehydrates the minimal client config that the example resolver expects; dedupes publication relays, enforces `serviceIdentityUri`, and carries the `expectedK` for NCC-02 pinning.
+- Rehydrates the minimal client config that the example resolver expects. Supports `serviceUrl` as alias for `relayUrl`.
 
 ## Key and TLS helpers
 
