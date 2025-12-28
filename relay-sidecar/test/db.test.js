@@ -1,7 +1,7 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
 import fs from 'fs';
-import { initDb, getConfig, setConfig, isInitialized, addLog, getLogs } from '../src/db.js';
+import { initDb, getConfig, setConfig, isInitialized, addLog, getLogs, addAdmin } from '../src/db.js';
 
 const TEST_DB = './test-sidecar.db';
 
@@ -20,7 +20,7 @@ test('Database Operations', async (t) => {
   });
 
   await t.test('isInitialized returns true after admin set', () => {
-    setConfig('admin_pubkey', 'pubkey');
+    addAdmin('pubkey', 'active');
     assert.strictEqual(isInitialized(), true);
   });
 
