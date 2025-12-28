@@ -21,7 +21,10 @@ export default function App() {
       publication_relays: ['wss://relay.damus.io'],
       refresh_interval_minutes: 360,
       ncc02_expiry_days: 3,
-      ncc05_ttl_hours: 12
+      ncc05_ttl_hours: 12,
+      authorized_recipients: [],
+      service_mode: 'public',
+      generate_self_signed: false
     }
   });
 
@@ -226,7 +229,26 @@ export default function App() {
                     <p className="text-[10px] text-slate-500 mt-1">Generate self-signed cert</p>
                   </div>
                 </div>
+
+                {setupData.config.service_mode === 'private' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Authorized Recipients (npubs, comma separated)</label>
+                    <textarea 
+                      placeholder="npub1..., npub1..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs font-mono h-20 focus:border-blue-500 outline-none text-white"
+                      onChange={(e) => setSetupData({
+                        ...setupData,
+                        config: { 
+                          ...setupData.config, 
+                          authorized_recipients: e.target.value.split(',').map(s => s.trim()).filter(Boolean) 
+                        }
+                      })}
+                    />
+                    <p className="text-[10px] text-blue-400 mt-1 italic">If empty, only the service owner can decrypt.</p>
+                  </div>
+                )}
               </div>
+
 
 
               <button 

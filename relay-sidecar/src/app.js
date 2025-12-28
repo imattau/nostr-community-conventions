@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { scheduleWithJitter, ensureSelfSignedCert } from 'ncc-06-js';
+import { scheduleWithJitter, ensureSelfSignedCert, fromNpub } from 'ncc-06-js';
+import { NCC05Publisher } from 'ncc-05-js';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
@@ -25,7 +26,7 @@ export async function runPublishCycle(config, state) {
   const inventory = await buildInventory(config.endpoints);
   const inventoryHash = crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
 
-  // 2. Build Records
+  // 2. Build Records (Base templates)
   const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords(config, inventory);
 
   // 3. Change Detection
@@ -41,14 +42,53 @@ export async function runPublishCycle(config, state) {
 
   console.log(`[App] Publishing records (${isChanged ? 'Change detected' : 'Interval reached'})...`);
 
-  // 4. Publish
-  const relays = [...new Set(config.publicationRelays)];
-  const publishResults = await publishToRelays(relays, [ncc02Event, ncc05EventTemplate], config.secretKey);
+  // 4. Advanced NCC-05 Logic (Privacy)
+  const isPrivate = config.service_mode === 'private';
+  const recipients = (config.authorized_recipients || [])
+    .map(r => {
+      try { return r.startsWith('npub1') ? fromNpub(r) : r; }
+      catch (e) { return null; }
+    })
+    .filter(Boolean);
 
-  // 5. Update State
+  const publicationRelays = [...new Set(config.publicationRelays)];
+  let finalNcc05Event = ncc05EventTemplate;
+
+  if (isPrivate && recipients.length > 0) {
+    console.log(`[App] Encrypting locator for ${recipients.length} recipients...`);
+    const ncc05Publisher = new NCC05Publisher();
+    try {
+      // We use the library to build the encrypted/wrapped event but publish via our local publisher
+      // to maintain our "local-first" delivery strategy and SQLite logging.
+      if (recipients.length === 1) {
+        // Targeted NIP-44
+        finalNcc05Event = await ncc05Publisher.publish([], config.secretKey, locatorPayload, {
+          identifier: config.locatorId,
+          recipientPubkey: recipients[0],
+          privateLocator: true
+        });
+      } else {
+        // Group Wrapped
+        finalNcc05Event = await ncc05Publisher.publishWrapped([], config.secretKey, recipients, locatorPayload, {
+          identifier: config.locatorId,
+          privateLocator: true
+        });
+      }
+      addLog('info', 'Encrypted NCC-05 locator built', { recipients: recipients.length });
+    } catch (err) {
+      addLog('error', `Failed to encrypt locator: ${err.message}`);
+      // Fallback to the plaintext template (or we could abort)
+    }
+  }
+
+  // 5. Delivery
+  const publishResults = await publishToRelays(publicationRelays, [ncc02Event, finalNcc05Event], config.secretKey);
+
+  // 6. Update State
   const newState = {
     ...state,
     last_published_ncc02_id: ncc02Event.id,
+    last_published_ncc05_id: finalNcc05Event.id,
     last_endpoints_hash: inventoryHash,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now
@@ -59,6 +99,7 @@ export async function runPublishCycle(config, state) {
   
   return newState;
 }
+
 
 
 export function startScheduler(config, state) {
