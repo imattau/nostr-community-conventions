@@ -1,4 +1,5 @@
 import { finalizeEvent, getPublicKey, validateEvent, verifyEvent } from 'nostr-tools/pure';
+import { NCC02Builder } from 'ncc-02-js';
 
 const DEFAULT_KIND = 30059;
 
@@ -19,22 +20,31 @@ export function buildNcc02ServiceRecord({
   if (!secretKey) {
     throw new Error('secretKey is required to build NCC-02 records');
   }
-  const timestamp = createdAt ?? Math.floor(Date.now() / 1000);
-  const expiresAt = timestamp + Number(expirySeconds);
-  const tags = [
-    ['d', serviceId],
-    ['u', endpoint],
-    ['k', fingerprint],
-    ['exp', expiresAt.toString()]
-  ];
-  const event = {
-    kind,
-    pubkey: getPublicKey(secretKey),
-    created_at: timestamp,
-    tags,
-    content: ''
-  };
-  return finalizeEvent(event, secretKey);
+
+  const builder = new NCC02Builder(secretKey);
+  // NCC02Builder expects days.
+  const expiryDays = expirySeconds / (24 * 60 * 60);
+  
+  const event = builder.createServiceRecord({
+    serviceId,
+    endpoint,
+    fingerprint,
+    expiryDays
+  });
+
+  // If createdAt or kind override is needed, we must re-sign.
+  if (createdAt || kind !== DEFAULT_KIND) {
+    const template = {
+      ...event,
+      created_at: createdAt ?? event.created_at,
+      kind: kind ?? event.kind,
+      id: undefined,
+      sig: undefined
+    };
+    return finalizeEvent(template, secretKey);
+  }
+
+  return event;
 }
 
 /**

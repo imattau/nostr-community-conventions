@@ -1,31 +1,23 @@
 import { test } from 'node:test';
 import { strict as assert } from 'assert';
 import { resolveServiceEndpoint } from '../src/resolver.js';
-import { buildNcc02ServiceRecord } from '../src/ncc02.js';
 import { buildLocatorPayload } from '../src/ncc05.js';
 import { generateKeypair } from '../src/keys.js';
 
 const SERVICE_ID = 'relay';
 const LOCATOR_ID = 'relay-locator';
 
-function buildServiceEvent({ secretKey, serviceId, endpoint, fingerprint }) {
-  return buildNcc02ServiceRecord({
-    secretKey,
-    serviceId,
-    endpoint,
-    fingerprint,
-    expirySeconds: 60
-  });
-}
-
 test('resolver prefers NCC-05 endpoint when k matches', async () => {
-  const { secretKey, publicKey } = generateKeypair();
-  const serviceEvent = buildServiceEvent({
-    secretKey,
-    serviceId: SERVICE_ID,
+  const { publicKey } = generateKeypair();
+  const mockServiceRecord = {
     endpoint: 'wss://fallback',
-    fingerprint: 'TESTKEY:match'
-  });
+    fingerprint: 'TESTKEY:match',
+    expiry: Math.floor(Date.now() / 1000) + 60,
+    attestations: [],
+    eventId: 'mock-id',
+    pubkey: publicKey
+  };
+
   const locatorPayload = buildLocatorPayload({
     ttl: 60,
     endpoints: [
@@ -39,7 +31,7 @@ test('resolver prefers NCC-05 endpoint when k matches', async () => {
     serviceId: SERVICE_ID,
     locatorId: LOCATOR_ID,
     expectedK: 'TESTKEY:match',
-    queryRelayEvents: async () => [serviceEvent],
+    ncc02Resolver: { resolve: async () => mockServiceRecord },
     resolveLocator: async () => locatorPayload
   });
 
@@ -48,13 +40,16 @@ test('resolver prefers NCC-05 endpoint when k matches', async () => {
 });
 
 test('resolver falls back to NCC-02 when locator k mismatches', async () => {
-  const { secretKey, publicKey } = generateKeypair();
-  const serviceEvent = buildServiceEvent({
-    secretKey,
-    serviceId: SERVICE_ID,
+  const { publicKey } = generateKeypair();
+  const mockServiceRecord = {
     endpoint: 'wss://fallback',
-    fingerprint: 'TESTKEY:match'
-  });
+    fingerprint: 'TESTKEY:match',
+    expiry: Math.floor(Date.now() / 1000) + 60,
+    attestations: [],
+    eventId: 'mock-id',
+    pubkey: publicKey
+  };
+
   const locatorPayload = buildLocatorPayload({
     ttl: 60,
     endpoints: [
@@ -68,7 +63,7 @@ test('resolver falls back to NCC-02 when locator k mismatches', async () => {
     serviceId: SERVICE_ID,
     locatorId: LOCATOR_ID,
     expectedK: 'TESTKEY:match',
-    queryRelayEvents: async () => [serviceEvent],
+    ncc02Resolver: { resolve: async () => mockServiceRecord },
     resolveLocator: async () => locatorPayload
   });
 
