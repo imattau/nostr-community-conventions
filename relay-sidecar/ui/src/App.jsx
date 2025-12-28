@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Shield, Key, Globe, Settings, CheckCircle, AlertTriangle, Cpu, Smartphone } from 'lucide-react';
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { nip19 } from 'nostr-tools';
+import { QRCodeSVG } from 'qrcode.react';
 
-const API_BASE = 'http://127.0.0.1:3000/api';
+const API_BASE = '/api';
 
 export default function App() {
   const [initialized, setInitialized] = useState(null);
@@ -11,6 +14,8 @@ export default function App() {
   const [torStatus, setTorStatus] = useState(null);
   const [admins, setAdmins] = useState([]);
   const [inviteNpub, setInviteNpub] = useState('');
+  const [loginMode, setLoginMode] = useState('nip07');
+  const [nip46Uri, setNip46Uri] = useState('');
 
   const [setupData, setSetupData] = useState({
     adminPubkey: '',
@@ -87,7 +92,35 @@ export default function App() {
       alert("NIP-07 extension (like Alby or Nos2x) not found.");
       return;
     }
-    const pubkey = await window.nostr.getPublicKey();
+    try {
+      const pubkey = await window.nostr.getPublicKey();
+      setSetupData({ ...setupData, adminPubkey: pubkey });
+      setStep(2);
+    } catch (e) {
+      alert("Login failed: " + e.message);
+    }
+  };
+
+  const startNIP46 = () => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const metadata = { name: 'NCC-06 Sidecar' };
+    const relay = 'wss://relay.damus.io';
+    const uri = `nostrconnect://${pk}?relay=${encodeURIComponent(relay)}&metadata=${encodeURIComponent(JSON.stringify(metadata))}`;
+    
+    setNip46Uri(uri);
+    setLoginMode('nip46');
+  };
+
+  const handleNIP46Complete = (input) => {
+    let pubkey = input;
+    if (input.startsWith('npub1')) {
+      try { pubkey = nip19.decode(input).data; } catch (e) { alert("Invalid npub"); return; }
+    }
+    if (!pubkey.match(/^[a-f0-9]{64}$/)) {
+      alert("Invalid hex pubkey");
+      return;
+    }
     setSetupData({ ...setupData, adminPubkey: pubkey });
     setStep(2);
   };
@@ -189,18 +222,60 @@ export default function App() {
 
         <div className="p-8">
           {step === 1 && (
-            <div className="space-y-6 text-center">
+            <div className="space-y-6">
               <Shield className="w-16 h-16 mx-auto text-blue-400" />
-              <div>
+              <div className="text-center">
                 <h2 className="text-xl font-semibold">Welcome Administrator</h2>
                 <p className="text-slate-400 text-sm mt-2">Connect your personal Nostr identity to manage this sidecar.</p>
               </div>
-              <button 
-                onClick={connectNIP07}
-                className="w-full bg-white text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center"
-              >
-                Login with NIP-07 Extension
-              </button>
+
+              <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700">
+                <button 
+                  onClick={() => setLoginMode('nip07')}
+                  className={`flex-1 flex items-center justify-center py-2 px-3 rounded-lg text-xs font-bold transition-all ${loginMode === 'nip07' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  <Cpu className="w-3 h-3 mr-2" /> Extension (NIP-07)
+                </button>
+                <button 
+                  onClick={() => { setLoginMode('nip46'); if(!nip46Uri) startNIP46(); }}
+                  className={`flex-1 flex items-center justify-center py-2 px-3 rounded-lg text-xs font-bold transition-all ${loginMode === 'nip46' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  <Smartphone className="w-3 h-3 mr-2" /> Remote (NIP-46)
+                </button>
+              </div>
+
+              {loginMode === 'nip07' ? (
+                <button 
+                  onClick={connectNIP07}
+                  className="w-full bg-white text-slate-900 font-bold py-3 px-4 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center"
+                >
+                  Login with Extension
+                </button>
+              ) : (
+                <div className="space-y-6">
+                  <div className="bg-white p-4 rounded-xl flex justify-center shadow-inner">
+                    <QRCodeSVG value={nip46Uri} size={180} />
+                  </div>
+                  <div className="text-center space-y-2">
+                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Connection URI</p>
+                    <code className="block p-2 bg-slate-900 rounded border border-slate-700 text-[10px] break-all font-mono text-blue-300 select-all cursor-pointer">
+                      {nip46Uri}
+                    </code>
+                  </div>
+                  <div className="pt-2 border-t border-slate-700">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Paste your pubkey after connecting</label>
+                    <div className="flex space-x-2">
+                      <input 
+                        type="text" 
+                        placeholder="hex or npub..."
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-xs focus:border-blue-500 outline-none text-white"
+                        onKeyDown={(e) => { if(e.key === 'Enter') handleNIP46Complete(e.target.value); }}
+                        onBlur={(e) => { if(e.target.value) handleNIP46Complete(e.target.value); }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

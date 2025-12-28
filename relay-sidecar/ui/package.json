@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "nostr-tools": "^2.19.4",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
