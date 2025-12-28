@@ -105,8 +105,9 @@ The package exposes modular helpers so you can keep using your own transport sta
 
 - `k` is the binding between NCC-02/NCC-05 records and the transport-level key (TLS/SPKI) that serves the endpoint.
 - This applies to **any secure protocol** (`wss://`, `https://`, `tls://`, `tcps://`).
-- Clients connect (potentially with `rejectUnauthorized=false` for self-signed certs) and enforce trust by comparing the published `k` value to the expected fingerprint before using the endpoint.
-- When migrating to CA-signed certificates or real SPKI pins, update the sidecar to publish the real fingerprint via `ncc02ExpectedKey` and update the resolver’s `expectedK`. The shared helpers keep the rest of the resolution flow untouched.
+- **Trust Model:** This mimics DANE: the `k` tag pins the expected SPKI fingerprint of the endpoint's certificate.
+- **Self-Signed vs CA:** You can use **self-signed certificates** or CA-signed ones. The security comes from the NCC record's signature (the Identity) pinning the transport key, not from a centralized CA.
+- **Verification:** The shared helpers compare the endpoint's actual fingerprint against the published `k` value. This allows clients to securely connect to self-signed endpoints without security warnings, provided the NCC record is valid.
 
 ## Reference Docs
 
