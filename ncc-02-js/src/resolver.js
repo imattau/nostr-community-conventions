@@ -43,7 +43,7 @@ export class NCC02Resolver {
    */
   constructor(relays, options = {}) {
     if (!Array.isArray(relays)) {
-       throw new Error("NCC02Resolver expects an array of relay URLs.");
+      throw new Error('NCC02Resolver expects an array of relay URLs.');
     }
     this.relays = relays;
     this.pool = options.pool || new SimplePool();
@@ -57,16 +57,16 @@ export class NCC02Resolver {
    * @returns {Promise<import('nostr-tools').Event[]>}
    */
   async _query(filter) {
-      return new Promise((resolve) => {
-          /** @type {import('nostr-tools').Event[]} */
-          const events = [];
-          // subscribeMany(relays, filters, callbacks)
-          // @ts-ignore - subscribeMany filters parameter type mismatch with simple Object
-          const sub = this.pool.subscribeMany(this.relays, [filter], {
-              onevent(e) { events.push(e); },
-              oneose() { sub.close(); resolve(events); }
-          });
+    return new Promise((resolve) => {
+      /** @type {import('nostr-tools').Event[]} */
+      const events = [];
+      // subscribeMany(relays, filters, callbacks)
+      // @ts-ignore - subscribeMany filters parameter type mismatch with simple Object
+      const sub = this.pool.subscribeMany(this.relays, [filter], {
+        onevent(e) { events.push(e); },
+        oneose() { sub.close(); resolve(events); }
       });
+    });
   }
 
   /**
@@ -117,8 +117,13 @@ export class NCC02Resolver {
     const now = Math.floor(Date.now() / 1000);
 
     // Security Fix: exp is REQUIRED by NCC-02 spec
-    if (!serviceTags.u || !serviceTags.k || !serviceTags.exp) {
-      throw new NCC02Error('MALFORMED_RECORD', 'Service record is missing required tags (u, k, or exp)');
+    if (!serviceTags.exp) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record is missing required tag (exp)');
+    }
+    
+    // 'k' is required for TLS-based endpoints
+    if (serviceTags.u && (serviceTags.u.startsWith('wss://') || serviceTags.u.startsWith('https://')) && !serviceTags.k) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record with \'https\' or \'wss\' endpoint must have a \'k\' tag');
     }
 
     const exp = parseInt(serviceTags.exp);

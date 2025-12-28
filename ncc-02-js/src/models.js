@@ -5,7 +5,7 @@ import { hexToBytes } from 'nostr-tools/utils';
  * NCC-02 Nostr Event Kinds
  */
 export const KINDS = {
-  SERVICE_RECORD: 30059,
+  SERVICE_RECORD: 300059,
   ATTESTATION: 30060,
   REVOCATION: 30061
 };
@@ -34,19 +34,19 @@ export class NCC02Builder {
   createServiceRecord(options) {
     const { serviceId, endpoint, fingerprint, expiryDays = 14 } = options;
     if (!serviceId) throw new Error('serviceId (d tag) is required');
-    if (!endpoint) throw new Error('endpoint (u tag) is required');
-    if (!fingerprint) throw new Error('fingerprint (k tag) is required');
 
     const expiry = Math.floor(Date.now() / 1000) + (expiryDays * 24 * 60 * 60);
+    const tags = [
+      ['d', serviceId],
+      ['exp', expiry.toString()]
+    ];
+    if(endpoint) tags.push(['u', endpoint]);
+    if(fingerprint) tags.push(['k', fingerprint]);
+
     const event = {
       kind: KINDS.SERVICE_RECORD,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', serviceId],
-        ['u', endpoint],
-        ['k', fingerprint],
-        ['exp', expiry.toString()]
-      ],
+      tags: tags,
       content: `NCC-02 Service Record for ${serviceId}`,
       pubkey: this.pk
     };

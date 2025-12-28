@@ -126,19 +126,34 @@ async function runTests() {
   }
 
   // --- 7. Robustness: Malformed Data ---
-  console.log('Test: Malformed record (missing tags)...');
+  console.log('Test: Malformed record (missing exp tag)...');
   const brokenEvent = builder.createServiceRecord({
     serviceId: 'broken',
     endpoint: 'https://b.io',
     fingerprint: 'fp'
   });
-  brokenEvent.tags = brokenEvent.tags.filter(t => t[0] !== 'u');
+  brokenEvent.tags = brokenEvent.tags.filter(t => t[0] !== 'exp');
   const signedBroken = finalizeEvent(brokenEvent, ownerSk);
   await relay.publish(signedBroken);
   try {
     await resolver.resolve(ownerPk, 'broken');
   } catch (e) {
-    if (e.code === 'MALFORMED_RECORD') console.log('✅ Passed (Detected missing URI)');
+    if (e.code === 'MALFORMED_RECORD') console.log('✅ Passed (Detected missing exp)');
+    else throw e;
+  }
+
+  console.log('Test: Malformed record (https with missing k)...');
+  const brokenEvent2 = builder.createServiceRecord({
+    serviceId: 'broken2',
+    endpoint: 'https://b.io'
+  });
+  brokenEvent2.tags = brokenEvent2.tags.filter(t => t[0] !== 'k');
+  const signedBroken2 = finalizeEvent(brokenEvent2, ownerSk);
+  await relay.publish(signedBroken2);
+  try {
+    await resolver.resolve(ownerPk, 'broken2');
+  } catch (e) {
+    if (e.code === 'MALFORMED_RECORD') console.log('✅ Passed (Detected missing k)');
     else throw e;
   }
 
@@ -187,7 +202,6 @@ async function runTests() {
   });
   await relay.publish(secureAtt);
 
-  // Manually construct a fake revocation event that is NOT processed by finalizeEvent (to avoid cache)
   const spoofedRev = {
     kind: 30061,
     created_at: Math.floor(Date.now() / 1000),
@@ -212,7 +226,6 @@ async function runTests() {
   const revEvent = caBuilder.createRevocation({ attestationId: secureAtt.id, reason: 'Key compromised' });
   await relay.publish(revEvent);
   
-  // Case A: Attestation required -> should fail
   try {
     await resolver.resolve(ownerPk, secureId, { requireAttestation: true });
     throw new Error('Should have failed due to revoked attestation');
@@ -220,12 +233,26 @@ async function runTests() {
     if (e.code !== 'POLICY_FAILURE') throw e;
   }
 
-  // Case B: Attestation optional -> should succeed but with 0 attestations
   const resRevoked = await resolver.resolve(ownerPk, secureId, { requireAttestation: false });
   if (resRevoked && resRevoked.attestations.length === 0) {
     console.log('✅ Passed (Valid revocation honored)');
   } else {
     throw new Error('Resolver failed to honor valid revocation');
+  }
+
+  // --- 11. Private / Invite-Only Services (No `u` tag)
+  console.log('Test: Private service (no `u` tag)...');
+  const privateEvent = builder.createServiceRecord({
+    serviceId: 'private-api',
+    fingerprint: 'fp_private'
+  });
+  await relay.publish(privateEvent);
+  
+  const resPrivate = await resolver.resolve(ownerPk, 'private-api');
+  if (resPrivate.endpoint === undefined && resPrivate.fingerprint === 'fp_private') {
+    console.log('✅ Passed');
+  } else {
+    throw new Error('Failed to resolve private service record correctly.');
   }
 
   console.log('\n--- All comprehensive tests passed! ---');
