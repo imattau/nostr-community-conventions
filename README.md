@@ -1,9 +1,20 @@
-# ncc-05-js: Identity-Bound Service Locator Resolution
+# NCC-05: Identity-Bound Service Locator Resolution
 
 **Status:** Draft  
 **Category:** Discovery / Resolution  
 **Author(s):** lostcause  
 **Supersedes:** None
+
+**Related NCCs (Informative)**
+
+- NCC-02: May advertise service identities and intent; NCC-05 provides private reachability.
+
+- NCC-00: Publication and revision conventions.
+
+**Integration with NCC-02 (Informative)**
+
+NCC-02 may be used to publish public service records and trust material for a service identity. Clients MAY attempt NCC-05 resolution for the same service identity as a private override. If NCC-05 resolution succeeds and the record is fresh, clients SHOULD prefer the NCC-05 resolved endpoint for connection while continuing to apply any NCC-02 trust checks (eg endpoint key pinning) where applicable.
+
 
 ---
 
@@ -28,14 +39,15 @@ NCC-05 primarily addresses the problem of **privately resolving dynamic `ip:port
 The convention defines shared expectations for:
 
 - publishing encrypted `ip:port` reachability information bound to a pubkey
-
+  
 - resolving that information deterministically
-
+  
 - supporting frequently changing network addresses
-
+  
 - minimising relay load and metadata leakage
-
+  
 - avoiding dependence on registrars, domains, or central services
+  
 
 ---
 
@@ -44,22 +56,24 @@ The convention defines shared expectations for:
 This convention applies to:
 
 - client behaviour for publishing encrypted locator records
-
+  
 - deterministic resolution and caching logic
-
+  
 - TTL and refresh semantics
-
+  
 - privacy and abuse mitigation expectations
+  
 
 This convention does **not** define:
 
 - new cryptographic primitives
-
+  
 - relay enforcement rules
-
+  
 - domain name integration
-
+  
 - protocol-level changes
+  
 
 ---
 
@@ -72,14 +86,15 @@ NCC-05 relies entirely on existing Nostr Improvement Proposals and does not intr
 Used for:
 
 - event structure and encoding
-
+  
 - event signing and verification
-
+  
 - relay publish and subscription semantics
-
+  
 - `created_at` ordering
-
+  
 - tag-based filtering, including the `d` tag
+  
 
 All `kind:30058` locator records are valid NIP-01 events.
 
@@ -90,10 +105,11 @@ All `kind:30058` locator records are valid NIP-01 events.
 Used for:
 
 - parameterised replaceable semantics
-
+  
 - replacement based on `pubkey + kind + d`
-
+  
 - deterministic latest-state resolution
+  
 
 ---
 
@@ -112,10 +128,11 @@ Used to encrypt `ip:port` locator payloads.
 This convention:
 
 - mandates encryption by default
-
+  
 - does not require a specific encryption NIP
-
+  
 - allows clients to support one or more schemes
+  
 
 ---
 
@@ -126,10 +143,11 @@ NCC-05 MAY leverage relay hints published via NIP-65 to improve resolution effic
 When resolving locator records, clients:
 
 - MAY query relays listed in the target pubkey’s NIP-65 relay list
-
+  
 - SHOULD prefer relays marked for read or both read/write access
-
+  
 - MAY fall back to locally configured or default relays if no NIP-65 data is available
+  
 
 NIP-65 is used strictly as a **hint mechanism** and does not alter NCC-05 resolution semantics or trust assumptions.
 
@@ -140,12 +158,13 @@ NIP-65 is used strictly as a **hint mechanism** and does not alter NCC-05 resolu
 NCC-05 deliberately does **not** rely on:
 
 - DNS or naming-related NIPs
-
+  
 - relay moderation or enforcement NIPs
-
+  
 - payment, zap, or wallet NIPs
-
+  
 - profile or alias NIPs
+  
 
 ---
 
@@ -153,14 +172,14 @@ NCC-05 deliberately does **not** rely on:
 
 NCC-05 provides **DNS-like resolution semantics for encrypted `ip:port` reachability**, using Nostr events as the distribution mechanism.
 
-| DNS concept          | NCC-05 analogue           |
-| -------------------- | ------------------------- |
-| Domain name          | Pubkey                    |
-| Record name          | `d` tag                   |
-| A / SRV record       | Encrypted `ip:port` entry |
-| TTL                  | Payload TTL               |
-| Authoritative server | Signature + freshness     |
-| Resolver cache       | Client cache              |
+| DNS concept | NCC-05 analogue |
+| --- | --- |
+| Domain name | Pubkey |
+| Record name | `d` tag |
+| A / SRV record | Encrypted `ip:port` entry |
+| TTL | Payload TTL |
+| Authoritative server | Signature + freshness |
+| Resolver cache | Client cache |
 
 Resolution is identity-centric and private by default.
 
@@ -177,10 +196,11 @@ Locator records **MUST** be published as **parameterised replaceable events** of
 Replaceability is determined by:
 
 - `pubkey`
-
+  
 - `kind = 30058`
-
+  
 - `d` tag value
+  
 
 Clients **MUST** treat locator records as latest-state only.
 
@@ -188,8 +208,8 @@ Clients **MUST** treat locator records as latest-state only.
 
 ### 4.2 Required tags
 
-| Tag | Description                      |
-| --- | -------------------------------- |
+| Tag | Description |
+| --- | --- |
 | `d` | Stable locator record identifier |
 
 The `d` tag **MUST** remain stable.
@@ -197,18 +217,24 @@ The `d` tag **MUST** remain stable.
 Recommended values:
 
 - `addr`
-
+  
 - `addr:v1`
-
+  
 - `addr:<device-id>`
+  
 
 ---
 
 ### 4.3 Optional tags
 
-No additional tags are required.
+- `expiration` – Unix timestamp indicating when the locator event SHOULD be treated as expired.
+  - Clients SHOULD treat expiry as the earliest of:
+    - `expiration`, and
+    - `updated_at + ttl` from the decrypted payload.
 
-Clients **SHOULD** minimise tag usage to reduce metadata leakage.
+- `private` – Boolean marker (for example `["private","true"]`) indicating the publisher intends the locator record for authorised use only.
+  - This tag does not provide privacy by itself.
+  - Privacy is provided by encryption and recipient scoping.
 
 ---
 
@@ -221,10 +247,11 @@ Service locator records **MUST NOT expose `ip:port` data in plaintext by default
 Event content:
 
 - **MUST** be encrypted when publishing `ip:port` data
-
+  
 - **MUST NOT** include address data in tags
-
+  
 - **MUST** assume relays are not trusted
+  
 
 ---
 
@@ -233,10 +260,11 @@ Event content:
 A plaintext record MAY be published only if:
 
 - the endpoint is intentionally public
-
+  
 - metadata disclosure is acceptable
-
+  
 - the publisher explicitly opts out of privacy
+  
 
 Clients **MUST NOT** treat plaintext records as private.
 
@@ -247,18 +275,36 @@ Clients **MUST NOT** treat plaintext records as private.
 Logical structure:
 
 - `v`: payload version
-
+  
 - `ttl`: time-to-live in seconds
-
+  
 - `updated_at`: unix timestamp
-
+  
 - `endpoints`: ordered list of endpoint objects
-
+  
 - `caps`: optional capability identifiers
-
+  
 - `notes`: optional text
+  
 
 Direct `ip:port` endpoints are the **primary and expected** use case.
+
+### 5.4 Endpoint object format (Normative)
+
+Each entry in `endpoints` MUST describe a reachable transport endpoint.
+
+Required:
+- `url` – full endpoint URL.
+
+Optional but strongly recommended:
+- `priority` – integer where lower values are preferred (default `1000`).
+- `family` – `onion`, `ipv6`, or `ipv4`.
+- `k` – transport key fingerprint for TLS-protected endpoints.
+
+For `wss://` endpoints:
+- Publishers SHOULD include `k`.
+- Clients SHOULD fail closed when `k` is present and does not match the observed transport identity.
+
 
 ---
 
@@ -267,36 +313,41 @@ Direct `ip:port` endpoints are the **primary and expected** use case.
 Clients publishing locator records:
 
 - **MUST** encrypt `ip:port` data by default
-
+  
 - **MUST** sign records with the resolved pubkey
-
+  
 - **MUST** publish only current reachability state
-
+  
 - **SHOULD** publish on change or bounded refresh
-
+  
 - **SHOULD** jitter refresh timing
-
+  
 - **MUST NOT** publish redundant updates
+  
 
 ---
 
 ## 7. Resolution Algorithm
 
+Unless explicitly operating in unanchored mode, clients SHOULD resolve and validate a corresponding NCC-02 Service Record before accepting NCC-05 locator records.
+
 ### Input
 
 - target `pubkey`
-
+  
 - locator name (`d` tag), default `addr`
+  
 
 ### Relay selection
 
 Clients SHOULD determine an initial relay set using the following order:
 
 1. Relays advertised by the target pubkey via NIP-65, if available
-
+  
 2. Client-configured default relays
-
+  
 3. Additional relays as required to complete resolution
+  
 
 Relay selection does not affect record validity.
 
@@ -305,20 +356,24 @@ Relay selection does not affect record validity.
 Clients query selected relays for:
 
 - author = target pubkey
-
+  
 - kind = 30058
-
+  
 - matching `d` tag
 
+### Record selection (Normative)
+
+When multiple locator events exist for the same identity:
+1. Select the event with the greatest `created_at`.
+2. If equal, select the lexicographically smallest event `id`.
+  
 ### Event selection
 
 Clients:
-
 1. discard invalid signatures
-
 2. discard undecryptable payloads
-
-3. select the event with the highest `created_at`
+3. pass all remaining candidate events to record selection
+  
 
 ### Freshness validation
 
@@ -328,27 +383,37 @@ Records are valid only if:
 
 Expired records **MUST NOT** be used.
 
-### Endpoint selection
+### Endpoint selection (Normative)
 
-Clients:
+Clients SHOULD select endpoints deterministically:
+1. Sort by ascending `priority`.
+2. For equal priority, apply a deterministic family order (for example `onion`, then `ipv6`, then `ipv4`).
+3. Attempt endpoints in order until a connection succeeds.
+4. Clients SHOULD apply cooldowns to failed endpoints to avoid retry storms.
 
-1. prioritise endpoints by ascending `priority`
-
-2. attempt direct `ip:port` endpoints first where present
-
-3. stop after first successful connection
+  
 
 Endpoint failure does not invalidate the record.
+
 
 ---
 
 ## 8. Caching and Expiry
 
-- Valid records **SHOULD** be cached until expiry
+- Clients MUST treat a locator record as expired when `now > updated_at + ttl`.
+- If an `expiration` tag is present, clients SHOULD treat expiry as the earliest of:
+  - `expiration`, and
+  - `updated_at + ttl`.
 
-- TTL **MUST NOT** be extended
+Expired records:
+- Clients SHOULD NOT use expired records by default.
+- Clients MAY retain one expired record as a short-lived fallback only in explicit override or recovery modes.
 
-- One expired fallback record **MAY** be retained briefly
+TTL rules:
+- TTL MUST NOT be extended by resolvers.
+- Publishers SHOULD refresh locator records before expiry using jittered schedules.
+
+  
 
 ---
 
@@ -357,16 +422,18 @@ Endpoint failure does not invalidate the record.
 Encryption protects:
 
 - IP address and port
-
+  
 - network topology
+  
 
 Encryption does not protect:
 
 - pubkey identity
-
+  
 - existence of a locator record
-
+  
 - publish timing
+  
 
 Using NIP-65 relay hints can reduce unnecessary broadcast queries and limit metadata exposure during resolution.
 
@@ -377,10 +444,11 @@ Relays are assumed honest-but-curious.
 ## 10. Abuse and Relay Load
 
 - Records **SHOULD** be small and replaceable
-
+  
 - Publish frequency **SHOULD** align with TTL
-
+  
 - Relays **MAY** apply rate limits or policy
+  
 
 ---
 
@@ -397,10 +465,11 @@ NCC-05 publishes **encrypted, identity-bound `ip:port` mappings** without domain
 This convention is not intended for:
 
 - public website discovery
-
+  
 - human-readable naming
-
+  
 - anonymous global resolution
+  
 
 ---
 
@@ -435,31 +504,32 @@ The user wants authorised clients to discover the current endpoint privately, wi
 The service publishes a parameterised replaceable event with:
 
 - `kind:30058`
-
+  
 - `d=addr`
-
+  
 - encrypted `content`
+  
 
 #### Example logical content (inside encryption)
 
 - `v`: 1
-
+  
 - `ttl`: 600
-
+  
 - `updated_at`: 1766726400
-
+  
 - `endpoints`:
   
   - type: tcp  
     uri: `[2001:db8:abcd:42::10]:9735`  
     priority: 5  
     family: ipv6
-  
+    
   - type: tcp  
     uri: `203.0.113.42:9735`  
     priority: 10  
     family: ipv4
-
+    
 - `caps`:
   
   - nostr-connect
@@ -469,12 +539,13 @@ The service publishes a parameterised replaceable event with:
 ### A.2.1 IPv6 considerations
 
 - IPv6 endpoints MAY be included alongside IPv4 endpoints.
-
+  
 - Clients SHOULD attempt endpoints strictly by priority.
-
+  
 - IPv6 literals MUST use standard bracket notation with ports.
-
+  
 - Publishers MAY omit IPv4 endpoints entirely in IPv6-only environments.
+  
 
 ---
 
@@ -491,14 +562,15 @@ Clients automatically treat the latest event as authoritative.
 A resolving client:
 
 1. Determines relay set, preferring NIP-65 hints if available.
-
+  
 2. Queries for `kind=30058` events with matching `d` tag.
-
+  
 3. Verifies signature and decrypts payload.
-
+  
 4. Selects the latest valid event.
-
+  
 5. Attempts endpoints by priority.
+  
 
 ---
 
@@ -507,8 +579,9 @@ A resolving client:
 If an endpoint connection attempt fails:
 
 - the client MAY attempt the next endpoint
-
+  
 - the locator record remains valid until expiry
+  
 
 ---
 
@@ -517,12 +590,13 @@ If an endpoint connection attempt fails:
 This example demonstrates that:
 
 - `ip:port` data is never visible to relays
-
+  
 - observers cannot infer network topology
-
+  
 - resolution requires prior knowledge of the pubkey
-
+  
 - historical addresses are not exposed
+  
 
 ---
 
