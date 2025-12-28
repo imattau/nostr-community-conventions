@@ -9,7 +9,18 @@ import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4 } fr
 import { sendInviteDM } from './dm.js';
 
 const __filename = fileURLToPath(import.meta.url);
-...
+const __dirname = path.dirname(__filename);
+
+export async function startWebServer(initialPort = 3000) {
+  const server = fastify({ logger: false });
+
+  await server.register(cors, { origin: true });
+
+  // API Routes
+  server.get('/api/setup/status', async () => {
+    return { initialized: isInitialized() };
+  });
+
   server.get('/api/tor/status', async () => {
     return await checkTor();
   });
@@ -42,9 +53,9 @@ const __filename = fileURLToPath(import.meta.url);
     const pubkey = fromNpub(npub);
     const serviceNsec = getConfig('service_nsec');
     const appConfig = getConfig('app_config');
-    const serviceNpub = generateKeypair(fromNsec(serviceNsec)).npub; // Wait, we have SK
+    const keys = generateKeypair(fromNsec(serviceNsec));
 
-    const inviteMsg = `You are invited to manage NCC-06 Sidecar for ${serviceNpub}. 
+    const inviteMsg = `You are invited to manage NCC-06 Sidecar for ${keys.npub}. 
 Login here: ${publicUrl || 'http://' + request.headers.host}`;
 
     const sent = await sendInviteDM({
@@ -66,8 +77,6 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     removeAdmin(request.params.pubkey);
     return { success: true };
   });
-
-
 
   server.get('/api/service/generate-key', async () => {
     const keys = generateKeypair();
@@ -127,6 +136,3 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
 
   return server;
 }
-
-
-
