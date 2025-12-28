@@ -27,15 +27,19 @@ export default function App() {
     config: {
       service_id: 'relay',
       locator_id: 'relay-locator',
-      endpoints: [],
-      publication_relays: ['wss://relay.damus.io'],
+      publication_relays: ['wss://relay.damus.io', 'wss://nos.lol'],
       refresh_interval_minutes: 360,
       ncc02_expiry_days: 3,
       ncc05_ttl_hours: 12,
       authorized_recipients: [],
       service_mode: 'public',
       generate_self_signed: false,
-      primary_protocol_preference: 'ip' // 'ip' or 'onion'
+      protocols: {
+        ipv4: true,
+        ipv6: true,
+        tor: true
+      },
+      primary_protocol: 'ipv4'
     }
   });
 
@@ -372,61 +376,59 @@ export default function App() {
             <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
               <div className="flex items-center space-x-3 text-blue-400">
                 <Globe className="w-6 h-6" />
-                <h2 className="text-xl font-bold text-slate-100">Network Discovery</h2>
+                <h2 className="text-xl font-bold text-slate-100">Connectivity</h2>
               </div>
               
               <div className="space-y-4">
-                <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Select Primary Discovery Path</p>
+                <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Enable Connectivity Paths</p>
                 
-                <div className="grid grid-cols-1 gap-3">
-                  {/* Onion Option */}
-                  <button 
-                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, primary_protocol_preference: 'onion' } }))}
-                    className={`flex items-center p-4 rounded-2xl border transition-all text-left ${setupData.config.primary_protocol_preference === 'onion' ? 'bg-indigo-600/20 border-indigo-500 shadow-indigo-900/20' : 'bg-slate-900/50 border-slate-700 opacity-60 hover:opacity-100'}`}
-                  >
-                    <Radio className={`w-5 h-5 mr-4 ${setupData.config.primary_protocol_preference === 'onion' ? 'text-indigo-400' : 'text-slate-600'}`} />
-                    <div className="flex-1">
-                      <p className="font-bold text-sm">Tor (Onion)</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Location-hiding, DNS-optional.</p>
+                <div className="space-y-3">
+                  {[
+                    { id: 'ipv4', label: 'IPv4 (Clearnet)', detected: networkProbe.ipv4, icon: <Radio className="w-4 h-4" /> },
+                    { id: 'ipv6', label: 'IPv6 (Global)', detected: networkProbe.ipv6, icon: <Network className="w-4 h-4" /> },
+                    { id: 'tor', label: 'Tor (Onion)', detected: torStatus?.running, icon: <Globe className="w-4 h-4" /> }
+                  ].map(p => (
+                    <div key={p.id} className="flex items-center p-4 bg-slate-900/50 border border-slate-700 rounded-2xl">
+                      <div className="mr-4 text-blue-400">{p.icon}</div>
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-sm">{p.label}</span>
+                          {p.detected ? <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded uppercase font-black">Detected</span> : <span className="text-[8px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded uppercase font-black">Not Found</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">{p.detected || 'Searching...'}</p>
+                      </div>
+                      <div className="flex items-center space-x-4">
+                        <div className="flex flex-col items-center">
+                          <span className="text-[8px] text-slate-600 uppercase font-bold mb-1">Use</span>
+                          <input 
+                            type="checkbox" 
+                            checked={setupData.config.protocols[p.id]}
+                            onChange={(e) => setSetupData(d => ({
+                              ...d, 
+                              config: { ...d.config, protocols: { ...d.config.protocols, [p.id]: e.target.checked } }
+                            }))}
+                            className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-blue-600"
+                          />
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span className="text-[8px] text-slate-600 uppercase font-bold mb-1">Primary</span>
+                          <input 
+                            type="radio" 
+                            name="primary_proto"
+                            checked={setupData.config.primary_protocol === p.id}
+                            onChange={() => setSetupData(d => ({ ...d, config: { ...d.config, primary_protocol: p.id } }))}
+                            className="w-4 h-4 border-slate-700 bg-slate-800 text-blue-600"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    {torStatus?.running ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
-                  </button>
-
-                  {/* IP Option */}
-                  <button 
-                    onClick={() => setSetupData(d => ({ ...d, config: { ...d.config, primary_protocol_preference: 'ip' } }))}
-                    className={`flex items-center p-4 rounded-2xl border transition-all text-left ${setupData.config.primary_protocol_preference === 'ip' ? 'bg-blue-600/20 border-blue-500 shadow-blue-900/20' : 'bg-slate-900/50 border-slate-700 opacity-60 hover:opacity-100'}`}
-                  >
-                    <Radio className={`w-5 h-5 mr-4 ${setupData.config.primary_protocol_preference === 'ip' ? 'text-blue-400' : 'text-slate-600'}`} />
-                    <div className="flex-1">
-                      <p className="font-bold text-sm">Internet Protocol (IP)</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Clearnet. Prefers IPv6, falls back to IPv4.</p>
-                    </div>
-                    {networkProbe.ipv4 ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
-                  </button>
+                  ))}
                 </div>
 
-                <div className="p-4 bg-slate-900/80 rounded-2xl border border-slate-700">
-                  <div className="flex items-center space-x-2 text-slate-400 mb-3">
-                    <Monitor className="w-3 h-3" />
-                    <span className="text-[9px] font-black uppercase tracking-tighter">Detected Endpoints</span>
-                  </div>
-                  <div className="space-y-2 font-mono text-[9px]">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">IPv4:</span>
-                      <span className="text-blue-300">{networkProbe.ipv4 || 'Detecting...'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">IPv6:</span>
-                      <span className="text-blue-300">{networkProbe.ipv6 || 'None detected'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Tor:</span>
-                      <span className={torStatus?.running ? 'text-green-400' : 'text-slate-600'}>
-                        {torStatus?.running ? 'Available' : 'Not running'}
-                      </span>
-                    </div>
-                  </div>
+                <div className="p-4 bg-blue-900/10 rounded-2xl border border-blue-500/20">
+                  <p className="text-[10px] text-blue-300/80 leading-relaxed italic">
+                    <strong>Robustness Note:</strong> Including all available paths (Tor + IP) ensures your service remains reachable even if clearnet is censored or your IP changes.
+                  </p>
                 </div>
               </div>
 

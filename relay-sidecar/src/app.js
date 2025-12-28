@@ -1,10 +1,11 @@
 import crypto from 'crypto';
-import { scheduleWithJitter, ensureSelfSignedCert, fromNpub } from 'ncc-06-js';
+import { scheduleWithJitter, ensureSelfSignedCert, fromNpub, getPublicIPv4, detectGlobalIPv6 } from 'ncc-06-js';
 import { NCC05Publisher } from 'ncc-05-js';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
 import { setState, addLog } from './db.js';
+import { checkTor } from './tor-check.js';
 
 export async function runPublishCycle(config, state) {
   console.log(`[App] Starting publish cycle for ${config.npub || 'service'}`);
@@ -22,8 +23,12 @@ export async function runPublishCycle(config, state) {
     }
   }
 
-  // 1. Inventory
-  const inventory = await buildInventory(config.endpoints);
+  // 1. Probe & Inventory
+  const ipv4 = await getPublicIPv4();
+  const ipv6 = detectGlobalIPv6();
+  const torStatus = await checkTor();
+  
+  const inventory = await buildInventory(config, { ipv4, ipv6 }, torStatus);
   const inventoryHash = crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
 
   // 2. Build Records (Base templates)
