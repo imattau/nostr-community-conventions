@@ -27,8 +27,8 @@ export class NCC02Builder {
    * Creates a signed Service Record (Kind 30059).
    * @param {Object} options
    * @param {string} options.serviceId - The 'd' tag identifier.
-   * @param {string} options.endpoint - The 'u' tag URI.
-   * @param {string} options.fingerprint - The 'k' tag fingerprint.
+   * @param {string} [options.endpoint] - The 'u' tag URI.
+   * @param {string} [options.fingerprint] - The 'k' tag fingerprint.
    * @param {number} [options.expiryDays=14] - Expiry in days.
    */
   createServiceRecord(options) {

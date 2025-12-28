@@ -19,8 +19,8 @@ export class NCC02Error extends Error {
 
 /**
  * @typedef {Object} ResolvedService
- * @property {string} endpoint
- * @property {string} fingerprint
+ * @property {string|undefined} endpoint
+ * @property {string|undefined} fingerprint
  * @property {number} expiry
  * @property {any[]} attestations
  * @property {string} eventId

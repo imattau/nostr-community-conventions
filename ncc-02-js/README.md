@@ -6,7 +6,7 @@ This library provides tools for service owners to publish records and for client
 
 ## Features
 
-- **Service Discovery**: Resolve Kind 30059 service records.
+- **Service Discovery**: Resolve Kind 30059 service records for both public and private services.
 - **Verification**: Built-in signature and expiry validation.
 - **Trust Policy**: Support for third-party attestations (Kind 30060) and revocations (Kind 30061).
 - **Security**: Cross-validation of subject and service identifiers to prevent impersonation.
@@ -36,7 +36,11 @@ try {
     requireAttestation: true,
     minLevel: 'verified' // 'self', 'verified', 'hardened'
   });
-  console.log('Resolved endpoint:', service.endpoint);
+  if(service.endpoint) {
+    console.log('Resolved endpoint:', service.endpoint);
+  } else {
+    console.log('Resolved private service, use NCC-05 for endpoint discovery.');
+  }
 } catch (err) {
   console.error('Resolution failed:', err.code, err.message);
 }
@@ -50,7 +54,7 @@ import { NCC02Builder } from 'ncc-02-js';
 // Initialize with private key (hex)
 const builder = new NCC02Builder(privateKey);
 
-// Example 1: IP-based Service
+// Example 1: Public IP-based Service
 const event = builder.createServiceRecord({
   serviceId: 'media',
   endpoint: 'https://203.0.113.45:8443',
@@ -58,10 +62,9 @@ const event = builder.createServiceRecord({
   expiryDays: 14
 });
 
-// Example 2: Tor Onion Service
-const onionEvent = builder.createServiceRecord({
+// Example 2: Private / Invite-Only Service
+const privateEvent = builder.createServiceRecord({
   serviceId: 'wallet',
-  endpoint: 'tcp://vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd.onion:80',
   fingerprint: 'sha256:fingerprint',
   expiryDays: 7
 });
@@ -109,7 +112,7 @@ The library follows a fail-closed principle. If a policy requirement is not met 
 - `options.minLevel`: Minimum trust level required.
 
 ### `NCC02Builder(privateKey)`
-- `createServiceRecord({ serviceId, endpoint, fingerprint, expiryDays })`
+- `createServiceRecord({ serviceId, endpoint?, fingerprint?, expiryDays? })`
 - `createAttestation({ subjectPubkey, serviceId, serviceEventId, level, validDays })`
 - `createRevocation({ attestationId, reason })`
 
