@@ -65,6 +65,16 @@ export async function startWebServer(port = 3000) {
     server.log.warn('UI dist folder not found, serving API only');
   }
 
-  await server.listen({ port, host: '127.0.0.1' });
-  console.log(`[Web] Admin interface running at http://127.0.0.1:${port}`);
+  try {
+    await server.listen({ port, host: '127.0.0.1' });
+    console.log(`[Web] Admin interface running at http://127.0.0.1:${port}`);
+  } catch (err) {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Web] Error: Port ${port} is already in use.`);
+      console.error(`[Web] Please specify a different port using the ADMIN_PORT environment variable.`);
+      process.exit(1);
+    }
+    throw err;
+  }
 }
+
