@@ -102,7 +102,7 @@ Clients resolve service endpoints by querying Nostr relays, verifying signatures
 
 ### 1. Service Record
 
-A Service Record is a parameterised replaceable event published by the service owner. It represents the current location and cryptographic identity of a service.
+A Service Record is a parameterised replaceable event of kind 300059 published by the service owner. It represents the current location and cryptographic identity of a service.
 
 #### Purpose
 
@@ -144,7 +144,7 @@ The `k` tag binds a service endpoint to a transport-level public key fingerprint
 
 ### 2. Certificate Attestation (Optional)
 
-A Certificate Attestation is a signed statement by a certifier pubkey asserting that a specific service record meets a defined standard.
+A Certificate Attestation is an event of kind 300060 - a signed statement by a certifier pubkey asserting that a specific service record meets a defined standard.
 
 #### Purpose
 
@@ -170,9 +170,23 @@ Clients decide:
 
 ---
 
+## Event Kinds (Normative)
+
+NCC-02 uses parameterised replaceable events with the following kinds:
+
+- **300059** — Service Record  
+  Parameterised replaceable (`d` tag = service identifier)
+
+- **300060** — Certificate / Transport Key Attestation  
+  Replaceable event binding a service identity to an observed transport key
+
+- **300061** — Revocation  
+  Replaceable event indicating withdrawal or invalidation of a prior record
+
+
 ### 3. Revocation
 
-A Revocation is a signed event published by a certifier revoking a previously issued Certificate Attestation.
+A Revocation is an event of kind 300061 - a signed event published by a certifier revoking a previously issued Certificate Attestation.
 
 #### Required tags
 
@@ -302,15 +316,32 @@ Experimental and subject to change. Clients are free to adopt partially or not a
 
 ### A.1 Service Publisher
 
-```text
-service_id = "api"
-endpoint_uri = "https://example.net:8443"
-endpoint_key_fp = spki_hash(endpoint_tls_cert)
+Inputs:
+
+Service identity: <npub>
+Service ID: "relay"
+
+# Option A: Publicly reachable endpoint (no DNS required)
+endpoint_uri = "wss://203.0.113.10:8443"        # or "onion://<onion-host>:8443"
+endpoint_key_fp = spki_hash(endpoint_tls_cert)   # fingerprint of observed transport key
 expiry = now + 14 days
 
-### A.1 Service Publisher
+Publish kind 300059 with:
+- `d`: "relay"
+- `u`: "wss://203.0.113.10:7777" OR "onion://<onion>:7777"
+- `k`: "<spki_hash>"
+- `exp`: "<unix_seconds>"
 
-Publish a signed, parameterised replaceable event containing the required tags.
+# Option B: Private or invite-only service (NCC-02 anchored, NCC-05 resolves)
+# Publish NCC-02 without `u`:
+Publish kind 300059 with:
+- `d`: "relay"
+- (omit `u`)
+- `k`: "<spki_hash>"
+
+Authorised clients resolve reachability via NCC-05 locators for this same service identity.
+If NCC-05 resolution succeeds, clients prefer the NCC-05 endpoint while keeping NCC-02 as the trust anchor.
+
 
 ---
 
