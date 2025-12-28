@@ -39,6 +39,44 @@ const resolution = await resolveServiceEndpoint({
 console.log('Resolved API endpoint:', resolution.endpoint);
 ```
 
+### Resolving a Tor Service via Npub
+
+```js
+import { resolveServiceEndpoint, fromNpub } from 'ncc-06-js';
+
+const servicePubkey = fromNpub('npub1...');
+
+const resolution = await resolveServiceEndpoint({
+  bootstrapRelays: ['wss://relay.damus.io'],
+  servicePubkey,
+  serviceId: 'relay',
+  locatorId: 'relay-locator',
+  torPreferred: true // Prefer .onion endpoints if available
+});
+
+console.log('Resolved Onion Endpoint:', resolution.endpoint);
+```
+
+### Configuring an Onion Service Sidecar
+
+```js
+import { buildExternalEndpoints, buildSidecarConfig } from 'ncc-06-js';
+
+// 1. Build endpoints (detects Onion, IPv6, IPv4)
+const endpoints = await buildExternalEndpoints({
+  tor: { enabled: true },
+  ensureOnionService: async () => ({ address: 'abcdef...', servicePort: 80 })
+});
+
+// 2. Build config
+const config = buildSidecarConfig({
+  secretKey: '...',
+  serviceUrl: 'ws://abcdef....onion', // Primary identity URL
+  externalEndpoints: endpoints,
+  serviceMode: 'public'
+});
+```
+
 ### Building a Service Config
 
 ```js

@@ -79,7 +79,7 @@ Utilities for locator payload construction and evaluation.
 - Reads a config block (`k.mode`) and returns the expected `k` string for static/generate/tls modes; used by the sidecar.
 
 ### Key helpers
-- `generateKeypair()`, `toNpub()`, `fromNsec()` wrap `nostr-tools` key utilities for convenience.
+- `generateKeypair()`, `toNpub()`, `fromNpub()`, `toNsec()`, `fromNsec()` wrap `nostr-tools` key utilities for convenience.
 - `ensureSelfSignedCert(options)` generates a self-signed cert for local `wss://` endpoints.
 
 ## Endpoint helpers
