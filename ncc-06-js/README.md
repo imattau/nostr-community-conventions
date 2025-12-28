@@ -14,6 +14,14 @@ Reusable helpers extracted from the NCC-06 example relay, sidecar, and client im
 ...
 - **Relay & Service mode helpers** (`getRelayMode`, `setRelayMode`) so you can control whether your service is *public* (publishes NCC-05 locators) or *private`.
 
+## Why NCC-06? (Identity vs Location)
+
+Unlike DNS, which binds a service to a **location** (domain/IP), NCC-06 binds a service to an **identity** (Public Key / Npub).
+
+- **Portability:** Move your service to a new IP, Tor address, or provider instantly. Clients follow the *key*, not the server.
+- **Censorship Resistance:** Discovery happens via decentralized relays, not centralized root servers.
+- **Trust:** End-to-end authentication is built-in. The "K" fingerprint ensures the server you connect to is authorized by the identity you resolved.
+
 ## Usage
 
 Install directly from the repository (example workspace):
@@ -27,6 +35,7 @@ npm install ../ncc-06-js
 ```js
 import { resolveServiceEndpoint } from 'ncc-06-js';
 
+// "Bootstrap Relays" act as the decentralized directory for finding the service's current location.
 const resolution = await resolveServiceEndpoint({
   bootstrapRelays: ['wss://relay.damus.io'],
   servicePubkey: '...',
@@ -77,15 +86,15 @@ const config = buildSidecarConfig({
 });
 ```
 
-### Building a Service Config
+### Building a Service Config (No DNS)
 
 ```js
 import { buildSidecarConfig } from 'ncc-06-js';
 
 const config = buildSidecarConfig({
   secretKey: '...',
-  serviceUrl: 'https://api.example.com',
-  serviceId: 'my-api',
+  serviceUrl: 'tcp://203.0.113.1:9000', // Direct IP or any URI scheme
+  serviceId: 'my-custom-service',
   serviceMode: 'public'
 });
 ```
