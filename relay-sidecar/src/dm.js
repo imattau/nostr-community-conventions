@@ -1,16 +1,29 @@
-import { finalizeEvent, verifyEvent } from 'nostr-tools/pure';
-import { nip04 } from 'nostr-tools';
+import { finalizeEvent, verifyEvent, getPublicKey } from 'nostr-tools/pure';
+import { nip44 } from 'nostr-tools';
 import WebSocket from 'ws';
 
 export async function sendInviteDM({ secretKey, recipientPubkey, message, relays }) {
-  const ciphertext = await nip04.encrypt(secretKey, recipientPubkey, message);
+  // Use NIP-44 for encryption
+  const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
+  const ciphertext = nip44.encrypt(message, conversationKey);
 
+  // Using Kind 4 with NIP-44 content (indicated by encryption tag)
+  // or Kind 14. Let's use Kind 4 for visibility but tag it as nip44.
   const eventTemplate = {
     kind: 4,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [['p', recipientPubkey]],
+    tags: [
+      ['p', recipientPubkey],
+      ['encryption', 'nip44']
+    ],
     content: ciphertext
   };
+
+  const signedEvent = finalizeEvent(eventTemplate, secretKey);
+  
+  return await broadcastEvent(relays, signedEvent);
+}
+
 
 
   // For this invite, let's use a simple NIP-04 DM for maximum visibility in the recipient's client.
