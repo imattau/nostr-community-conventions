@@ -1,3 +1,6 @@
+import WebSocket from 'ws';
+globalThis.WebSocket = WebSocket;
+
 import { initDb, isInitialized, getConfig, setState, getState } from './db.js';
 import { startWebServer } from './web.js';
 import { startScheduler } from './app.js';
