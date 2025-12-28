@@ -92,6 +92,9 @@ export async function startWebServer(initialPort = 3000) {
   console.log(`--- NCC-06 Admin Interface ---`);
   console.log(`URL: http://127.0.0.1:${port}`);
   console.log(`------------------------------`);
+
+  return server;
 }
+
 
 

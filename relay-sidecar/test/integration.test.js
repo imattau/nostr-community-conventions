@@ -5,6 +5,7 @@ import path from 'path';
 import { createMockRelay } from './mock-relay.js';
 import { runPublishCycle } from '../src/app.js';
 import { generateKeypair } from 'ncc-06-js';
+import { initDb } from '../src/db.js';
 
 test('integration: full publish cycle to local mock relay', async () => {
   const relay = createMockRelay();
@@ -12,7 +13,11 @@ test('integration: full publish cycle to local mock relay', async () => {
   const { secretKey, publicKey, npub } = generateKeypair();
   
   const statePath = path.resolve(process.cwd(), './test-state.json');
+  const dbPath = path.resolve(process.cwd(), './test-integration-1.db');
   if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+
+  initDb(dbPath);
 
   const config = {
     secretKey,
@@ -52,20 +57,26 @@ test('integration: full publish cycle to local mock relay', async () => {
 
     assert.strictEqual(newState.last_success_per_relay[relayUrl].success, true);
     assert.ok(newState.last_published_ncc02_id);
-    assert.ok(fs.existsSync(statePath));
+    assert.ok(fs.existsSync(dbPath), 'Database file should exist');
 
   } finally {
     await relay.close();
     if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   }
 });
+
 
 test('integration: change detection logic (IP and Onion changes)', async () => {
   const relay = createMockRelay();
   const relayUrl = relay.url();
   const { secretKey, publicKey, npub } = generateKeypair();
   const statePath = path.resolve(process.cwd(), './test-state-changes.json');
+  const dbPath = path.resolve(process.cwd(), './test-integration-2.db');
   if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+
+  initDb(dbPath);
 
   const configBase = {
     secretKey, publicKey, npub,
