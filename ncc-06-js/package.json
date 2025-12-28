@@ -1,6 +1,6 @@
 {
   "name": "ncc-06-js",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Reusable NCC-06 discovery helpers extracted from the example relay, sidecar, and client.",
   "type": "module",
   "main": "src/index.js",
