@@ -18,7 +18,7 @@ async function test() {
         ttl: 60,
         updated_at: Math.floor(Date.now() / 1000),
         endpoints: [
-            { type: 'tcp', uri: '127.0.0.1:9000', priority: 1, family: 'ipv4' }
+            { type: 'tcp', url: '127.0.0.1:9000', priority: 1, family: 'ipv4' }
         ]
     };
 
@@ -42,7 +42,7 @@ async function test() {
         v: 1,
         ttl: 1,
         updated_at: Math.floor(Date.now() / 1000) - 10, // 10s ago
-        endpoints: [{ type: 'tcp', uri: '1.1.1.1:1', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: '1.1.1.1:1', priority: 1, family: 'ipv4' }]
     };
     await publisher.publish(relays, sk, expiredPayload, { identifier: 'expired-test' });
     const strictResult = await resolver.resolve(pk, sk, 'expired-test', { strict: true });
@@ -109,7 +109,7 @@ async function test() {
 
     const payloadFriend: NCC05Payload = {
         v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
-        endpoints: [{ type: 'tcp', uri: 'friend:7777', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: 'friend:7777', priority: 1, family: 'ipv4' }]
     };
 
     // User A publishes for User B
@@ -119,7 +119,7 @@ async function test() {
     // User B resolves User A's record
     console.log('User B resolving User A...');
     const friendResult = await resolver.resolve(pkA, skB, 'friend-test');
-    if (friendResult && friendResult.endpoints[0].uri === 'friend:7777') {
+    if (friendResult && friendResult.endpoints[0].url === 'friend:7777') {
         console.log('Friend-to-Friend resolution successful.');
     } else {
         console.error('FAILED: Friend-to-Friend resolution.');
@@ -131,7 +131,7 @@ async function test() {
     const groupIdentity = NCC05Group.createGroupIdentity();
     const payloadGroup: NCC05Payload = {
         v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
-        endpoints: [{ type: 'tcp', uri: 'group-service:8888', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: 'group-service:8888', priority: 1, family: 'ipv4' }]
     };
 
     console.log('Publishing as Group...');
@@ -139,7 +139,7 @@ async function test() {
 
     console.log('Resolving as Group Member...');
     const groupResult = await NCC05Group.resolveAsGroup(resolver, groupIdentity.pk, groupIdentity.sk, 'group-test');
-    if (groupResult && groupResult.endpoints[0].uri === 'group-service:8888') {
+    if (groupResult && groupResult.endpoints[0].url === 'group-service:8888') {
         console.log('NCC05Group resolution successful.');
     } else {
         console.error('FAILED: NCC05Group resolution.');
@@ -157,7 +157,7 @@ async function test() {
 
     const payloadWrap: NCC05Payload = {
         v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
-        endpoints: [{ type: 'tcp', uri: 'multi-recipient:9999', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: 'multi-recipient:9999', priority: 1, family: 'ipv4' }]
     };
 
     console.log('Alice publishing wrapped record for Bob and Charlie...');
@@ -169,7 +169,7 @@ async function test() {
     console.log('Charlie resolving Alice...');
     const charlieResult = await resolver.resolve(pkAlice, skCharlie, 'wrap-test');
 
-    if (bobResult && charlieResult && bobResult.endpoints[0].uri === 'multi-recipient:9999') {
+    if (bobResult && charlieResult && bobResult.endpoints[0].url === 'multi-recipient:9999') {
         console.log('Group Wrapping successful! Both recipients resolved Alice.');
     } else {
         console.error('FAILED: Group Wrapping resolution.');
@@ -180,7 +180,7 @@ async function test() {
     console.log('Testing Private Locator Tagging...');
     const payloadPrivate: NCC05Payload = {
         v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
-        endpoints: [{ type: 'tcp', uri: 'private:1234', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: 'private:1234', priority: 1, family: 'ipv4' }]
     };
 
     const privateEvent = await publisher.publish(relays, sk, payloadPrivate, { 

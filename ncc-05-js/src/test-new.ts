@@ -21,7 +21,7 @@ async function testNewFeatures() {
 
     const payload: NCC05Payload = {
         v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
-        endpoints: [{ type: 'tcp', uri: 'hex-test', priority: 1, family: 'ipv4' }]
+        endpoints: [{ type: 'tcp', url: 'hex-test', priority: 1, family: 'ipv4' }]
     };
 
     try {
@@ -36,7 +36,7 @@ async function testNewFeatures() {
     try {
         // Resolve using Hex string secret key
         const res = await resolver.resolve(pk, skHex, 'hex-key');
-        if (res && res.endpoints[0].uri === 'hex-test') {
+        if (res && res.endpoints[0].url === 'hex-test') {
             console.log('Resolved with Hex Key: OK');
         } else {
             console.error('Failed to resolve with hex key');

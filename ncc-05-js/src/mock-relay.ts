@@ -15,12 +15,30 @@ export class MockRelay {
 
                 if (type === 'EVENT') {
                     const event = msg[1];
-                    // Basic replaceable logic for test consistency
+                    // Basic replaceable logic for test consistency (NIP-16)
                     if (event.kind === 30058 || event.kind === 10002) {
                         const dTag = event.tags.find((t: any) => t[0] === 'd')?.[1] || "";
-                        this.events = this.events.filter(e => 
-                            !(e.pubkey === event.pubkey && e.kind === event.kind && (e.tags.find((t: any) => t[0] === 'd')?.[1] || "") === dTag)
+                        
+                        const existingIndex = this.events.findIndex(e => 
+                            e.pubkey === event.pubkey && 
+                            e.kind === event.kind && 
+                            (e.tags.find((t: any) => t[0] === 'd')?.[1] || "") === dTag
                         );
+
+                        if (existingIndex !== -1) {
+                            const existing = this.events[existingIndex];
+                            // Replace if new is newer OR (same time AND new ID is smaller)
+                            if (event.created_at > existing.created_at || 
+                                (event.created_at === existing.created_at && event.id < existing.id)) {
+                                this.events[existingIndex] = event;
+                                ws.send(JSON.stringify(["OK", event.id, true, ""]));
+                            } else {
+                                // Ignore the update (it's older or same-time-larger-id)
+                                ws.send(JSON.stringify(["OK", event.id, true, "duplicate: ignored"]));
+                            }
+                            // Do not push again
+                            return; 
+                        }
                     }
                     this.events.push(event);
                     ws.send(JSON.stringify(["OK", event.id, true, ""]));

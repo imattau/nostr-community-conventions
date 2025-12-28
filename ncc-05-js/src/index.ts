@@ -81,12 +81,38 @@ function ensureUint8Array(key: string | Uint8Array): Uint8Array {
 export interface NCC05Endpoint {
     /** Protocol type, e.g., 'tcp', 'udp', 'http' */
     type: 'tcp' | 'udp' | string;
-    /** The URI string, e.g., '1.2.3.4:8080' or '[2001:db8::1]:9000' */
-    uri: string;
-    /** Priority for selection (lower is higher priority) */
-    priority: number;
-    /** Network family for routing hints */
-    family: 'ipv4' | 'ipv6' | 'onion' | string;
+    /** The full endpoint URL, e.g., 'tcp://1.2.3.4:8080' or 'http://[2001:db8::1]:9000' */
+    url: string;
+    /** Priority for selection (lower is higher priority, default: 1000) */
+    priority?: number;
+    /** Network family for routing hints: 'onion', 'ipv6', 'ipv4' */
+    family?: 'ipv4' | 'ipv6' | 'onion' | string;
+    /** Transport key fingerprint for TLS/Noise protected endpoints */
+    k?: string;
+}
+
+/**
+ * Deterministically sorts endpoints according to NCC-05 normative rules.
+ * 1. Priority (ascending)
+ * 2. Family (onion < ipv6 < ipv4)
+ * 3. Original order
+ */
+export function selectEndpoints(endpoints: NCC05Endpoint[]): NCC05Endpoint[] {
+    const familyScore = (f?: string) => {
+        if (!f) return 4;
+        if (f === 'onion') return 1;
+        if (f === 'ipv6') return 2;
+        if (f === 'ipv4') return 3;
+        return 5;
+    };
+
+    return [...endpoints].sort((a, b) => {
+        const pA = a.priority ?? 1000;
+        const pB = b.priority ?? 1000;
+        if (pA !== pB) return pA - pB;
+        
+        return familyScore(a.family) - familyScore(b.family);
+    });
 }
 
 /**
@@ -268,10 +294,13 @@ export class NCC05Resolver {
             
             if (!result || (Array.isArray(result) && result.length === 0)) return null;
             
-            // 2. Filter for valid signatures, correct author, and sort by created_at
+            // 2. Filter for valid signatures, correct author, and sort by created_at desc, then id asc
             const validEvents = (result as Event[])
                 .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
-                .sort((a, b) => b.created_at - a.created_at);
+                .sort((a, b) => {
+                    if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+                    return a.id.localeCompare(b.id);
+                });
 
             if (validEvents.length === 0) return null;
             const latestEvent = validEvents[0];
@@ -332,7 +361,14 @@ export class NCC05Resolver {
 
             // Freshness validation
             const now = Math.floor(Date.now() / 1000);
-            if (now > payload.updated_at + payload.ttl) {
+            
+            // Check for expiration tag
+            const expirationTag = latestEvent.tags.find(t => t[0] === 'expiration');
+            const explicitExpiry = expirationTag ? parseInt(expirationTag[1], 10) : Infinity;
+            const calculatedExpiry = payload.updated_at + payload.ttl;
+            const expiry = Math.min(explicitExpiry, calculatedExpiry);
+
+            if (now > expiry) {
                 if (options.strict) return null;
                 console.warn('NCC-05 record expired');
             }
