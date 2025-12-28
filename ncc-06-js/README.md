@@ -103,8 +103,10 @@ The package exposes modular helpers so you can keep using your own transport sta
 
 ## Trust model
 
-- `k` is the binding between NCC-02/NCC-05 records and the TLS key that serves `wss://` endpoints. Clients connect with `rejectUnauthorized=false` and enforce trust by comparing the published `k` value to the expected fingerprint before using the endpoint.
-- When migrating to real TLS/SPKI pins, update the sidecar to publish the real fingerprint via `ncc02ExpectedKey` and update the resolver’s `expectedK`. The shared helpers keep the rest of the resolution flow untouched.
+- `k` is the binding between NCC-02/NCC-05 records and the transport-level key (TLS/SPKI) that serves the endpoint.
+- This applies to **any secure protocol** (`wss://`, `https://`, `tls://`, `tcps://`).
+- Clients connect (potentially with `rejectUnauthorized=false` for self-signed certs) and enforce trust by comparing the published `k` value to the expected fingerprint before using the endpoint.
+- When migrating to CA-signed certificates or real SPKI pins, update the sidecar to publish the real fingerprint via `ncc02ExpectedKey` and update the resolver’s `expectedK`. The shared helpers keep the rest of the resolution flow untouched.
 
 ## Reference Docs
 
