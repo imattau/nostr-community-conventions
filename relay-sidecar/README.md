@@ -26,7 +26,8 @@ Copy `config.example.json` to `config.json` and update the values:
 {
   "service_nsec": "nsec1...",
   "endpoints": [
-    { "url": "wss://relay.example.com", "priority": 10 }
+    { "url": "ws://v76zt...fake.onion:80", "priority": 1 },
+    { "url": "wss://203.0.113.1:7447", "priority": 10 }
   ],
   "publication_relays": [
     "wss://relay.damus.io",
@@ -41,6 +42,12 @@ Copy `config.example.json` to `config.json` and update the values:
 ```bash
 npm start
 ```
+
+### Development Mode (Hot Reloading)
+```bash
+npm run dev
+```
+Starts the backend with `--watch` and the frontend with the Vite dev server. The UI will proxy API requests to the backend automatically.
 
 ### Force Publish Now
 ```bash
@@ -59,7 +66,9 @@ node src/index.js inventory
 
 ## Architecture
 
-1. **Inventory:** Probes configured endpoints, fetches TLS fingerprints if missing.
-2. **Builder:** Assembles NCC-02 and NCC-05 events using the `ncc-06-js` library.
-3. **Publisher:** Delivers events to multiple relays with retry logic.
-4. **Scheduler:** Triggers updates based on change detection or refresh intervals.
+1. **Identity over Location:** Replaces DNS with cryptographic Nostr identity (`npub`). Clients find you via your key, regardless of your current IP or Onion address.
+2. **Inventory:** Probes configured endpoints, fetches TLS fingerprints (`k` tags) when missing.
+3. **Builder:** Assembles NCC-02 and NCC-05 events using the `ncc-06-js` library.
+4. **Publisher:** Delivers events to multiple relays with retry logic.
+5. **Scheduler:** Triggers updates based on change detection or refresh intervals.
+
