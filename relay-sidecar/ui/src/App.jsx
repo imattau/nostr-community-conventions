@@ -378,16 +378,17 @@ export default function App() {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Primary Relay URL (WSS)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Primary Endpoint (IP or Onion)</label>
                   <input 
                     type="text" 
-                    placeholder="wss://relay.yourdomain.com"
+                    placeholder="ws://abcdef...onion:80 or wss://1.2.3.4:7447"
                     className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm focus:border-blue-500 outline-none text-white font-mono"
                     onChange={(e) => setSetupData({
                       ...setupData,
                       config: { ...setupData.config, endpoints: [{ url: e.target.value, priority: 1 }] }
                     })}
                   />
+                  <p className="text-[10px] text-slate-500 mt-1 italic">The routable network address where your service is physically listening.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
