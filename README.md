@@ -1,4 +1,4 @@
-# Pubkey-Owned Service Discovery and Trust
+Pubkey-Owned Service Discovery and Trust
 
 **Status:** Informal / Experimental  
 **Type:** Convention  
@@ -17,6 +17,19 @@
 **Private Endpoint Resolution (Informative)**
 
 NCC-02 service records include public endpoint references and may disclose network location. Clients MAY use NCC-05 to privately resolve an endpoint for the same service identity when access-controlled resolution is desired. Where NCC-05 resolution succeeds, clients MAY prefer the NCC-05 resolved endpoint while continuing to apply NCC-02 trust semantics.
+
+---
+
+### Identity anchor relationship to NCC-05 (Informative)
+
+NCC-02 defines the identity, intent, and trust context for a service.
+
+When NCC-05 locator records exist for a service identity, clients SHOULD treat NCC-02 as the identity and trust anchor, except when explicitly operating in an unanchored or recovery mode.
+
+In anchored mode:
+1. Clients resolve and validate NCC-02 Service Records first, including signature verification, expiry checks, and any applicable attestation or revocation policy.
+2. Clients MAY prefer NCC-05 resolved endpoints for reachability and privacy.
+3. If NCC-05 resolution fails or yields no usable endpoint, clients MAY fall back to the NCC-02 `u` endpoint when present, while continuing to apply NCC-02 trust semantics.
 
 ---
 
@@ -72,6 +85,7 @@ Nostr already provides strong cryptographic identity. What is missing is a stand
 
 ---
 
+
 ## Overview
 
 This convention defines three event roles:
@@ -94,14 +108,31 @@ A Service Record is a parameterised replaceable event published by the service o
 
 Bind a pubkey to a reachable endpoint and its transport-level key.
 
-**Kind: 30059**
-
 #### Required tags
 
 - `d` – service identifier (for example `api`, `media`, `wallet`)  
 - `u` – endpoint URI (`https://`, `wss://`, `tcp://`, `onion://`)  
 - `k` – endpoint public key fingerprint (for example SPKI hash)  
 - `exp` – expiry timestamp (Unix seconds)  
+
+### Private and invite-only services (Clarifying)
+
+A valid NCC-02 Service Record MAY intentionally omit a publicly routable endpoint (`u`) in private or invite-only deployments.
+
+The absence of `u` does not invalidate the Service Record.
+
+In such cases:
+- NCC-02 continues to serve as the service identity and trust anchor.
+- NCC-05 provides the exclusive mechanism for authorised endpoint discovery.
+- Clients MUST NOT treat the absence of a public `u` value as a reason to bypass NCC-02 anchoring requirements.
+
+### `k` requirements (Normative)
+
+The `k` tag binds a service endpoint to a transport-level public key fingerprint.
+
+- If the `u` endpoint uses a TLS-protected scheme (for example `https://` or `wss://`), clients SHOULD treat `k` as REQUIRED unless explicitly operating in an override or recovery mode.
+- Clients SHOULD verify that the observed transport identity matches `k` and SHOULD fail closed on mismatch.
+
 
 #### Conventions
 
@@ -118,8 +149,6 @@ A Certificate Attestation is a signed statement by a certifier pubkey asserting 
 #### Purpose
 
 Provide assurance beyond self-assertion.
-
-**Kind: 30060**
 
 #### Required tags
 
@@ -144,8 +173,6 @@ Clients decide:
 ### 3. Revocation
 
 A Revocation is a signed event published by a certifier revoking a previously issued Certificate Attestation.
-
-**Kind: 30061**
 
 #### Required tags
 
@@ -276,11 +303,12 @@ Experimental and subject to change. Clients are free to adopt partially or not a
 ### A.1 Service Publisher
 
 ```text
-service_id = "media"
-endpoint_uri = "https://203.0.113.45:8443"
+service_id = "api"
+endpoint_uri = "https://example.net:8443"
 endpoint_key_fp = spki_hash(endpoint_tls_cert)
 expiry = now + 14 days
-```
+
+### A.1 Service Publisher
 
 Publish a signed, parameterised replaceable event containing the required tags.
 
@@ -310,4 +338,5 @@ Publish a signed attestation event that references the relevant Service Record a
 - No global registry is required  
 - Trust stores are application-defined  
 - Fail-closed defaults are recommended  
+
 
