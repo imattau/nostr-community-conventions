@@ -10,8 +10,8 @@ import { generateKeypair, toNsec } from 'ncc-06-js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function startWebServer(port = 3000) {
-  const server = fastify({ logger: true });
+export async function startWebServer(initialPort = 3000) {
+  const server = fastify({ logger: false }); // Reduce noise during port hunting
 
   await server.register(cors, { origin: true });
 
@@ -51,7 +51,7 @@ export async function startWebServer(port = 3000) {
     };
   });
 
-  // Serve Frontend (placeholder until built)
+  // Serve Frontend
   const uiPath = path.join(__dirname, '../ui/dist');
   try {
     await server.register(staticFiles, {
@@ -62,19 +62,36 @@ export async function startWebServer(port = 3000) {
       reply.sendFile('index.html');
     });
   } catch (err) {
-    server.log.warn('UI dist folder not found, serving API only');
+    // ignore
   }
 
-  try {
-    await server.listen({ port, host: '127.0.0.1' });
-    console.log(`[Web] Admin interface running at http://127.0.0.1:${port}`);
-  } catch (err) {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`[Web] Error: Port ${port} is already in use.`);
-      console.error(`[Web] Please specify a different port using the ADMIN_PORT environment variable.`);
-      process.exit(1);
+  let port = initialPort;
+  let success = false;
+  const maxAttempts = 20;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await server.listen({ port, host: '127.0.0.1' });
+      success = true;
+      break;
+    } catch (err) {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[Web] Port ${port} in use, trying ${port + 1}...`);
+        port++;
+      } else {
+        throw err;
+      }
     }
-    throw err;
   }
+
+  if (!success) {
+    console.error(`[Web] Failed to find an available port after ${maxAttempts} attempts.`);
+    process.exit(1);
+  }
+
+  console.log(`--- NCC-06 Admin Interface ---`);
+  console.log(`URL: http://127.0.0.1:${port}`);
+  console.log(`------------------------------`);
 }
+
 
