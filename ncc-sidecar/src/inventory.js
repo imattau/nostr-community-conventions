@@ -18,6 +18,7 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
     ipv6: { enabled: !!protocols.ipv6, address: networkProbe.ipv6 },
     wsPort: config.port || 80,
     wssPort: config.port || 443,
+    ncc02ExpectedKey: config.ncc02ExpectedKey || null,
     ensureOnionService: async () => {
       // 1. Check for manual onion address in config
       if (config.onion_address) {
@@ -61,6 +62,9 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
   }
 
   // Adjust priorities and schemes based on primary_protocol and service type
+  const expectedKey = config.ncc02ExpectedKey;
+  const secureProtocols = new Set(['wss', 'https', 'tls', 'tcps']);
+
   return finalEndpoints.map(ep => {
     let priority = ep.priority || 100;
     if (ep.family === primary_protocol) {
@@ -72,6 +76,7 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
 
     // Adjust URI scheme based on service type
     let url = ep.url;
+    const rawProtocol = (ep.protocol || url.split('://')[0]).toLowerCase();
     const isWeb = config.type === 'blossom' || config.type === 'custom';
     
     if (isWeb) {
@@ -84,6 +89,12 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
         url = url.replace('ws://', 'http://');
     }
 
-    return { ...ep, url, priority };
+    const endpoint = { ...ep, url, priority };
+    if (!endpoint.k && expectedKey && secureProtocols.has(rawProtocol)) {
+      endpoint.k = expectedKey;
+    }
+    const fingerprint = endpoint.k || expectedKey;
+    return { ...endpoint, tlsFingerprint: fingerprint };
+
   }).sort((a, b) => a.priority - b.priority);
 }

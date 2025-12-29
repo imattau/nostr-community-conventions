@@ -2,10 +2,11 @@ import fastify from 'fastify';
 import cors from '@fastify/cors';
 import staticFiles from '@fastify/static';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, updateService, getServices, deleteService } from './db.js';
+import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, updateService, getServices, deleteService, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
-import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4 } from 'ncc-06-js';
+import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,6 +109,44 @@ export async function startWebServer(initialPort = 3000, onInitialized) {
   server.delete('/api/service/:id', async (request) => {
     deleteService(request.params.id);
     return { success: true };
+  });
+
+  server.post('/api/service/:id/regenerate-tls', async (request, reply) => {
+    const services = getServices();
+    const service = services.find(s => String(s.id) === String(request.params.id));
+    if (!service) {
+      return reply.code(404).send({ error: 'Service not found' });
+    }
+
+    if (service.config?.generate_self_signed === false) {
+      return reply.code(400).send({ error: 'TLS regeneration is only available for services using self-signed certificates' });
+    }
+
+    const targetDir = path.join(process.cwd(), 'certs', String(service.id));
+    const altNames = [];
+    if (service.config?.probe_url) {
+      try {
+        altNames.push(new URL(service.config.probe_url).hostname);
+      } catch (err) {
+        // ignore invalid URL
+      }
+    }
+    if (altNames.length === 0) altNames.push('localhost');
+
+    try {
+      await fs.promises.rm(targetDir, { recursive: true, force: true });
+    } catch (err) {
+      // best effort removal
+    }
+
+    try {
+      await ensureSelfSignedCert({ targetDir, altNames });
+      addLog('info', `Regenerated TLS cert for ${service.name}`, { serviceId: service.id });
+      return { success: true };
+    } catch (err) {
+      console.error(`[Web] Failed to regenerate TLS cert for ${service.name}: ${err.message}`);
+      return reply.code(500).send({ error: err.message });
+    }
   });
 
   server.get('/api/admins', async () => {

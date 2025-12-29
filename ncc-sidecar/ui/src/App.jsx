@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { nip19, nip04, nip44, SimplePool } from 'nostr-tools';
+import { parseManualAdminPubkey } from './lib/adminKeyParser';
 import { QRCodeSVG } from 'qrcode.react';
 
 const toHex = (bytes) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -46,6 +47,7 @@ export default function App() {
   const [inviteNpub, setInviteNpub] = useState('');
   const [relayStatus, setRelayStatus] = useState({});
   const [nip46Logs, setNip46Logs] = useState([]);
+  const [regeneratingTlsServiceId, setRegeneratingTlsServiceId] = useState(null);
 
   const addNip46Log = (msg) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -191,7 +193,8 @@ export default function App() {
     if (initialized) {
       try {
         const res = await axios.get(`${API_BASE}/admins`);
-        const isAdmin = res.data.some(a => a.pubkey === pk);
+        const normalizedPk = pk?.toLowerCase();
+        const isAdmin = res.data.some(a => a.pubkey.toLowerCase() === normalizedPk);
         if (!isAdmin) {
           alert("Unauthorized: This identity is not an administrator of this node.");
           return false;
@@ -204,6 +207,21 @@ export default function App() {
     saveAdminPk(pk);
     handleAuthComplete();
     return true;
+  };
+
+  const handleForceConnection = async () => {
+    try {
+      const finalPk = parseManualAdminPubkey(manualPubkey);
+      console.info('[NIP-46 Force] manual input:', manualPubkey);
+      console.info('[NIP-46 Force] normalized hex:', finalPk);
+      const success = await verifyAndSaveAdmin(finalPk);
+      if (!success) {
+        console.warn('[NIP-46 Force] admin verification failed for', finalPk);
+      }
+    } catch (err) {
+      console.warn('[NIP-46 Force] manual input failed:', manualPubkey, err.message);
+      alert('Invalid npub/hex');
+    }
   };
 
   const handleAuthComplete = () => {
@@ -232,7 +250,8 @@ export default function App() {
     setNip46Logs([]);
     addNip46Log("Initializing secure channel...");
     
-    const uri = `nostrconnect://${pk}?${relays.map(r => `relay=${encodeURIComponent(r)}`).join('&')}&metadata=${encodeURIComponent(JSON.stringify({ name: 'NCC Sidecar' }))}`;
+    const clientNpub = nip19.npubEncode(pk);
+    const uri = `nostrconnect://${clientNpub}?${relays.map(r => `relay=${encodeURIComponent(r)}`).join('&')}&metadata=${encodeURIComponent(JSON.stringify({ name: 'NCC Sidecar' }))}`;
     setNip46Uri(uri);
     setLoginMode('nip46');
 
@@ -378,6 +397,35 @@ export default function App() {
       fetchServices();
       if (showNewServiceModal) setShowNewServiceModal(false);
     } catch (e) { alert("Failed to delete service: " + e.message); }
+  };
+
+  const regenerateTls = async (serviceId, { showAlert = true } = {}) => {
+    const service = services.find(s => String(s.id) === String(serviceId));
+    if (!service || service.config?.generate_self_signed === false) return;
+    setRegeneratingTlsServiceId(service.id);
+    try {
+      await axios.post(`${API_BASE}/service/${service.id}/regenerate-tls`);
+      fetchServices();
+      if (showAlert) {
+        alert('TLS certificate regenerated. The new fingerprint will be used on the next publish.');
+      }
+    } catch (e) {
+      alert('Failed to regenerate TLS certificate: ' + e.message);
+    } finally {
+      setRegeneratingTlsServiceId(null);
+    }
+  };
+
+  const handleRegenerateTls = async () => {
+    if (!editServiceId || newService.config?.generate_self_signed === false) return;
+    if (!confirm('Regenerate the self-signed TLS certificate for this service?')) return;
+    await regenerateTls(editServiceId);
+  };
+
+  const handleRegenerateTlsFromCard = async (service) => {
+    if (!service || service.config?.generate_self_signed === false) return;
+    if (!confirm(`Regenerate the self-signed TLS certificate for ${service.name}?`)) return;
+    await regenerateTls(service.id);
   };
 
   const copyToClipboard = (text, key) => {
@@ -759,6 +807,15 @@ export default function App() {
                                     setNewService(d => ({ ...d, config: { ...d.config, onion_private_key: undefined } }));
                                 }} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50">ROTATE ONION</button>
                             </div>
+                            <button 
+                              onClick={handleRegenerateTls}
+                              disabled={newService.config?.generate_self_signed === false || regeneratingTlsServiceId === editServiceId}
+                              title={newService.config?.generate_self_signed === false ? 'TLS managed elsewhere' : ''}
+                              className="w-full py-3 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50 transition-colors disabled:opacity-70 disabled:cursor-wait flex items-center justify-center space-x-2"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${regeneratingTlsServiceId === editServiceId ? 'animate-spin' : ''}`} />
+                              <span>{regeneratingTlsServiceId === editServiceId ? 'REGENERATING TLS...' : 'REGENERATE TLS CERT'}</span>
+                            </button>
                         </div>
                     )}
 
@@ -891,7 +948,7 @@ export default function App() {
                     </div>
 
                     <div className="space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between items-start">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Endpoints</span>
                         {s.config?.protocols?.tor && !s.state?.last_inventory?.some(e => e.family === 'onion') && (
                            <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded border ${s.state?.tor_status?.running ? 'border-yellow-500/50 bg-yellow-50 text-yellow-600' : 'border-red-500/50 bg-red-50 text-red-500'}`} title={s.state?.tor_status?.running ? "Tor running but no Onion Service configured" : "Tor not detected"}>
@@ -904,14 +961,16 @@ export default function App() {
                       {s.state?.last_inventory?.length > 0 ? (
                         <div className="space-y-1.5">
                           {s.state.last_inventory.map((ep, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
-                              <div className="flex items-center space-x-2 truncate">
-                                <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
-                                <span className="truncate max-w-[180px]">{ep.url}</span>
+                            <div key={idx} className="space-y-1.5">
+                              <div className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
+                                <div className="flex items-center space-x-2 truncate">
+                                  <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
+                                  <span className="truncate max-w-[180px]">{ep.url}</span>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${s.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
+                                  {copiedMap[`ep-${s.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                                </button>
                               </div>
-                              <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${s.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
-                                {copiedMap[`ep-${s.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                              </button>
                             </div>
                           ))}
                         </div>
@@ -920,6 +979,47 @@ export default function App() {
                           {s.state?.is_probing ? 'Probing...' : 'No active endpoints'}
                         </p>
                       )}
+                      <div className="mt-3 space-y-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TLS fingerprint</span>
+                        {(s.state?.last_inventory?.length || 0) > 0 ? (
+                          <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-2xl border border-slate-200 text-[10px] font-mono text-slate-600">
+                            <span className="truncate">
+                              {(() => {
+                                const match = s.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
+                                return match?.tlsFingerprint || match?.k || 'N/A';
+                              })()}
+                            </span>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const match = s.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
+                                  const value = match?.tlsFingerprint || match?.k;
+                                  if (value) copyToClipboard(value, `fingerprint-${s.id}`);
+                                }}
+                                className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              {s.config?.generate_self_signed === false ? (
+                                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400">TLS EXTERNAL</span>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRegenerateTlsFromCard(s); }}
+                                  disabled={regeneratingTlsServiceId && String(regeneratingTlsServiceId) === String(s.id)}
+                                  aria-label="Regenerate TLS certificate"
+                                  className="flex items-center justify-center px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-600 hover:border-blue-300 hover:bg-blue-100 transition-colors disabled:opacity-40 disabled:cursor-wait"
+                                >
+                                  <RefreshCw className={`w-4 h-4 ${regeneratingTlsServiceId && String(regeneratingTlsServiceId) === String(s.id) ? 'animate-spin' : ''}`} />
+                                  <span className="sr-only">Regenerate TLS cert</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-slate-500 italic">No TLS fingerprints available yet.</p>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter pt-2 border-t border-slate-100">
@@ -1050,7 +1150,7 @@ export default function App() {
                       <div className="space-y-4">
                         <p className="text-xs font-black text-blue-400 animate-pulse uppercase tracking-widest">Awaiting Signer Approval</p>
                         
-                        {/* NEW: Connection Logs */}
+                        {/* Connection Logs */}
                         <div className="bg-slate-950/50 rounded-2xl p-4 border border-white/5 font-mono text-[9px] text-left space-y-1 max-w-[280px] mx-auto">
                           {nip46Logs.length > 0 ? (
                             nip46Logs.map((log, i) => (
@@ -1074,13 +1174,7 @@ export default function App() {
                             onChange={(e) => setManualPubkey(e.target.value)}
                           />
                           {manualPubkey && (
-                            <button onClick={async () => { 
-                              try {
-                                const pk = manualPubkey.startsWith('npub1') ? fromNpub(manualPubkey) : manualPubkey;
-                                const finalPk = (typeof pk === 'string') ? pk : toHex(pk);
-                                await verifyAndSaveAdmin(finalPk); 
-                              } catch (e) { alert("Invalid npub/hex"); }
-                            }} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
+                            <button onClick={handleForceConnection} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
                           )}
                         </div>
                       </div>
