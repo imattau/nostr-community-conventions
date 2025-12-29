@@ -1,6 +1,6 @@
 {
   "name": "ncc-06-js",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Reusable NCC-06 discovery helpers for multimodal service identities.",
   "type": "module",
   "main": "src/index.js",
