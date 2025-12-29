@@ -8,6 +8,7 @@ import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, remo
 import { checkTor } from './tor-check.js';
 import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
+import { runPublishCycle } from './app.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -149,6 +150,30 @@ export async function startWebServer(initialPort = 3000, onInitialized) {
     }
   });
 
+  server.post('/api/services/republish', async () => {
+    const services = getServices().filter(s => s.status === 'active');
+    const details = [];
+    addLog('info', 'Manual republish triggered', { initiatedBy: 'admin' });
+    for (const service of services) {
+      try {
+        const updatedState = await runPublishCycle(service, { forcePublish: true });
+        details.push({ serviceId: service.id, success: true });
+        addLog('info', `Forced publish succeeded for ${service.name}`, {
+          serviceId: service.id,
+          reason: 'manual republish',
+          ncc02: updatedState.last_published_ncc02_id,
+          ncc05: updatedState.last_published_ncc05_id,
+          kind0: updatedState.last_published_kind0_id,
+          publishResults: updatedState.last_success_per_relay
+        });
+      } catch (err) {
+        addLog('error', `Forced publish failed for ${service.name}: ${err.message}`, { serviceId: service.id });
+        details.push({ serviceId: service.id, success: false, error: err.message });
+      }
+    }
+    return { success: true, details };
+  });
+
   server.get('/api/admins', async () => {
     return getAdmins();
   });
@@ -184,6 +209,41 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
   server.delete('/api/admin/:pubkey', async (request) => {
     removeAdmin(request.params.pubkey);
     return { success: true };
+  });
+
+  server.put('/api/config/publication-relays', async (request, reply) => {
+    const { relays } = request.body;
+    if (!Array.isArray(relays)) {
+      return reply.code(400).send({ error: 'relays must be an array of strings' });
+    }
+    const normalized = relays
+      .map(entry => String(entry || '').trim())
+      .filter(Boolean)
+      .map(entry => {
+        let candidate = entry;
+        if (/^https?:\/\//i.test(candidate)) {
+          candidate = candidate.replace(/^https?:\/\//i, match => (match.toLowerCase() === 'https://' ? 'wss://' : 'ws://'));
+        } else if (!/^wss?:\/\//i.test(candidate)) {
+          candidate = `wss://${candidate}`;
+        }
+        return candidate;
+      });
+
+    const appConfig = getConfig('app_config') || {};
+    appConfig.publication_relays = [...new Set(normalized)];
+    setConfig('app_config', appConfig);
+    
+    // propagate to existing services so their stored config stays in sync
+    const services = getServices();
+    for (const service of services) {
+      updateService(service.id, {
+        config: {
+          ...service.config,
+          publication_relays: appConfig.publication_relays
+        }
+      });
+    }
+    return { success: true, publication_relays: appConfig.publication_relays };
   });
 
   server.get('/api/service/generate-key', async () => {
