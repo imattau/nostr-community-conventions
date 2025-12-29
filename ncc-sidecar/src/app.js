@@ -78,9 +78,20 @@ export async function runPublishCycle(service) {
   const torStatus = await checkTor();
   
   const inventory = await buildInventory({ ...config, type, torAddress }, { ipv4, ipv6 }, torStatus);
-  const inventoryHash = crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
+  
+  // Stable hashing to prevent redundant updates
+  const stableInventory = inventory.map(e => ({ url: e.url, priority: e.priority, family: e.family }));
+  const stableProfile = {
+    name: config.profile?.name,
+    about: config.profile?.about,
+    picture: config.profile?.picture
+  };
+  const combinedHash = crypto.createHash('sha256')
+    .update(JSON.stringify(stableInventory))
+    .update(JSON.stringify(stableProfile))
+    .digest('hex');
 
-  // 3. Build Records
+  // 2. Build Records
   const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords({
     ...config,
     ncc02ExpiryDays: config.ncc02_expiry_days || 14,
@@ -98,7 +109,10 @@ export async function runPublishCycle(service) {
   const now = Date.now();
   const timeSinceLastPublish = now - (state.last_full_publish_timestamp || 0);
   const isIntervalReached = timeSinceLastPublish > (config.refresh_interval_minutes || 60) * 60 * 1000;
-  const isChanged = inventoryHash !== state.last_endpoints_hash;
+  const isChanged = combinedHash !== state.last_endpoints_hash;
+
+  console.debug(`[App] Service ${name} hash comparison: current=${combinedHash}, last=${state.last_endpoints_hash}, changed=${isChanged}`);
+
   const isFirstRunForService = !state.last_published_ncc02_id;
 
   if (!isFirstRunForService && !isChanged && !isIntervalReached && state.last_published_ncc02_id) {
@@ -106,6 +120,9 @@ export async function runPublishCycle(service) {
     updateService(id, { state: finalState });
     return finalState;
   }
+
+  const reason = isFirstRunForService ? 'Initial' : (isChanged ? 'Config/Network Change' : 'Interval');
+  console.log(`[App] Publishing ${name} due to: ${reason}`);
 
   // 4. Publish
   let publicationRelays = config.publication_relays || [];
@@ -146,7 +163,7 @@ export async function runPublishCycle(service) {
     ...state,
     is_probing: false,
     last_published_ncc02_id: ncc02Event.id,
-    last_endpoints_hash: inventoryHash,
+    last_endpoints_hash: combinedHash,
     last_inventory: inventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now,
@@ -156,8 +173,9 @@ export async function runPublishCycle(service) {
   updateService(id, { state: newState });
   
   const eventInfo = `NCC-02: ${ncc02Event.id.slice(0, 8)}...`;
-  addLog('info', `Published updates for ${name} (${eventInfo})`, { 
+  addLog('info', `Published updates for ${name} (${reason}) [${eventInfo}]`, { 
     serviceId: id,
+    reason,
     ncc02: ncc02Event.id,
     ncc05: ncc05EventTemplate.id,
     kind0: eventsToPublish.find(e => e.kind === 0)?.id
