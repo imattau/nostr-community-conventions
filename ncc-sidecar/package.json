@@ -4,7 +4,7 @@
   "description": "Multi-service NCC-06 discovery manager",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/**/*.test.js",
     "start": "node src/index.js",
     "dev": "run-p dev:*",
     "dev:backend": "node --watch src/index.js",

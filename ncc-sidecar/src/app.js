@@ -37,6 +37,8 @@ export async function runPublishCycle(service) {
   // 2. Build Records
   const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords({
     ...config,
+    ncc02ExpiryDays: config.ncc02_expiry_days || 14,
+    ncc05TtlHours: config.ncc05_ttl_hours || 1,
     secretKey,
     publicKey,
     serviceId: service_id,

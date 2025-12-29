@@ -59,6 +59,9 @@ export function createMockRelay(port = 0) {
     port: () => getPort(),
     url: () => `ws://localhost:${getPort()}`,
     receivedEvents: () => events,
-    close: () => new Promise(res => wss.close(res))
+    close: () => new Promise(res => {
+      wss.clients.forEach(client => client.terminate());
+      wss.close(res);
+    })
   };
 }

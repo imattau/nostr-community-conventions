@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
+import { SimplePool } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05-js';
-import { NCC02Resolver } from 'ncc-02-js';
+import { validateNcc02, parseNcc02Tags } from './ncc02.js';
 import { validateLocatorFreshness, normalizeLocatorEndpoints } from './ncc05.js';
 import { choosePreferredEndpoint } from './selector.js';
 
@@ -39,20 +40,52 @@ export async function resolveServiceEndpoint(options = {}) {
     throw new Error('At least one bootstrap relay is required');
   }
 
+  // 1. Resolve NCC-02 Service Record
   const timestamp = now ?? Math.floor(Date.now() / 1000);
   const locatorResolver = resolveLocator ?? defaultResolveLocator;
 
-  // 1. Resolve NCC-02 Service Record using the library
   let serviceRecord;
-  const resolver = ncc02Resolver || new NCC02Resolver(bootstrapRelays, { pool });
-  try {
-    serviceRecord = await resolver.resolve(servicePubkey, serviceId, {});
-  } catch (err) {
-    throw err;
-  } finally {
-    if (!ncc02Resolver) {
-      resolver.close();
+  if (ncc02Resolver) {
+    serviceRecord = await ncc02Resolver.resolve(servicePubkey, serviceId, {});
+  } else {
+    const poolToUse = pool || new SimplePool();
+    try {
+      const filters = [{
+        kinds: [30059],
+        authors: [servicePubkey],
+        '#d': [serviceId]
+      }];
+      const events = await new Promise((resolve) => {
+        const results = [];
+        const sub = poolToUse.subscribeMany(bootstrapRelays, filters, {
+          onevent(e) { results.push(e); },
+          oneose() { sub.close(); resolve(results); }
+        });
+        setTimeout(() => { sub.close(); resolve(results); }, publicationRelayTimeoutMs);
+      });
+
+      // Sort and validate
+      const validEvents = events
+        .filter(e => validateNcc02(e, { expectedAuthor: servicePubkey, expectedD: serviceId, now: timestamp }))
+        .sort((a, b) => b.created_at - a.created_at);
+      
+      if (validEvents[0]) {
+        const tags = parseNcc02Tags(validEvents[0]);
+        serviceRecord = {
+          endpoint: tags.u,
+          fingerprint: tags.k,
+          expiry: Number(tags.exp),
+          eventId: validEvents[0].id,
+          pubkey: validEvents[0].pubkey
+        };
+      }
+    } finally {
+      if (!pool) poolToUse.close(bootstrapRelays);
     }
+  }
+  
+  if (!serviceRecord) {
+    throw new Error(`No valid NCC-02 record found for ${serviceId}`);
   }
   
   // 2. Resolve NCC-05 Locator
@@ -156,7 +189,9 @@ async function defaultResolveLocator({
       gossip: false
     });
   } finally {
-    resolver.close();
+    if (resolver && typeof resolver.close === 'function') {
+      resolver.close();
+    }
   }
 }
 

@@ -13,6 +13,11 @@ test('Web API and Setup Flow', async (t) => {
   // Start server on a high port to avoid conflicts
   const server = await startWebServer(4000);
 
+  t.after(async () => {
+    await server.close();
+    if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
+  });
+
   await t.test('GET /api/setup/status returns uninitialized', async () => {
     const response = await server.inject({
       method: 'GET',
@@ -59,10 +64,5 @@ test('Web API and Setup Flow', async (t) => {
     const data = JSON.parse(response.body);
     assert.strictEqual(data.status, 'running');
     assert.deepStrictEqual(data.config, { foo: 'bar' });
-  });
-
-  after(async () => {
-    await server.close();
-    if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);
   });
 });
