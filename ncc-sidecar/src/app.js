@@ -13,13 +13,17 @@ export async function runPublishCycle(service) {
   const publicKey = getPublicKey(secretKey);
   
   console.log(`[App] Starting publish cycle for service: ${name} (${id})`);
+  
+  // Mark as probing
+  updateService(id, { state: { ...state, is_probing: true } });
 
   // 0. Optional: Generate Self-Signed Cert
   if (config.generate_self_signed) {
     try {
+      const altNames = config.probe_url ? [new URL(config.probe_url).hostname] : ['localhost'];
       await ensureSelfSignedCert({
         targetDir: `./certs/${id}`,
-        altNames: config.probe_url ? [new URL(config.probe_url).hostname] : []
+        altNames
       });
     } catch (err) {
       addLog('error', `Cert generation failed for ${name}: ${err.message}`, { serviceId: id });
@@ -45,27 +49,65 @@ export async function runPublishCycle(service) {
     locatorId: service_id + '-locator'
   }, inventory);
 
+  // Update DB with inventory immediately so UI sees it
+  updateService(id, { state: { ...state, last_inventory: inventory } });
+
   // 3. Change Detection
   const now = Date.now();
   const timeSinceLastPublish = now - (state.last_full_publish_timestamp || 0);
   const isIntervalReached = timeSinceLastPublish > (config.refresh_interval_minutes || 60) * 60 * 1000;
   const isChanged = inventoryHash !== state.last_endpoints_hash;
+  const isFirstRunForService = !state.last_published_ncc02_id;
 
-  if (!isChanged && !isIntervalReached && state.last_published_ncc02_id) {
-    return state;
+  if (!isFirstRunForService && !isChanged && !isIntervalReached && state.last_published_ncc02_id) {
+    const finalState = { ...state, is_probing: false, last_inventory: inventory };
+    updateService(id, { state: finalState });
+    return finalState;
   }
 
   // 4. Publish
-  const publicationRelays = config.publication_relays || [];
-  const publishResults = await publishToRelays(publicationRelays, [ncc02Event, ncc05EventTemplate], secretKey);
+  let publicationRelays = config.publication_relays || [];
+  
+  // If Private Mode, do not publish to external relays
+  if (config.service_mode === 'private') {
+    publicationRelays = [];
+    console.log(`[App] Service ${name} is Private. Skipping external publication.`);
+  }
+
+  const eventsToPublish = [ncc02Event, ncc05EventTemplate];
+
+  // Add Kind 0 (Metadata) if profile exists
+  if (config.profile) {
+    const metadata = {
+      name: config.profile.name || name,
+      about: config.profile.about,
+      picture: config.profile.picture,
+      nip05: config.profile.nip05
+    };
+    // Remove undefined keys
+    Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
+
+    const kind0Event = {
+      kind: 0,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+      content: JSON.stringify(metadata)
+    };
+    eventsToPublish.push(kind0Event);
+  }
+
+  const publishResults = await publishToRelays(publicationRelays, eventsToPublish, secretKey);
 
   // 5. Update State in DB
   const newState = {
     ...state,
+    is_probing: false,
     last_published_ncc02_id: ncc02Event.id,
     last_endpoints_hash: inventoryHash,
+    last_inventory: inventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
-    last_full_publish_timestamp: now
+    last_full_publish_timestamp: now,
+    tor_status: torStatus
   };
 
   updateService(id, { state: newState });
@@ -82,6 +124,7 @@ export function startManager(getServices) {
         await runPublishCycle(service);
       } catch (err) {
         console.error(`[Manager] Service ${service.name} failed: ${err.message}`);
+        addLog('error', `Service cycle failed: ${err.message}`, { serviceId: service.id });
       }
     }
     setTimeout(loop, 60000); // Check every minute

@@ -22,6 +22,12 @@ npm run build
 
 # Start the manager
 npm start
+
+# Force reset and re-run setup wizard
+npm run first-run
+
+# Wipe all data and exit (factory reset)
+npm run reset
 ```
 
 ## Architecture

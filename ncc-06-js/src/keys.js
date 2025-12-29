@@ -1,5 +1,7 @@
-import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { generateSecretKey, getPublicKey as getPk } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
+
+export const getPublicKey = getPk;
 
 /**
  * Generate a deterministic keypair, returning all common formats.

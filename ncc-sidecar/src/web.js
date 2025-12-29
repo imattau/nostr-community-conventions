@@ -11,7 +11,7 @@ import { sendInviteDM } from './dm.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function startWebServer(initialPort = 3000) {
+export async function startWebServer(initialPort = 3000, onInitialized) {
   const server = fastify({ logger: false });
 
   await server.register(cors, { origin: true });
@@ -31,27 +31,65 @@ export async function startWebServer(initialPort = 3000) {
     return { ipv6, ipv4 };
   });
 
+  server.get('/api/network/detect-proxy', async (request) => {
+    const forwardedFor = request.headers['x-forwarded-for'];
+    const forwardedProto = request.headers['x-forwarded-proto'];
+    const host = request.headers['host'];
+    
+    // Simple heuristic: if x-forwarded headers exist, likely behind proxy.
+    // Also if host doesn't match localhost/127.0.0.1 (though that might just mean bound to 0.0.0.0 and accessed via IP)
+    
+    return {
+      detected: !!(forwardedFor || forwardedProto),
+      details: {
+        'x-forwarded-for': forwardedFor,
+        'x-forwarded-proto': forwardedProto,
+        'host': host
+      }
+    };
+  });
+
   server.post('/api/setup/init', async (request, reply) => {
     if (isInitialized()) {
       return reply.code(400).send({ error: 'Already initialized' });
     }
-    const { adminPubkey, service, config } = request.body;
+    const { adminPubkey, config: userConfig } = request.body;
     
-    if (!adminPubkey || !service || !config) {
-      return reply.code(400).send({ error: 'Missing required fields' });
+    if (!adminPubkey) {
+      return reply.code(400).send({ error: 'Admin Pubkey is required' });
     }
 
+    const sidecarKeys = generateKeypair();
+    const defaultConfig = {
+      refresh_interval_minutes: 360,
+      ncc02_expiry_days: 14,
+      ncc05_ttl_hours: 12,
+      service_mode: 'public',
+      generate_self_signed: true,
+      protocols: { ipv4: true, ipv6: true, tor: true },
+      primary_protocol: 'ipv4',
+      ...userConfig
+    };
+
     addAdmin(adminPubkey, 'active');
-    setConfig('app_config', config);
-    addService({
-      type: service.type,
-      name: service.name,
-      service_id: service.service_id,
-      service_nsec: service.service_nsec,
-      config: config
-    });
+    setConfig('app_config', defaultConfig);
     
-    return { success: true };
+    // Automatically add the Sidecar's own discovery profile
+    addService({
+      type: 'sidecar',
+      name: 'Sidecar Node',
+      service_id: 'manager',
+      service_nsec: sidecarKeys.nsec,
+      config: defaultConfig
+    });
+
+    if (onInitialized) onInitialized();
+    
+    return { 
+      success: true, 
+      sidecar_nsec: sidecarKeys.nsec,
+      sidecar_npub: sidecarKeys.npub 
+    };
   });
 
   server.get('/api/services', async () => {

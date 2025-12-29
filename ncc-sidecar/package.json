@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node --test test/**/*.test.js",
     "start": "node src/index.js",
-    "dev": "run-p dev:*",
+    "first-run": "node src/index.js --first-run",
+    "reset": "node src/index.js reset && rm -rf certs",
+    "dev": "run-p dev:backend dev:ui",
     "dev:backend": "node --watch src/index.js",
     "dev:ui": "cd ui && npm run dev",
     "status": "node src/index.js status",
