@@ -19,8 +19,9 @@ export function buildRecords(config, inventory) {
   // 2. Build NCC-05 Locator Payload
   const locatorPayload = buildLocatorPayload({
     endpoints: inventory,
-    ttl: config.ncc05TtlHours * 3600
+    ttl: config.ncc05_ttl_hours * 3600
   });
+
 
   const createdAt = Math.floor(Date.now() / 1000);
   const expiration = createdAt + locatorPayload.ttl;

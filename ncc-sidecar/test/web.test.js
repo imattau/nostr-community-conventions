@@ -28,7 +28,12 @@ test('Web API and Setup Flow', async (t) => {
       url: '/api/setup/init',
       payload: {
         adminPubkey: 'admin-pk',
-        serviceNsec: 'nsec1...',
+        service: {
+          type: 'relay',
+          name: 'Test Relay',
+          service_id: 'relay',
+          service_nsec: 'nsec1...'
+        },
         config: { foo: 'bar' }
       }
     });

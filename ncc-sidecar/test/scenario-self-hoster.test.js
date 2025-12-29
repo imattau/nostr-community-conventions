@@ -7,13 +7,13 @@ globalThis.WebSocket = WebSocket;
 
 import { createMockRelay } from './mock-relay.js';
 import { runPublishCycle } from '../src/app.js';
-import { initDb } from '../src/db.js';
+import { initDb, addService } from '../src/db.js';
 import { generateKeypair, resolveServiceEndpoint } from 'ncc-06-js';
 import { finalizeEvent } from 'nostr-tools/pure';
 
 test('Scenario: Self-Hoster with Dynamic IP and Onion Fallback', async () => {
   // 1. Setup Identities
-  const { secretKey: serviceSk, publicKey: servicePk, npub: serviceNpub } = generateKeypair();
+  const { nsec: serviceNsec, publicKey: servicePk } = generateKeypair();
   
   // 2. Start Infrastructure
   const serviceRelay = createMockRelay();   // The actual relay being hosted
@@ -28,30 +28,35 @@ test('Scenario: Self-Hoster with Dynamic IP and Onion Fallback', async () => {
   initDb(dbPath);
 
   // 3. Configure Sidecar for this service
-  const config = {
-    secretKey: serviceSk,
-    publicKey: servicePk,
-    npub: serviceNpub,
-    serviceId: 'relay',
-    locatorId: 'relay-locator',
-    endpoints: [
-      { url: mockOnion, family: 'onion', priority: 10 },
-      { url: serviceUrl, family: 'ipv4', priority: 1 } 
-    ],
-    publicationRelays: [discoveryUrl],
-    refreshIntervalMinutes: 60,
-    ncc02ExpiryDays: 1,
-    ncc05TtlHours: 1,
-    service_mode: 'public',
-    protocols: { ipv4: true, ipv6: true, tor: true },
-    primary_protocol: 'ipv4'
+  const service = {
+    id: 1,
+    name: 'Test Relay',
+    service_id: 'relay',
+    service_nsec: serviceNsec,
+    config: {
+      endpoints: [
+        { url: mockOnion, family: 'onion', priority: 10 },
+        { url: serviceUrl, family: 'ipv4', priority: 1 } 
+      ],
+      publication_relays: [discoveryUrl],
+      refresh_interval_minutes: 60,
+      ncc02_expiry_days: 1,
+      ncc05_ttl_hours: 1,
+      service_mode: 'public',
+      protocols: { ipv4: true, ipv6: true, tor: true },
+      primary_protocol: 'ipv4'
+    },
+    state: {
+      last_full_publish_timestamp: 0
+    }
   };
+
+  addService(service);
 
   try {
     // 4. Run Sidecar (Publish discovery records to the bootstrap relay)
     console.log('[Test] Running Sidecar publish cycle...');
-    // We pass empty probe results to ensure it uses our manual test endpoints
-    await runPublishCycle(config, { last_full_publish_timestamp: 0 }, {}, {});
+    await runPublishCycle(service);
     
     console.log('[Test] Sidecar publish complete.');
     // Give some time for the mock relays to "receive" the events

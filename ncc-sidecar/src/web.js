@@ -37,7 +37,12 @@ export async function startWebServer(initialPort = 3000) {
     }
     const { adminPubkey, service, config } = request.body;
     
+    if (!adminPubkey || !service || !config) {
+      return reply.code(400).send({ error: 'Missing required fields' });
+    }
+
     addAdmin(adminPubkey, 'active');
+    setConfig('app_config', config);
     addService({
       type: service.type,
       name: service.name,
@@ -69,9 +74,12 @@ export async function startWebServer(initialPort = 3000) {
   server.post('/api/admin/invite', async (request, reply) => {
     const { npub, publicUrl } = request.body;
     const pubkey = fromNpub(npub);
-    const serviceNsec = getConfig('service_nsec');
+    const services = getServices();
+    if (services.length === 0) return reply.code(400).send({ error: 'No services configured' });
+    
+    const serviceNsec = services[0].service_nsec;
     const appConfig = getConfig('app_config');
-    const keys = generateKeypair(fromNsec(serviceNsec));
+    const keys = { nsec: serviceNsec, npub: toNpub(getPublicKey(fromNsec(serviceNsec))) };
 
     const inviteMsg = `You are invited to manage NCC-06 Sidecar for ${keys.npub}. 
 Login here: ${publicUrl || 'http://' + request.headers.host}`;
@@ -106,6 +114,7 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     return {
       status: 'running',
       config: getConfig('app_config'),
+      services: getServices().length,
       logs: getLogs(20)
     };
   });

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { scheduleWithJitter, ensureSelfSignedCert, fromNpub, getPublicIPv4, detectGlobalIPv6 } from 'ncc-06-js';
-import { NCC05Publisher } from 'ncc-05-js';
+import { scheduleWithJitter, ensureSelfSignedCert, fromNsec, getPublicIPv4, detectGlobalIPv6 } from 'ncc-06-js';
+import { getPublicKey } from 'nostr-tools/pure';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
@@ -8,8 +8,9 @@ import { updateService, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
 
 export async function runPublishCycle(service) {
-  const { id, name, service_nsec, config, state } = service;
-  const secretKey = fromNpub(service_nsec); // Logic might need sk from nsec helper
+  const { id, name, service_nsec, service_id, config, state } = service;
+  const secretKey = fromNsec(service_nsec);
+  const publicKey = getPublicKey(secretKey);
   
   console.log(`[App] Starting publish cycle for service: ${name} (${id})`);
 
@@ -21,7 +22,7 @@ export async function runPublishCycle(service) {
         altNames: config.probe_url ? [new URL(config.probe_url).hostname] : []
       });
     } catch (err) {
-      addLog('error', `Cert generation failed for ${name}: ${err.message}`);
+      addLog('error', `Cert generation failed for ${name}: ${err.message}`, { serviceId: id });
     }
   }
 
@@ -36,23 +37,25 @@ export async function runPublishCycle(service) {
   // 2. Build Records
   const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords({
     ...config,
-    secretKey: fromNpub(service_nsec), // Fix: actually sk
-    publicKey: fromNpub(service_nsec) // Placeholder
+    secretKey,
+    publicKey,
+    serviceId: service_id,
+    locatorId: service_id + '-locator'
   }, inventory);
 
   // 3. Change Detection
   const now = Date.now();
   const timeSinceLastPublish = now - (state.last_full_publish_timestamp || 0);
-  const isIntervalReached = timeSinceLastPublish > config.refresh_interval_minutes * 60 * 1000;
+  const isIntervalReached = timeSinceLastPublish > (config.refresh_interval_minutes || 60) * 60 * 1000;
   const isChanged = inventoryHash !== state.last_endpoints_hash;
 
-  if (!isChanged && !isIntervalReached) {
+  if (!isChanged && !isIntervalReached && state.last_published_ncc02_id) {
     return state;
   }
 
-  // 4. Advanced NCC-05 Logic (Skipped for briefness, same as before but per service)
+  // 4. Publish
   const publicationRelays = config.publication_relays || [];
-  const publishResults = await publishToRelays(publicationRelays, [ncc02Event, ncc05EventTemplate], fromNpub(service_nsec));
+  const publishResults = await publishToRelays(publicationRelays, [ncc02Event, ncc05EventTemplate], secretKey);
 
   // 5. Update State in DB
   const newState = {

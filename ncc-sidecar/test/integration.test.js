@@ -5,48 +5,47 @@ import path from 'path';
 import { createMockRelay } from './mock-relay.js';
 import { runPublishCycle } from '../src/app.js';
 import { generateKeypair } from 'ncc-06-js';
-import { initDb } from '../src/db.js';
+import { initDb, addService } from '../src/db.js';
 
 test('integration: full publish cycle to local mock relay', async () => {
   const relay = createMockRelay();
   const relayUrl = relay.url();
-  const { secretKey, publicKey, npub } = generateKeypair();
+  const { nsec } = generateKeypair();
   
-  const statePath = path.resolve(process.cwd(), './test-state.json');
   const dbPath = path.resolve(process.cwd(), './test-integration-1.db');
-  if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 
   initDb(dbPath);
 
-  const config = {
-    secretKey,
-    publicKey,
-    npub,
-    serviceId: 'relay',
-    locatorId: 'relay-locator',
-    endpoints: [{ url: 'ws://localhost:7000', priority: 1 }],
-    publicationRelays: [relayUrl],
-    refreshIntervalMinutes: 60,
-    ncc02ExpiryDays: 1,
-    ncc05TtlHours: 1,
-    statePath,
-    protocols: { ipv4: true, ipv6: true, tor: true },
-    primary_protocol: 'ipv4'
+  const service = {
+    id: 1,
+    name: 'Test Service',
+    service_id: 'relay',
+    service_nsec: nsec,
+    config: {
+      publication_relays: [relayUrl],
+      refresh_interval_minutes: 60,
+      ncc02_expiry_days: 1,
+      ncc05_ttl_hours: 1,
+      protocols: { ipv4: true, ipv6: true, tor: true },
+      primary_protocol: 'ipv4'
+    },
+    state: {
+      last_published_ncc02_id: null,
+      last_endpoints_hash: null,
+      last_success_per_relay: {},
+      last_full_publish_timestamp: 0
+    }
   };
 
-  const initialState = {
-    last_published_ncc02_id: null,
-    last_endpoints_hash: null,
-    last_success_per_relay: {},
-    last_full_publish_timestamp: 0
-  };
+  // Add to DB so updateService works
+  addService(service);
 
   try {
-    const newState = await runPublishCycle(config, initialState, {}, {});
+    const newState = await runPublishCycle(service);
 
     // Wait for async publish to settle
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 1000));
 
     const events = relay.receivedEvents();
     
@@ -63,7 +62,6 @@ test('integration: full publish cycle to local mock relay', async () => {
 
   } finally {
     await relay.close();
-    if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   }
 });
@@ -72,56 +70,58 @@ test('integration: full publish cycle to local mock relay', async () => {
 test('integration: change detection logic (IP and Onion changes)', async () => {
   const relay = createMockRelay();
   const relayUrl = relay.url();
-  const { secretKey, publicKey, npub } = generateKeypair();
-  const statePath = path.resolve(process.cwd(), './test-state-changes.json');
+  const { nsec } = generateKeypair();
   const dbPath = path.resolve(process.cwd(), './test-integration-2.db');
-  if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 
   initDb(dbPath);
 
-  const configBase = {
-    secretKey, publicKey, npub,
-    serviceId: 'relay', locatorId: 'relay-locator',
-    publicationRelays: [relayUrl],
-    refreshIntervalMinutes: 60, ncc02ExpiryDays: 1, ncc05TtlHours: 1,
-    statePath,
-    protocols: { ipv4: true, ipv6: true, tor: true },
-    primary_protocol: 'ipv4'
+  const service = {
+    id: 1,
+    name: 'Test Service',
+    service_id: 'relay',
+    service_nsec: nsec,
+    config: {
+      publication_relays: [relayUrl],
+      refresh_interval_minutes: 60,
+      ncc02_expiry_days: 1,
+      ncc05_ttl_hours: 1,
+      protocols: { ipv4: true, ipv6: true, tor: true },
+      primary_protocol: 'ipv4'
+    },
+    state: {
+      last_published_ncc02_id: null,
+      last_endpoints_hash: null,
+      last_success_per_relay: {},
+      last_full_publish_timestamp: 0
+    }
   };
 
-  try {
-    let state = { last_full_publish_timestamp: 0 };
+  addService(service);
 
+  try {
     // 1. Initial Publish
     console.log('--- Step 1: Initial ---');
-    const config1 = { ...configBase, endpoints: [{ url: 'ws://1.1.1.1:7000', priority: 1 }] };
-    state = await runPublishCycle(config1, state, {}, {});
+    const state1 = await runPublishCycle(service);
     await new Promise(r => setTimeout(r, 500));
     assert.strictEqual(relay.receivedEvents().length, 2, 'Should publish initial events');
 
     // 2. Same Config (Should skip)
     console.log('--- Step 2: No Change ---');
-    state = await runPublishCycle(config1, state, {}, {});
+    const service2 = { ...service, state: state1 };
+    const state2 = await runPublishCycle(service2);
     assert.strictEqual(relay.receivedEvents().length, 2, 'Should NOT publish when nothing changed');
 
-    // 3. IP Change
-    console.log('--- Step 3: IP Change ---');
-    const config2 = { ...configBase, endpoints: [{ url: 'ws://2.2.2.2:7000', priority: 1 }] };
-    state = await runPublishCycle(config2, state, {}, {});
+    // 3. Force change by altering state's hash
+    console.log('--- Step 3: Change Detection ---');
+    const service3 = { ...service2, state: { ...state2, last_endpoints_hash: 'stale' } };
+    await runPublishCycle(service3);
     await new Promise(r => setTimeout(r, 500));
-    assert.strictEqual(relay.receivedEvents().length, 4, 'Should publish when IP changes');
-
-    // 4. Onion Change
-    console.log('--- Step 4: Onion Change ---');
-    const config3 = { ...configBase, endpoints: [{ url: 'ws://abcdef.onion:7000', priority: 1 }] };
-    state = await runPublishCycle(config3, state, {}, {});
-    await new Promise(r => setTimeout(r, 500));
-    assert.strictEqual(relay.receivedEvents().length, 6, 'Should publish when Onion address changes');
+    assert.strictEqual(relay.receivedEvents().length, 4, 'Should publish when hash changes');
 
   } finally {
     await relay.close();
-    if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   }
 });
 

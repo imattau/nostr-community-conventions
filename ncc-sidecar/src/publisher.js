@@ -37,17 +37,21 @@ function publishToRelay(relayUrl, events, secretKey) {
       try {
         const msg = JSON.parse(data.toString());
         if (msg[0] === 'OK') {
-          // Track individual OKs if needed, but we resolve on EOSE or just after sending
+          // One OK is enough to consider it a success for this relay in many cases
+          clearTimeout(timeout);
+          clearTimeout(finishTimeout);
+          ws.close();
+          resolve();
         }
       } catch (e) {}
     });
 
-    // Simple strategy: wait a bit for OKs then close
-    setTimeout(() => {
+    // Fallback: wait a bit for OKs then close
+    const finishTimeout = setTimeout(() => {
       clearTimeout(timeout);
       ws.close();
       resolve();
-    }, 2000);
+    }, 1000);
 
     ws.on('error', (err) => {
       clearTimeout(timeout);
