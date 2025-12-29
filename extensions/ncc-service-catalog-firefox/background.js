@@ -14,6 +14,7 @@
   let lastRelays = [...DEFAULT_RELAYS];
   let lastUpdated = null;
   let lastStatus = { success: false, errors: [] };
+  const profilesByPubkey = new Map();
 
   function normalizeRelayList(values) {
     const unique = new Map();
@@ -80,6 +81,14 @@
     return Array.from(set);
   }
 
+  function getTrackedPubkeys() {
+    const pubkeys = new Set();
+    for (const entry of catalogMap.values()) {
+      if (entry.pubkey) pubkeys.add(entry.pubkey);
+    }
+    return Array.from(pubkeys);
+  }
+
   function formatResponseEntries() {
     const entries = Array.from(catalogMap.values()).sort((a, b) => {
       const aName = (a.name || a.serviceId || '').toLowerCase();
@@ -98,7 +107,8 @@
       created_at: entry.created_at,
       expires_at: entry.expires_at,
       last_seen_at: entry.last_seen_at,
-      content: entry.content
+      content: entry.content,
+      profile: entry.profile || null
     }));
   }
 
@@ -126,8 +136,6 @@
     if (!event.pubkey || typeof event.pubkey !== 'string') return false;
     const serviceId = getTagValue(event.tags, 'd');
     if (!serviceId) return false;
-    const fingerprint = getTagValue(event.tags, 'k');
-    if (!fingerprint) return false;
     return true;
   }
 
@@ -151,10 +159,12 @@
     const mergedEndpoints = mergeEndpoints(existing.endpoints, endpoints);
     const mergedRelays = Array.from(new Set([...(existing.relays || []), relayUrl]));
 
+    const fallbackName = typeof metadata?.raw === 'string' ? metadata.raw : null;
+    const profile = profilesByPubkey.get(event.pubkey);
     const entry = {
       serviceId,
       pubkey: event.pubkey,
-      name: metadata.name || metadata.display_name || existing.name || serviceId,
+      name: profile?.display_name || profile?.name || metadata.name || metadata.display_name || fallbackName || existing.name || serviceId,
       about: metadata.about || existing.about || '',
       picture: metadata.picture || existing.picture || '',
       fingerprint: fingerprint || existing.fingerprint || null,
@@ -163,17 +173,41 @@
       created_at: event.created_at,
       expires_at: expiresAt || existing.expires_at || null,
       last_seen_at: Date.now(),
-      content: event.content
+      content: event.content,
+      profile: profile || existing.profile || null
     };
 
     catalogMap.set(serviceId, entry);
+  }
+
+  function handleProfileEvent(event) {
+    if (!event || event.kind !== 0 || !event.pubkey) return;
+    const metadata = parseContent(event.content);
+    profilesByPubkey.set(event.pubkey, metadata);
+    let updated = false;
+    for (const entry of catalogMap.values()) {
+      if (entry.pubkey === event.pubkey) {
+        const displayName = metadata.display_name || metadata.name;
+        if (displayName) {
+          entry.name = displayName;
+        }
+        entry.profile = metadata;
+        catalogMap.set(entry.serviceId, entry);
+        updated = true;
+      }
+    }
+    if (updated) {
+      persistCatalog().catch(() => {});
+    }
   }
 
   function queryRelay(relayUrl) {
     return new Promise((resolve) => {
       let settled = false;
       const socket = new WebSocket(relayUrl);
-      const subscriptionId = `ncc-catalog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const subscriptions = new Map();
+      let pendingSubscriptions = 0;
+      let profileRequested = false;
 
       const finish = (result) => {
         if (settled) return;
@@ -191,8 +225,35 @@
         finish({ success: false, error: 'timeout waiting for relay response' });
       }, QUERY_TIMEOUT_MS);
 
+      const sendSubscription = (type, filter) => {
+        const subId = `ncc-catalog-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        subscriptions.set(subId, type);
+        pendingSubscriptions += 1;
+        socket.send(JSON.stringify(['REQ', subId, filter]));
+        return subId;
+      };
+
+      const startProfileSubscription = () => {
+        if (profileRequested) return;
+        profileRequested = true;
+        const authors = getTrackedPubkeys();
+        if (!authors.length) {
+          if (pendingSubscriptions === 0) {
+            finish({ success: true });
+          }
+          return;
+        }
+        sendSubscription('profile', { kinds: [0], authors, limit: 1 });
+      };
+
+      const finishIfDone = () => {
+        if (pendingSubscriptions <= 0) {
+          finish({ success: true });
+        }
+      };
+
       socket.addEventListener('open', () => {
-        socket.send(JSON.stringify(['REQ', subscriptionId, { kinds: [SERVICE_KIND], limit: 200 }]));
+        sendSubscription('service', { kinds: [SERVICE_KIND], limit: 200 });
       });
 
       socket.addEventListener('message', (event) => {
@@ -200,11 +261,21 @@
           const payload = JSON.parse(event.data);
           if (!Array.isArray(payload)) return;
           const [type, subId, content] = payload;
-          if (subId !== subscriptionId) return;
+          const subType = subscriptions.get(subId);
+          if (!subType) return;
           if (type === 'EVENT') {
-            handleServiceEvent(content, relayUrl);
+            if (subType === 'service') {
+              handleServiceEvent(content, relayUrl);
+            } else if (subType === 'profile') {
+              handleProfileEvent(content);
+            }
           } else if (type === 'EOSE') {
-            finish({ success: true });
+            pendingSubscriptions -= 1;
+            subscriptions.delete(subId);
+            if (subType === 'service') {
+              startProfileSubscription();
+            }
+            finishIfDone();
           }
         } catch (err) {
           // ignore malformed
@@ -257,15 +328,16 @@
     }
   }
 
-  function handleMessage(message, sender, sendResponse) {
+  async function handleMessage(message, sender, sendResponse) {
+    await storageReady;
     if (!message || typeof message.type !== 'string') {
       sendResponse && sendResponse({ error: 'invalid message' });
-      return false;
+      return;
     }
 
     if (message.type === 'getCatalog') {
       sendResponse && sendResponse(buildResponse());
-      return false;
+      return;
     }
 
     if (message.type === 'refreshCatalog') {
@@ -274,20 +346,23 @@
       }).catch(error => {
         sendResponse && sendResponse({ error: error?.message || 'failed to refresh catalogue' });
       });
-      return true;
+      return;
     }
 
     sendResponse && sendResponse({ error: 'unknown message type' });
-    return false;
+    return;
   }
+
+  const storageReady = loadStoredState();
 
   if (browserApi?.runtime?.onMessage) {
     browserApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      return handleMessage(message, sender, sendResponse);
+      handleMessage(message, sender, sendResponse);
+      return true;
     });
   }
 
-  loadStoredState().then(() => {
+  storageReady.then(() => {
     if (!lastUpdated && catalogMap.size === 0) {
       fetchCatalog().catch(() => {});
     }

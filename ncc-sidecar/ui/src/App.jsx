@@ -69,6 +69,10 @@ export default function App() {
   const [nip46Logs, setNip46Logs] = useState([]);
   const [regeneratingTlsServiceId, setRegeneratingTlsServiceId] = useState(null);
   const [recipientInput, setRecipientInput] = useState('');
+  const [showRelaysModal, setShowRelaysModal] = useState(false);
+  const [relayModalInput, setRelayModalInput] = useState('');
+  const [isRepublishing, setIsRepublishing] = useState(false);
+  const [appConfig, setAppConfig] = useState({});
 
   const addNip46Log = (msg) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -89,6 +93,7 @@ export default function App() {
   };
 
   const selectedLogMetadata = useMemo(() => parseLogMetadata(selectedLog?.metadata), [selectedLog]);
+  const formatLogId = (value) => value ? `${value.slice(0, 8)}...${value.slice(-8)}` : null;
 
   const handleLogClick = (log) => {
     setSelectedLog(prev => (prev && prev.id === log.id ? null : log));
@@ -134,6 +139,25 @@ export default function App() {
     setRecipientInput(value);
     const parsed = parseRecipientInput(value);
     setNewService(d => ({ ...d, config: { ...d.config, ncc05_recipients: parsed } }));
+  };
+
+  const normalizeRelayInput = (value) => {
+    if (!value) return [];
+    const entries = Array.from(new Set(value
+      .split(/[\s,]+/)
+      .map(token => token.trim())
+      .filter(Boolean)));
+    const normalized = [];
+    for (const entry of entries) {
+      let candidate = entry;
+      if (/^https?:\/\//i.test(candidate)) {
+        candidate = candidate.replace(/^https?:\/\//i, match => (match.toLowerCase() === 'https://' ? 'wss://' : 'ws://'));
+      } else if (!/^wss?:\/\//i.test(candidate)) {
+        candidate = `wss://${candidate}`;
+      }
+      normalized.push(candidate);
+    }
+    return normalized;
   };
 
   const fetchAdmins = async () => {
@@ -228,6 +252,7 @@ export default function App() {
       });
       
       const logRes = await axios.get(`${API_BASE}/status`);
+      setAppConfig(logRes.data.config || {});
       if (logRes.data.logs) {
         setLogs(prev => {
           if (JSON.stringify(prev) === JSON.stringify(logRes.data.logs)) return prev;
@@ -235,6 +260,18 @@ export default function App() {
         });
       }
     } catch (e) {}
+  };
+
+  const handleRepublish = async () => {
+    setIsRepublishing(true);
+    try {
+      await axios.post(`${API_BASE}/services/republish`);
+      fetchServices();
+    } catch (err) {
+      alert(`Failed to republish services: ${err.message}`);
+    } finally {
+      setIsRepublishing(false);
+    }
   };
 
   const checkStatus = async () => {
@@ -446,6 +483,30 @@ export default function App() {
     } catch (e) { alert("Failed to delete service: " + e.message); }
   };
 
+  const openRelaySettings = () => {
+    const sidecar = services.find(s => s.type === 'sidecar');
+    const configuredRelays = Array.isArray(appConfig.publication_relays)
+      ? appConfig.publication_relays
+      : (sidecar?.config?.publication_relays || []);
+    setRelayModalInput(configuredRelays.join('\n'));
+    setShowRelaysModal(true);
+  };
+
+  const handleSaveRelays = async () => {
+    const relays = normalizeRelayInput(relayModalInput);
+    try {
+      const res = await axios.put(`${API_BASE}/config/publication-relays`, { relays });
+      setAppConfig(prev => ({
+        ...prev,
+        publication_relays: Array.isArray(res.data.publication_relays) ? res.data.publication_relays : relays
+      }));
+      fetchServices();
+      setShowRelaysModal(false);
+    } catch (err) {
+      alert(`Failed to save relays: ${err.message}`);
+    }
+  };
+
   const regenerateTls = async (serviceId, { showAlert = true } = {}) => {
     const service = services.find(s => String(s.id) === String(serviceId));
     if (!service || service.config?.generate_self_signed === false) return;
@@ -528,12 +589,15 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50"
                   >
-                    <button onClick={() => { setShowMenu(false); handleEditService(sidecarNode); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
-                      Node Settings
-                    </button>
-                    <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
-                      Administrators
-                    </button>
+                  <button onClick={() => { setShowMenu(false); handleEditService(sidecarNode); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
+                    Node Settings
+                  </button>
+                  <button onClick={() => { setShowMenu(false); openRelaySettings(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
+                    Publishing Relays
+                  </button>
+                  <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
+                    Administrators
+                  </button>
                   </motion.div>
                 )}
               </div>
@@ -894,6 +958,55 @@ export default function App() {
           </AnimatePresence>
 
           <AnimatePresence>
+            {showRelaysModal && (
+              <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowRelaysModal(false)}
+                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+                />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+                >
+                  <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
+                    <h2 className="text-2xl font-black tracking-tight">Publishing Relays</h2>
+                    <button onClick={() => setShowRelaysModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                      <Plus className="w-6 h-6 rotate-45" />
+                    </button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <p className="text-sm text-slate-500">
+                      Specify the relay URLs the Sidecar uses when publishing NCC-02/NCC-05 and when services push profile updates.
+                    </p>
+                    <textarea
+                      value={relayModalInput}
+                      onChange={(e) => setRelayModalInput(e.target.value)}
+                      rows={6}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                      placeholder="wss://nostr-pub.wellorder.net\nwss://relay.damus.io"
+                    />
+                    <div className="flex justify-between items-center text-[10px] text-slate-400">
+                      <span>One URL per line or comma separated.</span>
+                      <span>{normalizeRelayInput(relayModalInput).length} saved</span>
+                    </div>
+                    <button 
+                      onClick={handleSaveRelays}
+                      className="w-full bg-blue-600 text-white font-bold py-3 rounded-2xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all"
+                    >
+                      Save Relays
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
             {showAdminModal && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
                 <motion.div 
@@ -1108,9 +1221,26 @@ export default function App() {
           </div>
 
           <section className="mt-20">
-            <div className="flex items-center space-x-3 mb-6">
-              <Terminal className="w-5 h-5 text-slate-400" />
-              <h2 className="text-xl font-black text-slate-900 tracking-tight">System Logs</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-3">
+                <Terminal className="w-5 h-5 text-slate-400" />
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">System Logs</h2>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={fetchServices}
+                  className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 hover:text-blue-600 transition-colors"
+                >
+                  Refresh Logs
+                </button>
+                <button
+                  onClick={handleRepublish}
+                  disabled={isRepublishing}
+                  className="text-[10px] font-black uppercase tracking-[0.3em] px-3 py-2 rounded-full border border-slate-200 hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                >
+                  {isRepublishing ? 'Republishing…' : 'Republish All'}
+                </button>
+              </div>
             </div>
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden font-mono text-[10px]">
             <div className="max-h-60 overflow-y-auto p-6 space-y-2">
@@ -1142,39 +1272,56 @@ export default function App() {
               )}
             </div>
             {selectedLog && (
-              <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-[11px] space-y-3">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-[9px] uppercase tracking-[0.4em] text-slate-500">Log Details</p>
-                    <p className="text-slate-800 text-sm font-semibold">{selectedLog.message}</p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedLog(null)}
-                    className="text-[10px] uppercase tracking-[0.5em] text-slate-400 hover:text-slate-600"
-                  >
-                    Close
-                  </button>
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-[10px] text-slate-500">
-                  <div>
-                    <p className="font-bold text-slate-900 text-xs">{selectedLog.level.toUpperCase()}</p>
-                    <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Level</p>
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-900 text-xs">{new Date(selectedLog.timestamp).toLocaleString()}</p>
-                    <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Timestamp</p>
-                  </div>
-                  {selectedLogMetadata?.serviceId && (
+                <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-[11px] space-y-3">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="font-bold text-slate-900 text-xs">{selectedLogMetadata.serviceId}</p>
-                      <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Service</p>
+                      <p className="text-[9px] uppercase tracking-[0.4em] text-slate-500">Log Details</p>
+                      <p className="text-slate-800 text-sm font-semibold">{selectedLog.message}</p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedLog(null)}
+                      className="text-[10px] uppercase tracking-[0.5em] text-slate-400 hover:text-slate-600"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-[10px] text-slate-500">
+                    <div>
+                      <p className="font-bold text-slate-900 text-xs">{selectedLog.level.toUpperCase()}</p>
+                      <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Level</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-900 text-xs">{new Date(selectedLog.timestamp).toLocaleString()}</p>
+                      <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Timestamp</p>
+                    </div>
+                    {selectedLogMetadata?.serviceId && (
+                      <div>
+                        <p className="font-bold text-slate-900 text-xs">{selectedLogMetadata.serviceId}</p>
+                        <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Service</p>
+                      </div>
+                    )}
+                  </div>
+                  {(selectedLogMetadata?.ncc02 || selectedLogMetadata?.ncc05 || selectedLogMetadata?.kind0) && (
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
+                      {['ncc02','ncc05','kind0'].map(key => {
+                        const value = selectedLogMetadata?.[key];
+                        if (!value) return null;
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => copyToClipboard(value, `log-${key}-${selectedLog.id}`)}
+                            className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[10px] text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                          >
+                            {key.toUpperCase()}: {formatLogId(value)}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-3 overflow-x-auto">
+                    <pre className="text-[10px] whitespace-pre-wrap break-words">{selectedLogMetadata ? JSON.stringify(selectedLogMetadata, null, 2) : 'No metadata.'}</pre>
+                  </div>
                 </div>
-                <div className="bg-white border border-slate-200 rounded-2xl p-3 overflow-x-auto">
-                  <pre className="text-[10px] whitespace-pre-wrap break-words">{selectedLogMetadata ? JSON.stringify(selectedLogMetadata, null, 2) : 'No metadata.'}</pre>
-                </div>
-              </div>
             )}
           </div>
         </section>
