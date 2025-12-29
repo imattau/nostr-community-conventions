@@ -7,7 +7,7 @@ import { publishToRelays } from './publisher.js';
 import { setState, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
 
-export async function runPublishCycle(config, state) {
+export async function runPublishCycle(config, state, probeOverride = null, torOverride = null) {
   console.log(`[App] Starting publish cycle for ${config.npub || 'service'}`);
 
   // 0. Optional: Generate Self-Signed Cert
@@ -24,9 +24,9 @@ export async function runPublishCycle(config, state) {
   }
 
   // 1. Probe & Inventory
-  const ipv4 = await getPublicIPv4();
-  const ipv6 = detectGlobalIPv6();
-  const torStatus = await checkTor();
+  const ipv4 = probeOverride ? probeOverride.ipv4 : await getPublicIPv4();
+  const ipv6 = probeOverride ? probeOverride.ipv6 : detectGlobalIPv6();
+  const torStatus = torOverride || await checkTor();
   
   const inventory = await buildInventory(config, { ipv4, ipv6 }, torStatus);
   const inventoryHash = crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');

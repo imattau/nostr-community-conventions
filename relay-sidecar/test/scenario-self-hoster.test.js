@@ -42,13 +42,16 @@ test('Scenario: Self-Hoster with Dynamic IP and Onion Fallback', async () => {
     refreshIntervalMinutes: 60,
     ncc02ExpiryDays: 1,
     ncc05TtlHours: 1,
-    service_mode: 'public'
+    service_mode: 'public',
+    protocols: { ipv4: true, ipv6: true, tor: true },
+    primary_protocol: 'ipv4'
   };
 
   try {
     // 4. Run Sidecar (Publish discovery records to the bootstrap relay)
     console.log('[Test] Running Sidecar publish cycle...');
-    await runPublishCycle(config, { last_full_publish_timestamp: 0 });
+    // We pass empty probe results to ensure it uses our manual test endpoints
+    await runPublishCycle(config, { last_full_publish_timestamp: 0 }, {}, {});
     
     console.log('[Test] Sidecar publish complete.');
     // Give some time for the mock relays to "receive" the events

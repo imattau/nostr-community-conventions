@@ -30,7 +30,9 @@ test('integration: full publish cycle to local mock relay', async () => {
     refreshIntervalMinutes: 60,
     ncc02ExpiryDays: 1,
     ncc05TtlHours: 1,
-    statePath
+    statePath,
+    protocols: { ipv4: true, ipv6: true, tor: true },
+    primary_protocol: 'ipv4'
   };
 
   const initialState = {
@@ -41,7 +43,7 @@ test('integration: full publish cycle to local mock relay', async () => {
   };
 
   try {
-    const newState = await runPublishCycle(config, initialState);
+    const newState = await runPublishCycle(config, initialState, {}, {});
 
     // Wait for async publish to settle
     await new Promise(r => setTimeout(r, 3000));
@@ -83,7 +85,9 @@ test('integration: change detection logic (IP and Onion changes)', async () => {
     serviceId: 'relay', locatorId: 'relay-locator',
     publicationRelays: [relayUrl],
     refreshIntervalMinutes: 60, ncc02ExpiryDays: 1, ncc05TtlHours: 1,
-    statePath
+    statePath,
+    protocols: { ipv4: true, ipv6: true, tor: true },
+    primary_protocol: 'ipv4'
   };
 
   try {
@@ -92,26 +96,26 @@ test('integration: change detection logic (IP and Onion changes)', async () => {
     // 1. Initial Publish
     console.log('--- Step 1: Initial ---');
     const config1 = { ...configBase, endpoints: [{ url: 'ws://1.1.1.1:7000', priority: 1 }] };
-    state = await runPublishCycle(config1, state);
+    state = await runPublishCycle(config1, state, {}, {});
     await new Promise(r => setTimeout(r, 500));
     assert.strictEqual(relay.receivedEvents().length, 2, 'Should publish initial events');
 
     // 2. Same Config (Should skip)
     console.log('--- Step 2: No Change ---');
-    state = await runPublishCycle(config1, state);
+    state = await runPublishCycle(config1, state, {}, {});
     assert.strictEqual(relay.receivedEvents().length, 2, 'Should NOT publish when nothing changed');
 
     // 3. IP Change
     console.log('--- Step 3: IP Change ---');
     const config2 = { ...configBase, endpoints: [{ url: 'ws://2.2.2.2:7000', priority: 1 }] };
-    state = await runPublishCycle(config2, state);
+    state = await runPublishCycle(config2, state, {}, {});
     await new Promise(r => setTimeout(r, 500));
     assert.strictEqual(relay.receivedEvents().length, 4, 'Should publish when IP changes');
 
     // 4. Onion Change
     console.log('--- Step 4: Onion Change ---');
     const config3 = { ...configBase, endpoints: [{ url: 'ws://abcdef.onion:7000', priority: 1 }] };
-    state = await runPublishCycle(config3, state);
+    state = await runPublishCycle(config3, state, {}, {});
     await new Promise(r => setTimeout(r, 500));
     assert.strictEqual(relay.receivedEvents().length, 6, 'Should publish when Onion address changes');
 
