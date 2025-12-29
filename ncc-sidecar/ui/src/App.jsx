@@ -587,36 +587,40 @@ export default function App() {
                     </button>
                   </div>
                   <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Type</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        {SERVICE_TYPES.map(t => (
-                          <button 
-                            key={t.id}
-                            onClick={() => setNewService(d => ({ ...d, type: t.id, service_id: t.defaultId }))}
-                            className={`p-4 rounded-2xl border transition-all flex items-center space-x-3 ${newService.type === t.id ? 'bg-blue-600/10 border-blue-500 text-blue-600' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-200'}`}
-                          >
-                            {t.icon}
-                            <span className="text-[10px] font-black uppercase tracking-widest">{t.label}</span>
-                          </button>
-                        ))}
+                    {newService.type !== 'sidecar' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Type</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          {SERVICE_TYPES.map(t => (
+                            <button 
+                              key={t.id}
+                              onClick={() => setNewService(d => ({ ...d, type: t.id, service_id: t.defaultId }))}
+                              className={`p-4 rounded-2xl border transition-all flex items-center space-x-3 ${newService.type === t.id ? 'bg-blue-600/10 border-blue-500 text-blue-600' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                            >
+                              {t.icon}
+                              <span className="text-[10px] font-black uppercase tracking-widest">{t.label}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visibility</label>
-                      <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100">
-                        {['public', 'private'].map(m => (
-                          <button 
-                            key={m} 
-                            onClick={() => setNewService(d => ({ ...d, config: { ...d.config, service_mode: m } }))} 
-                            className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${newService.config.service_mode === m ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            {m}
-                          </button>
-                        ))}
+                    {newService.type !== 'sidecar' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visibility</label>
+                        <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100">
+                          {['public', 'private'].map(m => (
+                            <button 
+                              key={m} 
+                              onClick={() => setNewService(d => ({ ...d, config: { ...d.config, service_mode: m } }))} 
+                              className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${newService.config.service_mode === m ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <div className="space-y-2">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service Identity</label>
