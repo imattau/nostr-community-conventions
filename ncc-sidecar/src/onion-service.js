@@ -1,86 +1,82 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { TorControl } from './tor-control.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let controlClient = null;
+const activeServices = new Map(); // serviceId -> { address, privateKey, servicePort }
 
-export async function ensureOnionEndpoint({ torControl, cacheFile, localPort }) {
-  // If explicitly disabled, skip
-  if (torControl?.enabled === false) {
-    return null;
-  }
+async function getClient(config) {
+  if (controlClient) return controlClient;
 
-  // Determine cache file location
-  const resolvedCache = cacheFile 
-    ? path.resolve(process.cwd(), cacheFile) 
-    : path.resolve(process.cwd(), 'onion-service.json');
-
-  let saved = null;
-  if (fs.existsSync(resolvedCache)) {
-    try {
-      const data = fs.readFileSync(resolvedCache, 'utf-8');
-      saved = JSON.parse(data);
-    } catch (err) {
-      console.warn('[Sidecar] Failed to parse cached onion data:', err.message);
-    }
-  }
-
-  // Use configured control port or defaults
   const client = new TorControl({
-    host: torControl?.host || '127.0.0.1',
-    port: torControl?.port || 9051,
-    password: torControl?.password,
-    timeout: 2000 // Short timeout to avoid hanging
+    host: config?.host || '127.0.0.1',
+    port: config?.port || 9051,
+    password: config?.password,
+    timeout: 2000
   });
 
   try {
     await client.connect();
-    
-    // Attempt authentication (empty if no password provided)
     try {
       await client.authenticate();
     } catch (err) {
-      // If auth fails, maybe we don't need it? Or password wrong.
-      // Re-throw if password was provided.
-      if (torControl?.password) throw err;
-      // Otherwise, assume it might be fine or will fail on command
-      console.warn('[Onion] Auth failed/skipped (might be required):', err.message);
+      if (config?.password) throw err;
+      console.warn('[Onion] Auth failed/skipped:', err.message);
     }
-
-    const keySpec = saved?.privateKey ? saved.privateKey : 'NEW:ED25519-V3';
-    const servicePort = 80; // Standard HTTP/WS port for Onion
-    const targetPort = localPort || 3000;
-    const portMapping = `${servicePort},127.0.0.1:${targetPort}`;
     
-    const response = await client.addOnion(keySpec, portMapping);
-    const serviceId = response.ServiceID;
-    const privateKey = response.PrivateKey ?? saved?.privateKey;
+    // Handle disconnect to clear state
+    client.socket.on('close', () => {
+      console.log('[Onion] Control connection closed. Resetting state.');
+      controlClient = null;
+      activeServices.clear();
+    });
 
-    if (!serviceId) {
-      throw new Error('Tor control did not return service id');
-    }
-
-    // Save only if we have a private key (to persist identity)
-    if (privateKey) {
-      const record = {
-        serviceId,
-        privateKey,
-        servicePort,
-        createdAt: Date.now()
-      };
-      fs.writeFileSync(resolvedCache, JSON.stringify(record, null, 2));
-    }
-
-    return {
-      address: `${serviceId}.onion`,
-      servicePort
-    };
+    controlClient = client;
+    return client;
   } catch (err) {
-    // Return error details so caller can decide (e.g. show Red dot)
-    throw err;
-  } finally {
     client.close();
+    throw err;
   }
+}
+
+export async function provisionOnion({ serviceId, torControl, privateKey, localPort }) {
+  if (torControl?.enabled === false) {
+    // If disabled, we might want to remove it if it exists?
+    // For now, just return null.
+    return null;
+  }
+
+  // Check cache first
+  const cached = activeServices.get(serviceId);
+  if (cached) {
+    // If key matches (or we have one and input is undefined), return cached
+    if (privateKey === cached.privateKey || (!privateKey && cached.privateKey)) {
+      return cached;
+    }
+    // If key changed, we need to re-provision.
+    // Tor ADD_ONION doesn't support "update" easily without "DEL_ONION" first?
+    // Actually, adding a new one is fine, but we should probably clean up old if we knew the ID?
+    // Since we don't track the ephemeral ServiceID for deletion easily here without parsing address,
+    // we'll just add new. The old one dies when connection closes or we can implement DEL_ONION later.
+  }
+
+  const client = await getClient(torControl);
+
+  const keySpec = privateKey ? privateKey : 'NEW:ED25519-V3';
+  const servicePort = 80;
+  const targetPort = localPort || 3000;
+  const portMapping = `${servicePort},127.0.0.1:${targetPort}`;
+  
+  // No Detached flag, rely on keep-alive
+  const response = await client.addOnion(keySpec, portMapping);
+  
+  const address = `${response.ServiceID}.onion`;
+  const newKey = response.PrivateKey || privateKey;
+
+  const result = {
+    address,
+    privateKey: newKey,
+    servicePort
+  };
+
+  activeServices.set(serviceId, result);
+  return result;
 }

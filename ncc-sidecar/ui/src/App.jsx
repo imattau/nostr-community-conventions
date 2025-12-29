@@ -8,8 +8,11 @@ import {
   Radio, Menu
 } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { nip19, nip04, SimplePool } from 'nostr-tools';
+import { nip19, nip04, nip44, SimplePool } from 'nostr-tools';
 import { QRCodeSVG } from 'qrcode.react';
+
+const toHex = (bytes) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+const hexToBytes = (hex) => new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
 
 const API_BASE = '/api';
 
@@ -24,6 +27,7 @@ export default function App() {
   const [initialized, setInitialized] = useState(null);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [stylesReady, setStylesReady] = useState(false);
   const [services, setServices] = useState([]);
   const [logs, setLogs] = useState([]);
   const [loginMode, setLoginMode] = useState('choice');
@@ -33,9 +37,61 @@ export default function App() {
   const [copiedMap, setCopiedMap] = useState({});
   const [connectionStatus, setConnectionStatus] = useState('idle');
   const [showNewServiceModal, setShowNewServiceModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsData, setSettingsData] = useState(null);
   const [proxyCheckResult, setProxyCheckResult] = useState(null);
+  const [networkAvailability, setNetworkAvailability] = useState({ ipv4: false, ipv6: false, tor: false });
+  const [editServiceId, setEditServiceId] = useState(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [admins, setAdmins] = useState([]);
+  const [inviteNpub, setInviteNpub] = useState('');
+  const [relayStatus, setRelayStatus] = useState({});
+  const [nip46Logs, setNip46Logs] = useState([]);
+
+  const addNip46Log = (msg) => {
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setNip46Logs(prev => [...prev.slice(-4), `[${time}] ${msg}`]);
+  };
+
+  const fetchAdmins = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/admins`);
+      setAdmins(res.data);
+    } catch (e) {}
+  };
+
+  const handleInviteAdmin = async () => {
+    if (!inviteNpub) return;
+    try {
+      await axios.post(`${API_BASE}/admin/invite`, { npub: inviteNpub });
+      setInviteNpub('');
+      fetchAdmins();
+      alert("Invite sent via Nostr DM!");
+    } catch (e) { alert(e.message); }
+  };
+
+  const handleRemoveAdmin = async (pubkey) => {
+    if (!confirm("Remove this admin?")) return;
+    try {
+      await axios.delete(`${API_BASE}/admin/${pubkey}`);
+      fetchAdmins();
+    } catch (e) { alert(e.message); }
+  };
+
+  const checkNetworkAvailability = async () => {
+    try {
+      const [netRes, torRes] = await Promise.all([
+        axios.get(`${API_BASE}/network/probe`),
+        axios.get(`${API_BASE}/tor/status`)
+      ]);
+      setNetworkAvailability({
+        ipv4: !!netRes.data.ipv4,
+        ipv6: !!netRes.data.ipv6,
+        tor: !!torRes.data.running
+      });
+    } catch (e) {
+      console.warn("Network probe failed:", e);
+    }
+  };
 
   const checkProxy = async () => {
     try {
@@ -44,25 +100,6 @@ export default function App() {
       setProxyCheckResult(res.data);
     } catch (e) {
       setProxyCheckResult({ error: e.message });
-    }
-  };
-
-  const handleOpenSettings = () => {
-    const sidecar = services.find(s => s.type === 'sidecar');
-    if (sidecar) {
-      setSettingsData(JSON.parse(JSON.stringify(sidecar))); // Deep copy
-      setShowSettingsModal(true);
-    }
-  };
-
-  const handleSaveSettings = async () => {
-    if (!settingsData) return;
-    try {
-      await axios.put(`${API_BASE}/service/${settingsData.id}`, { config: settingsData.config });
-      setShowSettingsModal(false);
-      fetchServices();
-    } catch (e) {
-      alert("Failed to save settings: " + e.message);
     }
   };
 
@@ -96,7 +133,14 @@ export default function App() {
   });
 
   useEffect(() => {
+    // Ensure styles are parsed before revealing the UI
+    const timer = setTimeout(() => setStylesReady(true), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     checkStatus();
+    checkNetworkAvailability();
     if (initialized) {
       fetchServices();
       const interval = setInterval(fetchServices, 10000); // Polling logs/services every 10s
@@ -143,6 +187,25 @@ export default function App() {
     localStorage.setItem('ncc_admin_pk', pk);
   };
 
+  const verifyAndSaveAdmin = async (pk) => {
+    if (initialized) {
+      try {
+        const res = await axios.get(`${API_BASE}/admins`);
+        const isAdmin = res.data.some(a => a.pubkey === pk);
+        if (!isAdmin) {
+          alert("Unauthorized: This identity is not an administrator of this node.");
+          return false;
+        }
+      } catch (e) {
+        alert("Verification failed: " + e.message);
+        return false;
+      }
+    }
+    saveAdminPk(pk);
+    handleAuthComplete();
+    return true;
+  };
+
   const handleAuthComplete = () => {
     if (!initialized) {
       startProvisioning();
@@ -151,31 +214,71 @@ export default function App() {
 
   const startNIP46 = async () => {
     const sk = generateSecretKey();
-    const pk = getPublicKey(sk);
+    const pkRaw = getPublicKey(sk);
+    const pk = (typeof pkRaw === 'string') ? pkRaw : toHex(pkRaw);
+    
     const pool = new SimplePool();
-    const relays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'];
+    const relays = [
+      'wss://relay.nsec.app',
+      'wss://offchain.pub',
+      'wss://nos.lol',
+      'wss://relay.damus.io',
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band'
+    ];
+    
     setConnectionStatus('listening');
+    setRelayStatus(Object.fromEntries(relays.map(r => [r, 'connecting'])));
+    setNip46Logs([]);
+    addNip46Log("Initializing secure channel...");
     
-    const relayParams = relays.map(r => `relay=${encodeURIComponent(r)}`).join('&');
-    const uri = `nostrconnect://${pk}?${relayParams}&metadata=${encodeURIComponent(JSON.stringify({name: 'NCC Sidecar'}))}`;
-    
+    const uri = `nostrconnect://${pk}?${relays.map(r => `relay=${encodeURIComponent(r)}`).join('&')}&metadata=${encodeURIComponent(JSON.stringify({ name: 'NCC Sidecar' }))}`;
     setNip46Uri(uri);
     setLoginMode('nip46');
 
-    const sub = pool.subscribeMany(relays, [{ kinds: [24133], '#p': [pk] }], {
-      onevent: async (event) => {
+    const handleEvent = async (event) => {
+      try {
+        addNip46Log("Received response!");
+        let decrypted;
         try {
-          const decrypted = await nip04.decrypt(sk, event.pubkey, event.content);
-          const parsed = JSON.parse(decrypted);
-          if (parsed.result === 'ack' || parsed.method === 'connect') {
-            saveAdminPk(event.pubkey);
-            sub.close();
-            handleAuthComplete();
+          decrypted = await nip04.decrypt(sk, event.pubkey, event.content);
+        } catch (err) {
+          const conversationKey = nip44.getConversationKey(sk, hexToBytes(event.pubkey));
+          decrypted = nip44.decrypt(event.content, conversationKey);
+        }
+        const parsed = JSON.parse(decrypted);
+        if (parsed.result || parsed.method === 'connect') {
+          const adminPk = (parsed.result && parsed.result !== 'ack') ? parsed.result : event.pubkey;
+          addNip46Log("Verifying authority...");
+          const success = await verifyAndSaveAdmin(adminPk);
+          if (success) {
+            addNip46Log("Handshake complete!");
+            pool.destroy();
+          } else {
+            addNip46Log("Verification failed.");
           }
-        } catch (e) {}
+        }
+      } catch (e) {
+        console.warn("[NIP-46] Error:", e.message);
+      }
+    };
+
+    // Subscribe to each relay individually for maximum compatibility
+    relays.forEach(async (url) => {
+      try {
+        const relay = await pool.ensureRelay(url);
+        setRelayStatus(prev => ({ ...prev, [url]: 'connected' }));
+        addNip46Log(`Listening on ${url.split('//')[1]}`);
+        
+        const sub = relay.sub([{ kinds: [24133], "#p": [pk] }]);
+        sub.on('event', handleEvent);
+        sub.on('eose', () => console.log(`[NIP-46] EOSE from ${url}`));
+      } catch (e) {
+        setRelayStatus(prev => ({ ...prev, [url]: 'failed' }));
       }
     });
   };
+
 
   const [provisioningProgress, setProvisioningProgress] = useState(0);
   const [provisioningLogs, setProvisioningLogs] = useState([]);
@@ -208,13 +311,64 @@ export default function App() {
     }
   };
 
-  const handleAddService = async () => {
+  const handleCloseModal = () => {
+    setShowNewServiceModal(false);
+    setEditServiceId(null);
+    setNewService({ 
+      type: 'relay', 
+      name: '', 
+      service_id: 'relay', 
+      service_nsec: '', 
+      config: { 
+        refresh_interval_minutes: 360, 
+        ncc02_expiry_days: 14, 
+        ncc05_ttl_hours: 12, 
+        service_mode: 'public', 
+        protocols: { ipv4: true, ipv6: true, tor: true }, 
+        primary_protocol: 'ipv4', 
+        profile: { about: '', picture: '' } 
+      } 
+    });
+  };
+
+  const handleSaveService = async () => {
     try {
-      await axios.post(`${API_BASE}/service/add`, newService);
+      if (editServiceId) {
+        await axios.put(`${API_BASE}/service/${editServiceId}`, newService);
+      } else {
+        await axios.post(`${API_BASE}/service/add`, newService);
+      }
       setShowNewServiceModal(false);
-      setNewService({ ...newService, name: '', service_nsec: '' });
+      setEditServiceId(null);
+      setNewService({ 
+        type: 'relay', 
+        name: '', 
+        service_id: 'relay', 
+        service_nsec: '', 
+        config: { 
+          refresh_interval_minutes: 360, 
+          ncc02_expiry_days: 14, 
+          ncc05_ttl_hours: 12, 
+          service_mode: 'public', 
+          protocols: { ipv4: true, ipv6: true, tor: true }, 
+          primary_protocol: 'ipv4', 
+          profile: { about: '', picture: '' } 
+        } 
+      });
       fetchServices();
-    } catch (e) { alert("Failed to add service: " + e.message); }
+    } catch (e) { alert(`Failed to ${editServiceId ? 'update' : 'add'} service: ` + e.message); }
+  };
+
+  const handleEditService = (service) => {
+    setEditServiceId(service.id);
+    setNewService({
+        type: service.type,
+        name: service.name,
+        service_id: service.service_id,
+        service_nsec: service.service_nsec,
+        config: service.config
+    });
+    setShowNewServiceModal(true);
   };
 
   const handleDeleteService = async (id) => {
@@ -222,6 +376,7 @@ export default function App() {
     try {
       await axios.delete(`${API_BASE}/service/${id}`);
       fetchServices();
+      if (showNewServiceModal) setShowNewServiceModal(false);
     } catch (e) { alert("Failed to delete service: " + e.message); }
   };
 
@@ -232,17 +387,15 @@ export default function App() {
     setTimeout(() => setCopiedMap(prev => ({ ...prev, [key]: false })), 2000);
   };
 
-  if (loading || initialized === null) return (
-    <div className="flex h-screen items-center justify-center bg-slate-950">
-      <motion.div 
-        animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }} 
-        transition={{ repeat: Infinity, duration: 2 }}
-        className="text-blue-500 font-black tracking-widest uppercase text-sm"
-      >
-        Connecting to Sidecar...
-      </motion.div>
-    </div>
-  );
+  const isDataReady = initialized === false || (initialized === true && services.some(s => s.type === 'sidecar'));
+
+  useEffect(() => {
+    if (services.length > 0) {
+      console.log("[UI] Services loaded:", services.map(s => `${s.name} (${s.type})`));
+    }
+  }, [services]);
+
+  if (loading || !stylesReady || initialized === null || !isDataReady) return null;
 
   const isAuthenticated = initialized && setupData.adminPubkey;
 
@@ -269,9 +422,26 @@ export default function App() {
                 <span className="text-[10px] font-black text-slate-400 uppercase">Admin Authority</span>
                 <span className="text-xs font-mono text-slate-600">{setupData.adminPubkey.slice(0, 8)}...{setupData.adminPubkey.slice(-8)}</span>
               </div>
-              <button onClick={handleOpenSettings} className="p-2 text-slate-400 hover:text-blue-500 transition-colors">
-                <Menu className="w-5 h-5" />
-              </button>
+              <div className="relative">
+                {showMenu && <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />}
+                <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-slate-400 hover:text-blue-500 transition-colors relative z-50">
+                  <Menu className="w-5 h-5" />
+                </button>
+                {showMenu && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50"
+                  >
+                    <button onClick={() => { setShowMenu(false); handleEditService(sidecarNode); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
+                      Node Settings
+                    </button>
+                    <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
+                      Administrators
+                    </button>
+                  </motion.div>
+                )}
+              </div>
               <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                 <LogOut className="w-5 h-5" />
               </button>
@@ -281,10 +451,9 @@ export default function App() {
 
         <main className="max-w-6xl mx-auto px-6 py-12">
           {sidecarNode && (
-            <motion.section 
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-16 bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl shadow-slate-900/40 relative overflow-hidden"
+            <section 
+              onClick={() => handleEditService(sidecarNode)}
+              className="mb-16 bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl shadow-slate-900/40 relative overflow-hidden cursor-pointer border-2 border-blue-500/20"
             >
               <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
                 <Shield className="w-64 h-64" />
@@ -295,25 +464,34 @@ export default function App() {
                   <div className="flex items-center space-x-3">
                     <div className="px-3 py-1 bg-blue-500 rounded-full text-[10px] font-black uppercase tracking-widest">Core Node</div>
                     <div className="flex items-center space-x-1.5">
-                      <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 2 }} className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                      <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_rgba(34,197,94,0.5)] animate-pulse" />
                       <span className="text-[10px] font-bold text-green-400 uppercase">System Online</span>
                     </div>
                   </div>
-                  <h2 className="text-4xl font-black tracking-tight leading-none">Management Identity</h2>
+                  <h2 
+                    className="text-4xl font-black tracking-tight leading-none hover:text-blue-400 transition-colors"
+                  >
+                    Management Identity
+                  </h2>
                   <div className="flex flex-col space-y-1 text-slate-400 font-mono text-sm">
-                    {sidecarNode.service_nsec && (
-                      <div className="flex items-center space-x-2">
-                        <span>{nip19.npubEncode(getPublicKey(fromNsecLocal(sidecarNode.service_nsec))).slice(0, 24)}...</span>
-                        <button onClick={() => copyToClipboard(nip19.npubEncode(getPublicKey(fromNsecLocal(sidecarNode.service_nsec))), 'npub')} className="hover:text-white transition-colors">
-                          {copiedMap['npub'] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    )}
+                    {(() => {
+                      const sk = fromNsecLocal(sidecarNode.service_nsec);
+                      if (!sk) return <span className="text-red-400">Invalid Key</span>;
+                      const npub = nip19.npubEncode(getPublicKey(sk));
+                      return (
+                        <div className="flex items-center space-x-2">
+                          <span>{npub.slice(0, 24)}...</span>
+                          <button onClick={(e) => { e.stopPropagation(); copyToClipboard(npub, 'npub'); }} className="hover:text-white transition-colors">
+                            {copiedMap['npub'] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      );
+                    })()}
                     {onionEndpoint && (
                       <div className="flex items-center space-x-2 text-purple-400 text-[10px] bg-purple-500/10 w-fit px-2 py-0.5 rounded-md border border-purple-500/20">
                         <Globe className="w-3 h-3" />
                         <span>{onionEndpoint.url}</span>
-                        <button onClick={() => copyToClipboard(onionEndpoint.url, 'onion')} className="hover:text-white transition-colors">
+                        <button onClick={(e) => { e.stopPropagation(); copyToClipboard(onionEndpoint.url, 'onion'); }} className="hover:text-white transition-colors">
                           {copiedMap['onion'] ? <Check className="w-2.5 h-2.5 text-green-500" /> : <Copy className="w-2.5 h-2.5" />}
                         </button>
                       </div>
@@ -368,7 +546,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </motion.section>
+            </section>
           )}
 
           <header className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
@@ -393,7 +571,7 @@ export default function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  onClick={() => setShowNewServiceModal(false)}
+                  onClick={handleCloseModal}
                   className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
                 />
                 <motion.div 
@@ -403,8 +581,8 @@ export default function App() {
                   className="relative bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
                 >
                   <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
-                    <h2 className="text-2xl font-black tracking-tight">New Profile</h2>
-                    <button onClick={() => setShowNewServiceModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                    <h2 className="text-2xl font-black tracking-tight">{editServiceId ? 'Edit Profile' : 'New Profile'}</h2>
+                    <button onClick={handleCloseModal} className="text-slate-400 hover:text-white transition-colors">
                       <Plus className="w-6 h-6 rotate-45" />
                     </button>
                   </div>
@@ -512,6 +690,29 @@ export default function App() {
                       </div>
                     </div>
 
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Network Protocols</label>
+                        <div className="flex space-x-2">
+                            {['ipv4', 'ipv6', 'tor'].map(p => {
+                                const isAvailable = networkAvailability[p];
+                                return (
+                                    <button
+                                        key={p}
+                                        disabled={!isAvailable}
+                                        onClick={() => setNewService(d => ({ ...d, config: { ...d.config, protocols: { ...d.config.protocols, [p]: !d.config.protocols[p] } } }))}
+                                        className={`flex-1 py-3 rounded-xl border flex items-center justify-center space-x-2 transition-all ${
+                                            !isAvailable ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed' :
+                                            newService.config.protocols[p] ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                                        }`}
+                                    >
+                                        <div className={`w-2 h-2 rounded-full ${!isAvailable ? 'bg-slate-300' : newService.config.protocols[p] ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                                        <span className="text-xs font-bold uppercase">{p}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Environment Check</span>
@@ -539,12 +740,30 @@ export default function App() {
                       )}
                     </div>
 
+                    {editServiceId && (
+                        <div className="bg-red-50 p-4 rounded-2xl border border-red-100 space-y-3">
+                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest">Danger Zone</span>
+                            <div className="flex space-x-2">
+                                <button onClick={async () => {
+                                    if(!confirm('Regenerate NSEC? This will invalidate existing identity.')) return;
+                                    const res = await axios.get(`${API_BASE}/service/generate-key`);
+                                    setNewService(d => ({ ...d, service_nsec: res.data.nsec }));
+                                }} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50">ROTATE NSEC</button>
+                                
+                                <button onClick={() => {
+                                    if(!confirm('Rotate Onion Address? This will happen on next save.')) return;
+                                    setNewService(d => ({ ...d, config: { ...d.config, onion_private_key: undefined } }));
+                                }} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50">ROTATE ONION</button>
+                            </div>
+                        </div>
+                    )}
+
                     <button 
-                      onClick={handleAddService}
+                      onClick={handleSaveService}
                       disabled={!newService.name || !newService.service_nsec}
                       className="w-full bg-blue-600 disabled:opacity-50 text-white font-black py-5 rounded-3xl shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all"
                     >
-                      ADD DISCOVERY PROFILE
+                      {editServiceId ? 'UPDATE PROFILE' : 'ADD DISCOVERY PROFILE'}
                     </button>
                   </div>
                 </motion.div>
@@ -553,13 +772,13 @@ export default function App() {
           </AnimatePresence>
 
           <AnimatePresence>
-            {showSettingsModal && settingsData && (
+            {showAdminModal && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
                 <motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  onClick={() => setShowSettingsModal(false)}
+                  onClick={() => setShowAdminModal(false)}
                   className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
                 />
                 <motion.div 
@@ -569,50 +788,58 @@ export default function App() {
                   className="relative bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
                 >
                   <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
-                    <h2 className="text-2xl font-black tracking-tight">Sidecar Settings</h2>
-                    <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                    <h2 className="text-2xl font-black tracking-tight">Administrators</h2>
+                    <button onClick={() => setShowAdminModal(false)} className="text-slate-400 hover:text-white transition-colors">
                       <Plus className="w-6 h-6 rotate-45" />
                     </button>
                   </div>
-                  <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
-                    
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Operation Mode</label>
-                        <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100">
-                            {['public', 'private'].map(m => (
-                                <button key={m} onClick={() => setSettingsData(d => ({ ...d, config: { ...d.config, service_mode: m } }))} className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${settingsData.config.service_mode === m ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>{m}</button>
-                            ))}
-                        </div>
+                  <div className="p-8 space-y-8">
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Invite New Admin</label>
+                      <div className="flex space-x-2">
+                        <input 
+                          type="text" placeholder="Paste npub..." 
+                          className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                          value={inviteNpub}
+                          onChange={(e) => setInviteNpub(e.target.value)}
+                        />
+                        <button onClick={handleInviteAdmin} className="bg-blue-600 text-white px-6 rounded-2xl font-bold text-[10px] hover:bg-blue-700 transition-colors">SEND INVITE</button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Publish Interval (Minutes)</label>
-                        <input type="number" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors" value={settingsData.config.refresh_interval_minutes} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, refresh_interval_minutes: parseInt(e.target.value) } }))} />
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Active Protocols</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            {['ipv4', 'ipv6', 'tor'].map(p => (
-                                <button key={p} onClick={() => setSettingsData(d => ({ ...d, config: { ...d.config, protocols: { ...d.config.protocols, [p]: !d.config.protocols[p] } } }))} className={`p-3 rounded-xl text-xs font-bold uppercase border transition-all ${settingsData.config.protocols[p] ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
-                                    {p}
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Authority Management</label>
+                      <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2">
+                        {admins.map((admin, idx) => (
+                          <div key={admin.pubkey} className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100 group">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-mono font-bold text-slate-600">{nip19.npubEncode(admin.pubkey).slice(0, 16)}...{nip19.npubEncode(admin.pubkey).slice(-8)}</p>
+                              <div className="flex items-center space-x-2">
+                                <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${admin.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>{admin.status}</span>
+                                {idx === 0 && <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">Primary Owner</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                                <button onClick={() => copyToClipboard(nip19.npubEncode(admin.pubkey), `admin-${idx}`)} className="p-2 text-slate-300 hover:text-blue-500 transition-colors">
+                                    {copiedMap[`admin-${idx}`] ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                                 </button>
-                            ))}
-                        </div>
+                                {idx !== 0 && (
+                                    <button onClick={() => handleRemoveAdmin(admin.pubkey)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Public Identity</label>
-                        <input type="text" placeholder="About / Bio" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors mb-2" value={settingsData.config.profile?.about || ''} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, about: e.target.value } } }))} />
-                        <input type="text" placeholder="Picture URL" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors" value={settingsData.config.profile?.picture || ''} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, picture: e.target.value } } }))} />
-                    </div>
-
-                    <button onClick={handleSaveSettings} className="w-full bg-blue-600 text-white font-black py-5 rounded-3xl shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all">SAVE CHANGES</button>
                   </div>
                 </motion.div>
               </div>
             )}
           </AnimatePresence>
+
+
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <AnimatePresence>
@@ -641,43 +868,57 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="mb-8 relative z-10">
+                  <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={() => handleEditService(s)}>
                     <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{s.name}</h3>
                     <p className="text-xs font-mono text-slate-400 truncate">{s.service_id}</p>
                   </div>
 
                   <div className="space-y-4 relative z-10">
-                    <div className="flex flex-wrap gap-2">
-                      {s.state?.last_inventory?.map((ep, idx) => (
-                        <div key={idx} className="flex items-center space-x-1.5 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                          <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : ep.family === 'ipv6' ? 'bg-blue-500' : 'bg-green-500'}`} />
-                          <span className="text-[9px] font-black uppercase text-slate-500">{ep.family}</span>
-                        </div>
-                      ))}
-                      {s.config?.protocols?.tor && !s.state?.last_inventory?.some(e => e.family === 'onion') && (
-                        <div className={`flex items-center space-x-1.5 bg-slate-100 px-2.5 py-1 rounded-lg border ${s.state?.tor_status?.running ? 'border-yellow-500/50' : 'border-red-500/50'}`} title={s.state?.tor_status?.running ? "Tor running but no Onion Service configured" : "Tor not detected"}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${s.state?.tor_status?.running ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
-                          <span className={`text-[9px] font-black uppercase ${s.state?.tor_status?.running ? 'text-yellow-600' : 'text-red-500'}`}>TOR</span>
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Public Identity</div>
+                      {s.service_nsec && (
+                        <div className="flex items-center space-x-2 text-slate-500 font-mono text-xs">
+                          <span>{nip19.npubEncode(getPublicKey(fromNsecLocal(s.service_nsec))).slice(0, 20)}...</span>
+                          <button onClick={(e) => { e.stopPropagation(); copyToClipboard(nip19.npubEncode(getPublicKey(fromNsecLocal(s.service_nsec))), `npub-${s.id}`); }} className="hover:text-blue-500 transition-colors">
+                            {copiedMap[`npub-${s.id}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                          </button>
                         </div>
                       )}
-                      {(!s.state?.last_inventory || s.state.last_inventory.length === 0) && (!s.config?.protocols?.tor || s.state?.last_inventory?.some(e => e.family === 'onion')) && (
-                        <p className="text-[9px] text-slate-400 italic">
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Endpoints</span>
+                        {s.config?.protocols?.tor && !s.state?.last_inventory?.some(e => e.family === 'onion') && (
+                           <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded border ${s.state?.tor_status?.running ? 'border-yellow-500/50 bg-yellow-50 text-yellow-600' : 'border-red-500/50 bg-red-50 text-red-500'}`} title={s.state?.tor_status?.running ? "Tor running but no Onion Service configured" : "Tor not detected"}>
+                             <div className={`w-1 h-1 rounded-full ${s.state?.tor_status?.running ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+                             <span className="text-[8px] font-bold uppercase">TOR</span>
+                           </div>
+                        )}
+                      </div>
+                      
+                      {s.state?.last_inventory?.length > 0 ? (
+                        <div className="space-y-1.5">
+                          {s.state.last_inventory.map((ep, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
+                              <div className="flex items-center space-x-2 truncate">
+                                <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
+                                <span className="truncate max-w-[180px]">{ep.url}</span>
+                              </div>
+                              <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${s.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
+                                {copiedMap[`ep-${s.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 italic">
                           {s.state?.is_probing ? 'Probing...' : 'No active endpoints'}
                         </p>
                       )}
                     </div>
 
-                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 flex justify-between">
-                        Discovery Fingerprint (K)
-                        <Activity className="w-3 h-3 text-blue-500" />
-                      </p>
-                      <code className="text-[10px] text-slate-600 font-mono break-all leading-relaxed line-clamp-2">
-                        {s.state?.last_published_ncc02_id || 'Waiting for cycle...'}
-                      </code>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter pt-2 border-t border-slate-100">
                       <span>Last Update</span>
                       <span className="text-slate-900">{s.state?.last_full_publish_timestamp ? new Date(s.state.last_full_publish_timestamp).toLocaleTimeString() : 'Pending'}</span>
                     </div>
@@ -685,7 +926,7 @@ export default function App() {
                   
                   <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button 
-                      onClick={() => handleDeleteService(s.id)}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteService(s.id); }}
                       className="p-2 text-slate-300 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -759,7 +1000,7 @@ export default function App() {
                   {loginMode === 'choice' && (
                     <div className="grid grid-cols-1 gap-4">
                       {[
-                        { id: 'nip07', label: 'Browser Extension', icon: <Smartphone className="w-5 h-5 text-blue-400" />, desc: 'Use Alby, Nos2x, or similar', action: () => { if(window.nostr) { window.nostr.getPublicKey().then(pk => { saveAdminPk(pk); handleAuthComplete(); }); } else alert("Extension not found"); } },
+                        { id: 'nip07', label: 'Browser Extension', icon: <Smartphone className="w-5 h-5 text-blue-400" />, desc: 'Use Alby, Nos2x, or similar', action: () => { if(window.nostr) { window.nostr.getPublicKey().then(pk => { verifyAndSaveAdmin(pk); }); } else alert("Extension not found"); } },
                         { id: 'nip46', label: 'Remote Signer', icon: <QrCode className="w-5 h-5 text-indigo-400" />, desc: 'Connect via Amber, Nex, or Bunker', action: startNIP46 },
                         { id: 'advanced', label: 'Advanced Options', icon: <Terminal className="w-5 h-5 text-slate-400" />, desc: 'Manual Pubkey or NSEC entry', action: () => setLoginMode('advanced') }
                       ].map(m => (
@@ -782,17 +1023,45 @@ export default function App() {
                       <div className="bg-white p-8 rounded-[3rem] w-fit mx-auto shadow-[0_0_50px_rgba(37,99,235,0.2)]">
                         <QRCodeSVG value={nip46Uri} size={220} />
                       </div>
-                      <div className="flex justify-center">
+                      
+                      <div className="space-y-4">
+                        <div className="flex justify-center flex-wrap gap-2">
+                          {Object.entries(relayStatus).map(([url, status]) => (
+                            <div key={url} className="flex items-center space-x-1.5 px-2 py-1 rounded-full bg-slate-800 border border-white/5" title={url}>
+                              <div className={`w-1.5 h-1.5 rounded-full ${status === 'connected' ? 'bg-green-500' : status === 'failed' ? 'bg-red-500' : 'bg-blue-500 animate-pulse'}`} />
+                              <span className="text-[8px] font-bold text-slate-400 uppercase">{url.split('//')[1]}</span>
+                            </div>
+                          ))}
+                        </div>
+
                         <button 
                           onClick={() => copyToClipboard(nip46Uri, 'nip46')}
-                          className="flex items-center space-x-2 bg-slate-800 px-4 py-2 rounded-full text-[10px] font-black uppercase text-slate-400 hover:text-white transition-colors"
+                          className="flex items-center space-x-2 bg-slate-800 px-4 py-2 rounded-full text-[10px] font-black uppercase text-slate-400 hover:text-white transition-colors mx-auto"
                         >
                           {copiedMap['nip46'] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                           <span>{copiedMap['nip46'] ? 'Copied URI' : 'Copy Connection URI'}</span>
                         </button>
                       </div>
+
                       <div className="space-y-4">
                         <p className="text-xs font-black text-blue-400 animate-pulse uppercase tracking-widest">Awaiting Signer Approval</p>
+                        
+                        {/* NEW: Connection Logs */}
+                        <div className="bg-slate-950/50 rounded-2xl p-4 border border-white/5 font-mono text-[9px] text-left space-y-1 max-w-[280px] mx-auto">
+                          {nip46Logs.length > 0 ? (
+                            nip46Logs.map((log, i) => (
+                              <div key={i} className="text-slate-400 truncate">
+                                <span className="text-blue-500 mr-1">›</span> {log}
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-slate-600 italic">Establishing secure channel...</div>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-slate-500 max-w-[300px] mx-auto leading-relaxed italic">
+                          If your app approved but this screen didn't change, your app's response might not have reached these relays. You can paste your <b>npub</b> below to continue.
+                        </p>
                         <div className="max-w-[280px] mx-auto">
                           <input 
                             type="text" placeholder="Or paste Pubkey manually" 
@@ -801,11 +1070,17 @@ export default function App() {
                             onChange={(e) => setManualPubkey(e.target.value)}
                           />
                           {manualPubkey && (
-                            <button onClick={() => { saveAdminPk(manualPubkey); handleAuthComplete(); }} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
+                            <button onClick={async () => { 
+                              try {
+                                const pk = manualPubkey.startsWith('npub1') ? fromNpub(manualPubkey) : manualPubkey;
+                                const finalPk = (typeof pk === 'string') ? pk : toHex(pk);
+                                await verifyAndSaveAdmin(finalPk); 
+                              } catch (e) { alert("Invalid npub/hex"); }
+                            }} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
                           )}
                         </div>
                       </div>
-                      <button onClick={() => setLoginMode('choice')} className="text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors">Back to Options</button>
+                      <button onClick={() => setLoginMode('choice')} className="text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors">Try Different Method</button>
                     </div>
                   )}
 
@@ -828,8 +1103,7 @@ export default function App() {
                         <button onClick={() => {
                           try {
                             const pk = localNsec.startsWith('nsec1') ? getPublicKey(nip19.decode(localNsec).data) : getPublicKey(new Uint8Array(localNsec.match(/.{1,2}/g).map(byte => parseInt(byte, 16))));
-                            saveAdminPk(pk);
-                            handleAuthComplete();
+                            verifyAndSaveAdmin(pk);
                           } catch(e) { alert("Invalid Key"); }
                         }} className="w-full bg-white text-slate-900 font-black py-5 rounded-3xl shadow-xl hover:bg-slate-100 transition-all">{initialized ? 'CONNECT' : 'START PROVISIONING'}</button>
                       </div>

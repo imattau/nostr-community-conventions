@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import { scheduleWithJitter, ensureSelfSignedCert, fromNsec, getPublicIPv4, detectGlobalIPv6 } from 'ncc-06-js';
 import { getPublicKey } from 'nostr-tools/pure';
 import { buildInventory } from './inventory.js';
@@ -6,9 +7,10 @@ import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
 import { updateService, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
+import { provisionOnion } from './onion-service.js';
 
 export async function runPublishCycle(service) {
-  const { id, name, service_nsec, service_id, config, state } = service;
+  const { id, name, service_nsec, service_id, config, state, type } = service;
   const secretKey = fromNsec(service_nsec);
   const publicKey = getPublicKey(secretKey);
   
@@ -30,15 +32,55 @@ export async function runPublishCycle(service) {
     }
   }
 
-  // 1. Probe & Inventory
+  // 1. Tor Provisioning (Stored in DB)
+  let torAddress = null;
+  if (config.protocols?.tor) {
+    try {
+      // Migration check: if onion-service.json exists, use it once and delete it
+      const migrationFile = `./onion-${service_id}.json`;
+      const legacyFile = './onion-service.json';
+      let existingKey = config.onion_private_key;
+
+      if (!existingKey) {
+        const fileToRead = fs.existsSync(migrationFile) ? migrationFile : (fs.existsSync(legacyFile) ? legacyFile : null);
+        if (fileToRead) {
+          try {
+            const data = JSON.parse(fs.readFileSync(fileToRead, 'utf8'));
+            existingKey = data.privateKey;
+            console.log(`[App] Migrated onion key for ${name} from ${fileToRead}`);
+            fs.unlinkSync(fileToRead); // Clean up
+          } catch (e) {}
+        }
+      }
+
+      const torRes = await provisionOnion({
+        serviceId: id,
+        torControl: config.tor_control,
+        privateKey: existingKey,
+        localPort: config.local_port || config.port || 3000
+      });
+
+      if (torRes) {
+        torAddress = torRes.address;
+        // If key changed (or was migrated), persist to DB
+        if (torRes.privateKey !== config.onion_private_key) {
+          updateService(id, { config: { ...config, onion_private_key: torRes.privateKey } });
+        }
+      }
+    } catch (err) {
+      console.warn(`[App] Tor provisioning failed for ${name}: ${err.message}`);
+    }
+  }
+
+  // 2. Probe & Inventory
   const ipv4 = await getPublicIPv4();
   const ipv6 = detectGlobalIPv6();
   const torStatus = await checkTor();
   
-  const inventory = await buildInventory(config, { ipv4, ipv6 }, torStatus);
+  const inventory = await buildInventory({ ...config, type, torAddress }, { ipv4, ipv6 }, torStatus);
   const inventoryHash = crypto.createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
 
-  // 2. Build Records
+  // 3. Build Records
   const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords({
     ...config,
     ncc02ExpiryDays: config.ncc02_expiry_days || 14,
@@ -77,13 +119,14 @@ export async function runPublishCycle(service) {
   const eventsToPublish = [ncc02Event, ncc05EventTemplate];
 
   // Add Kind 0 (Metadata) if profile exists
-  if (config.profile) {
-    const metadata = {
-      name: config.profile.name || name,
-      about: config.profile.about,
-      picture: config.profile.picture,
-      nip05: config.profile.nip05
-    };
+    if (config.profile) {
+      const metadata = {
+        name: (config.profile.name || name).toLowerCase().replace(/\s+/g, '_'),
+        display_name: config.profile.name || name,
+        about: config.profile.about,
+        picture: config.profile.picture,
+        nip05: config.profile.nip05
+      };
     // Remove undefined keys
     Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
 
@@ -111,7 +154,14 @@ export async function runPublishCycle(service) {
   };
 
   updateService(id, { state: newState });
-  addLog('info', `Published updates for ${name}`, { serviceId: id });
+  
+  const eventInfo = `NCC-02: ${ncc02Event.id.slice(0, 8)}...`;
+  addLog('info', `Published updates for ${name} (${eventInfo})`, { 
+    serviceId: id,
+    ncc02: ncc02Event.id,
+    ncc05: ncc05EventTemplate.id,
+    kind0: eventsToPublish.find(e => e.kind === 0)?.id
+  });
   
   return newState;
 }

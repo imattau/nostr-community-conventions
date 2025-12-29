@@ -182,7 +182,7 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      await server.listen({ port, host: '127.0.0.1' });
+      await server.listen({ port, host: '0.0.0.0' });
       success = true;
       break;
     } catch (err) {

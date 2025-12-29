@@ -17,17 +17,32 @@ export class TorControl {
     this.socket = net.connect({ host: this.host, port: this.port });
     this.socket.setEncoding('utf-8');
     this.socket.setTimeout(this.timeout);
-    this.socket.on('timeout', () => {
-      this.socket?.destroy(new Error('tor control connection timed out'));
+    
+    // Prevent unhandled error events from crashing the process
+    this.socket.on('error', (err) => {
+      if (this.pending) {
+        this.pending.reject(err);
+        this.pending = null;
+      }
     });
+
+    this.socket.on('timeout', () => {
+      const err = new Error('tor control connection timed out');
+      this.socket?.destroy(err);
+      if (this.pending) {
+        this.pending.reject(err);
+        this.pending = null;
+      }
+    });
+
     this.socket.on('data', chunk => {
       this.buffer += chunk;
       this._processBuffer();
     });
 
     await once(this.socket, 'connect');
-    // We expect a greeting or just be ready. 
-    // The original code had _expectGreeting but I'll trust the caller to handle auth immediately.
+    // Disable timeout after connection to allow persistent session
+    this.socket.setTimeout(0);
   }
 
   async authenticate() {
@@ -38,8 +53,12 @@ export class TorControl {
     }
   }
 
-  async addOnion(keySpec, portMapping) {
-    const command = `ADD_ONION ${keySpec} Port=${portMapping}`;
+  async addOnion(keySpec, portMapping, flags = []) {
+    let command = `ADD_ONION ${keySpec}`;
+    if (flags.length > 0) {
+      command += ` Flags=${flags.join(',')}`;
+    }
+    command += ` Port=${portMapping}`;
     const response = await this.sendCommand(command);
     if (!response.ok) {
       throw new Error(`Tor control ADD_ONION failed: ${response.lines.join(' | ')}`);
@@ -59,6 +78,7 @@ export class TorControl {
       this.pending.resolve = resolve;
       this.pending.reject = reject;
     });
+    console.log('[TorControl] Sending:', command);
     this.socket.write(`${command}\r\n`);
     return promise;
   }
@@ -76,10 +96,13 @@ export class TorControl {
   }
 
   close() {
+    if (this.pending) {
+      this.pending.reject(new Error('Tor control connection closed'));
+      this.pending = null;
+    }
     this.socket?.destroy();
     this.socket = null;
     this.buffer = '';
-    this.pending = null;
   }
 }
 

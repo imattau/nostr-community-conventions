@@ -63,7 +63,7 @@ export function addAdmin(pubkey, status = 'active') {
 }
 
 export function getAdmins() {
-  return db.prepare('SELECT * FROM admins').all();
+  return db.prepare('SELECT * FROM admins ORDER BY created_at ASC').all();
 }
 
 export function removeAdmin(pubkey) {
@@ -110,4 +110,14 @@ export function getLogs(limit = 100) {
 export function isInitialized() {
   const row = db.prepare('SELECT pubkey FROM admins LIMIT 1').get();
   return !!row;
+}
+
+export function wipeDb() {
+  db.exec(`
+    DELETE FROM config;
+    DELETE FROM state;
+    DELETE FROM admins;
+    DELETE FROM services;
+    DELETE FROM logs;
+  `);
 }
