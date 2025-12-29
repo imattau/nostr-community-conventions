@@ -32,15 +32,22 @@ export async function ensureSelfSignedCert({
     return { type: 2, value: name };
   });
 
-  const generated = selfsigned.generate(attrs, {
+  const generated = await selfsigned.generate(attrs, {
     algorithm: 'rsa',
     keySize: 2048,
     days: 365,
     extensions: [{ name: 'subjectAltName', altNames: altNameObjects }]
   });
 
-  fs.writeFileSync(keyPath, generated.private, 'utf-8');
-  fs.writeFileSync(certPath, generated.cert, 'utf-8');
+  const privateKey = generated.private || generated.privateKey;
+  const certificate = generated.cert || generated.certificate;
+
+  if (!privateKey || !certificate) {
+    throw new Error(`Self-signed cert generation failed. Keys returned: ${Object.keys(generated).join(', ')}`);
+  }
+
+  fs.writeFileSync(keyPath, privateKey, 'utf-8');
+  fs.writeFileSync(certPath, certificate, 'utf-8');
 
   return { keyPath, certPath };
 }

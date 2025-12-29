@@ -5,7 +5,7 @@ import {
   Shield, Key, Globe, Plus, Trash2, Activity, Box, 
   ChevronRight, Smartphone, QrCode, Terminal, 
   Copy, Check, AlertCircle, RefreshCw, LogOut, ExternalLink,
-  Radio
+  Radio, Menu
 } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { nip19, nip04, SimplePool } from 'nostr-tools';
@@ -30,9 +30,11 @@ export default function App() {
   const [nip46Uri, setNip46Uri] = useState('');
   const [manualPubkey, setManualPubkey] = useState('');
   const [localNsec, setLocalNsec] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copiedMap, setCopiedMap] = useState({});
   const [connectionStatus, setConnectionStatus] = useState('idle');
   const [showNewServiceModal, setShowNewServiceModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsData, setSettingsData] = useState(null);
   const [proxyCheckResult, setProxyCheckResult] = useState(null);
 
   const checkProxy = async () => {
@@ -42,6 +44,25 @@ export default function App() {
       setProxyCheckResult(res.data);
     } catch (e) {
       setProxyCheckResult({ error: e.message });
+    }
+  };
+
+  const handleOpenSettings = () => {
+    const sidecar = services.find(s => s.type === 'sidecar');
+    if (sidecar) {
+      setSettingsData(JSON.parse(JSON.stringify(sidecar))); // Deep copy
+      setShowSettingsModal(true);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    if (!settingsData) return;
+    try {
+      await axios.put(`${API_BASE}/service/${settingsData.id}`, { config: settingsData.config });
+      setShowSettingsModal(false);
+      fetchServices();
+    } catch (e) {
+      alert("Failed to save settings: " + e.message);
     }
   };
 
@@ -86,9 +107,19 @@ export default function App() {
   const fetchServices = async () => {
     try {
       const res = await axios.get(`${API_BASE}/services`);
-      setServices(res.data);
+      setServices(prev => {
+        // Optimization: prevent re-renders if data is identical
+        if (JSON.stringify(prev) === JSON.stringify(res.data)) return prev;
+        return res.data;
+      });
+      
       const logRes = await axios.get(`${API_BASE}/status`);
-      if (logRes.data.logs) setLogs(logRes.data.logs);
+      if (logRes.data.logs) {
+        setLogs(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(logRes.data.logs)) return prev;
+          return logRes.data.logs;
+        });
+      }
     } catch (e) {}
   };
 
@@ -112,6 +143,12 @@ export default function App() {
     localStorage.setItem('ncc_admin_pk', pk);
   };
 
+  const handleAuthComplete = () => {
+    if (!initialized) {
+      startProvisioning();
+    }
+  };
+
   const startNIP46 = async () => {
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
@@ -133,7 +170,7 @@ export default function App() {
           if (parsed.result === 'ack' || parsed.method === 'connect') {
             saveAdminPk(event.pubkey);
             sub.close();
-            startProvisioning();
+            handleAuthComplete();
           }
         } catch (e) {}
       }
@@ -188,11 +225,11 @@ export default function App() {
     } catch (e) { alert("Failed to delete service: " + e.message); }
   };
 
-  const copyToClipboard = (text) => {
+  const copyToClipboard = (text, key) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedMap(prev => ({ ...prev, [key]: true }));
+    setTimeout(() => setCopiedMap(prev => ({ ...prev, [key]: false })), 2000);
   };
 
   if (loading || initialized === null) return (
@@ -207,9 +244,12 @@ export default function App() {
     </div>
   );
 
-  if (initialized) {
+  const isAuthenticated = initialized && setupData.adminPubkey;
+
+  if (isAuthenticated) {
     const sidecarNode = services.find(s => s.type === 'sidecar');
     const managedServices = services.filter(s => s.type !== 'sidecar');
+    const onionEndpoint = sidecarNode?.state?.last_inventory?.find(e => e.family === 'onion');
 
     return (
       <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans selection:bg-blue-100 pb-20">
@@ -229,6 +269,9 @@ export default function App() {
                 <span className="text-[10px] font-black text-slate-400 uppercase">Admin Authority</span>
                 <span className="text-xs font-mono text-slate-600">{setupData.adminPubkey.slice(0, 8)}...{setupData.adminPubkey.slice(-8)}</span>
               </div>
+              <button onClick={handleOpenSettings} className="p-2 text-slate-400 hover:text-blue-500 transition-colors">
+                <Menu className="w-5 h-5" />
+              </button>
               <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
                 <LogOut className="w-5 h-5" />
               </button>
@@ -257,14 +300,23 @@ export default function App() {
                     </div>
                   </div>
                   <h2 className="text-4xl font-black tracking-tight leading-none">Management Identity</h2>
-                  <div className="flex items-center space-x-2 text-slate-400 font-mono text-sm">
+                  <div className="flex flex-col space-y-1 text-slate-400 font-mono text-sm">
                     {sidecarNode.service_nsec && (
-                      <>
+                      <div className="flex items-center space-x-2">
                         <span>{nip19.npubEncode(getPublicKey(fromNsecLocal(sidecarNode.service_nsec))).slice(0, 24)}...</span>
-                        <button onClick={() => copyToClipboard(nip19.npubEncode(getPublicKey(fromNsecLocal(sidecarNode.service_nsec))))} className="hover:text-white transition-colors">
-                          {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                        <button onClick={() => copyToClipboard(nip19.npubEncode(getPublicKey(fromNsecLocal(sidecarNode.service_nsec))), 'npub')} className="hover:text-white transition-colors">
+                          {copiedMap['npub'] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                         </button>
-                      </>
+                      </div>
+                    )}
+                    {onionEndpoint && (
+                      <div className="flex items-center space-x-2 text-purple-400 text-[10px] bg-purple-500/10 w-fit px-2 py-0.5 rounded-md border border-purple-500/20">
+                        <Globe className="w-3 h-3" />
+                        <span>{onionEndpoint.url}</span>
+                        <button onClick={() => copyToClipboard(onionEndpoint.url, 'onion')} className="hover:text-white transition-colors">
+                          {copiedMap['onion'] ? <Check className="w-2.5 h-2.5 text-green-500" /> : <Copy className="w-2.5 h-2.5" />}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -421,10 +473,10 @@ export default function App() {
                         />
                         {newService.service_nsec && (
                           <button 
-                            onClick={() => copyToClipboard(newService.service_nsec)}
+                            onClick={() => copyToClipboard(newService.service_nsec, 'nsec')}
                             className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all"
                           >
-                            {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                            {copiedMap['nsec'] ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                           </button>
                         )}
                         <button 
@@ -494,6 +546,68 @@ export default function App() {
                     >
                       ADD DISCOVERY PROFILE
                     </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showSettingsModal && settingsData && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowSettingsModal(false)}
+                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+                />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="relative bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+                >
+                  <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
+                    <h2 className="text-2xl font-black tracking-tight">Sidecar Settings</h2>
+                    <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                      <Plus className="w-6 h-6 rotate-45" />
+                    </button>
+                  </div>
+                  <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
+                    
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Operation Mode</label>
+                        <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100">
+                            {['public', 'private'].map(m => (
+                                <button key={m} onClick={() => setSettingsData(d => ({ ...d, config: { ...d.config, service_mode: m } }))} className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${settingsData.config.service_mode === m ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>{m}</button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Publish Interval (Minutes)</label>
+                        <input type="number" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors" value={settingsData.config.refresh_interval_minutes} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, refresh_interval_minutes: parseInt(e.target.value) } }))} />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Active Protocols</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {['ipv4', 'ipv6', 'tor'].map(p => (
+                                <button key={p} onClick={() => setSettingsData(d => ({ ...d, config: { ...d.config, protocols: { ...d.config.protocols, [p]: !d.config.protocols[p] } } }))} className={`p-3 rounded-xl text-xs font-bold uppercase border transition-all ${settingsData.config.protocols[p] ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Public Identity</label>
+                        <input type="text" placeholder="About / Bio" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors mb-2" value={settingsData.config.profile?.about || ''} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, about: e.target.value } } }))} />
+                        <input type="text" placeholder="Picture URL" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors" value={settingsData.config.profile?.picture || ''} onChange={(e) => setSettingsData(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, picture: e.target.value } } }))} />
+                    </div>
+
+                    <button onClick={handleSaveSettings} className="w-full bg-blue-600 text-white font-black py-5 rounded-3xl shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all">SAVE CHANGES</button>
                   </div>
                 </motion.div>
               </div>
@@ -638,14 +752,14 @@ export default function App() {
                     <div className="w-20 h-20 bg-blue-500/10 rounded-[2rem] flex items-center justify-center mx-auto border border-blue-500/20 mb-6">
                       <Shield className="w-10 h-10 text-blue-400" />
                     </div>
-                    <h1 className="text-4xl font-black tracking-tight leading-none">Initialize Node</h1>
-                    <p className="text-slate-400 font-medium">Connect your admin identity to provision the Sidecar.</p>
+                    <h1 className="text-4xl font-black tracking-tight leading-none">{initialized ? 'Connect Identity' : 'Initialize Node'}</h1>
+                    <p className="text-slate-400 font-medium">{initialized ? 'Login to manage your services.' : 'Connect your admin identity to provision the Sidecar.'}</p>
                   </div>
 
                   {loginMode === 'choice' && (
                     <div className="grid grid-cols-1 gap-4">
                       {[
-                        { id: 'nip07', label: 'Browser Extension', icon: <Smartphone className="w-5 h-5 text-blue-400" />, desc: 'Use Alby, Nos2x, or similar', action: () => { if(window.nostr) { window.nostr.getPublicKey().then(pk => { saveAdminPk(pk); startProvisioning(); }); } else alert("Extension not found"); } },
+                        { id: 'nip07', label: 'Browser Extension', icon: <Smartphone className="w-5 h-5 text-blue-400" />, desc: 'Use Alby, Nos2x, or similar', action: () => { if(window.nostr) { window.nostr.getPublicKey().then(pk => { saveAdminPk(pk); handleAuthComplete(); }); } else alert("Extension not found"); } },
                         { id: 'nip46', label: 'Remote Signer', icon: <QrCode className="w-5 h-5 text-indigo-400" />, desc: 'Connect via Amber, Nex, or Bunker', action: startNIP46 },
                         { id: 'advanced', label: 'Advanced Options', icon: <Terminal className="w-5 h-5 text-slate-400" />, desc: 'Manual Pubkey or NSEC entry', action: () => setLoginMode('advanced') }
                       ].map(m => (
@@ -670,11 +784,11 @@ export default function App() {
                       </div>
                       <div className="flex justify-center">
                         <button 
-                          onClick={() => copyToClipboard(nip46Uri)}
+                          onClick={() => copyToClipboard(nip46Uri, 'nip46')}
                           className="flex items-center space-x-2 bg-slate-800 px-4 py-2 rounded-full text-[10px] font-black uppercase text-slate-400 hover:text-white transition-colors"
                         >
-                          {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          <span>{copied ? 'Copied URI' : 'Copy Connection URI'}</span>
+                          {copiedMap['nip46'] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedMap['nip46'] ? 'Copied URI' : 'Copy Connection URI'}</span>
                         </button>
                       </div>
                       <div className="space-y-4">
@@ -687,7 +801,7 @@ export default function App() {
                             onChange={(e) => setManualPubkey(e.target.value)}
                           />
                           {manualPubkey && (
-                            <button onClick={() => { saveAdminPk(manualPubkey); startProvisioning(); }} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
+                            <button onClick={() => { saveAdminPk(manualPubkey); handleAuthComplete(); }} className="w-full mt-3 bg-slate-800 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-blue-500/30 text-blue-400">Force Connection</button>
                           )}
                         </div>
                       </div>
@@ -715,9 +829,9 @@ export default function App() {
                           try {
                             const pk = localNsec.startsWith('nsec1') ? getPublicKey(nip19.decode(localNsec).data) : getPublicKey(new Uint8Array(localNsec.match(/.{1,2}/g).map(byte => parseInt(byte, 16))));
                             saveAdminPk(pk);
-                            startProvisioning();
+                            handleAuthComplete();
                           } catch(e) { alert("Invalid Key"); }
-                        }} className="w-full bg-white text-slate-900 font-black py-5 rounded-3xl shadow-xl hover:bg-slate-100 transition-all">START PROVISIONING</button>
+                        }} className="w-full bg-white text-slate-900 font-black py-5 rounded-3xl shadow-xl hover:bg-slate-100 transition-all">{initialized ? 'CONNECT' : 'START PROVISIONING'}</button>
                       </div>
                       <button onClick={() => setLoginMode('choice')} className="text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors text-center">Return to Safety</button>
                     </div>

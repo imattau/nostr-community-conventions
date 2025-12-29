@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import staticFiles from '@fastify/static';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, getServices, deleteService } from './db.js';
+import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, updateService, getServices, deleteService } from './db.js';
 import { checkTor } from './tor-check.js';
 import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4 } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
@@ -98,6 +98,11 @@ export async function startWebServer(initialPort = 3000, onInitialized) {
 
   server.post('/api/service/add', async (request) => {
     return addService(request.body);
+  });
+
+  server.put('/api/service/:id', async (request) => {
+    updateService(request.params.id, request.body);
+    return { success: true };
   });
 
   server.delete('/api/service/:id', async (request) => {
