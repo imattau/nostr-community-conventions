@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import { scheduleWithJitter, ensureSelfSignedCert, fromNsec, getPublicIPv4, detectGlobalIPv6, computeKFromCertPem } from 'ncc-06-js';
+import { scheduleWithJitter, ensureSelfSignedCert, fromNsec, fromNpub, getPublicIPv4, detectGlobalIPv6, computeKFromCertPem } from 'ncc-06-js';
 import { getPublicKey } from 'nostr-tools/pure';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
@@ -8,6 +8,59 @@ import { publishToRelays } from './publisher.js';
 import { updateService, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
 import { provisionOnion } from './onion-service.js';
+import { NCC05Publisher } from 'ncc-05-js';
+
+const locatorPublisher = new NCC05Publisher({ timeout: 5000 });
+
+function normalizeRecipientPubkeys(values = []) {
+  if (!Array.isArray(values)) return [];
+  const cleaned = new Set();
+  for (const raw of values) {
+    if (!raw) continue;
+    let candidate = String(raw).trim();
+    if (!candidate) continue;
+    if (candidate.startsWith('0x')) {
+      candidate = candidate.slice(2);
+    }
+    if (/^[0-9a-f]{64}$/i.test(candidate)) {
+      cleaned.add(candidate.toLowerCase());
+      continue;
+    }
+    try {
+      const decoded = fromNpub(candidate);
+      if (/^[0-9a-f]{64}$/i.test(decoded)) {
+        cleaned.add(decoded.toLowerCase());
+      }
+    } catch (err) {
+      // ignore invalid transmissions
+    }
+  }
+  return Array.from(cleaned);
+}
+
+async function buildEncryptedLocatorEvent({ publicationRelays, recipients, payload, secretKey, identifier, service }) {
+  if (!recipients.length || !publicationRelays.length) return null;
+  try {
+    if (recipients.length === 1) {
+      return await locatorPublisher.publish(publicationRelays, secretKey, payload, {
+        identifier,
+        recipientPubkey: recipients[0],
+        privateLocator: true
+      });
+    }
+    return await locatorPublisher.publishWrapped(publicationRelays, secretKey, recipients, payload, {
+      identifier,
+      privateLocator: true
+    });
+  } catch (err) {
+    console.warn(`[App] Failed to encrypt NCC-05 locator for ${service.name}: ${err.message}`);
+    addLog('error', `Encrypted NCC-05 publish failed for ${service.name}: ${err.message}`, {
+      serviceId: service.id,
+      error: err.message
+    });
+    return null;
+  }
+}
 
 export async function runPublishCycle(service) {
   const { id, name, service_nsec, service_id, config, state, type } = service;
@@ -93,6 +146,13 @@ export async function runPublishCycle(service) {
   const torStatus = await checkTor();
   
   const inventory = await buildInventory({ ...config, type, torAddress, ncc02ExpectedKey: expectedKey }, { ipv4, ipv6 }, torStatus);
+  const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
+  const configuredPublicationRelays = config.publication_relays || [];
+  let publicationRelays = configuredPublicationRelays;
+  if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
+    publicationRelays = [];
+    console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured. Skipping locator publication.`);
+  }
   
   // Stable hashing to prevent redundant updates
   const stableInventory = inventory.map(e => ({ url: e.url, priority: e.priority, family: e.family }));
@@ -115,7 +175,7 @@ export async function runPublishCycle(service) {
     .digest('hex');
 
   // 2. Build Records
-  const { ncc02Event, ncc05EventTemplate, locatorPayload } = buildRecords({
+  const { ncc02Event, ncc05EventTemplate: baselineNcc05Event, locatorPayload } = buildRecords({
     ...config,
     ncc02ExpiryDays: config.ncc02_expiry_days || 14,
     ncc05TtlHours: config.ncc05_ttl_hours || 1,
@@ -124,6 +184,29 @@ export async function runPublishCycle(service) {
     serviceId: service_id,
     locatorId: service_id + '-locator'
   }, inventory);
+
+  let ncc05EventTemplate = baselineNcc05Event;
+  if (config.service_mode === 'private') {
+    if (normalizedRecipients.length && publicationRelays.length) {
+      const encryptedEvent = await buildEncryptedLocatorEvent({
+        publicationRelays,
+        recipients: normalizedRecipients,
+        payload: locatorPayload,
+        secretKey,
+        identifier: config.locatorId || `${service_id}-locator`,
+        service
+      });
+      ncc05EventTemplate = encryptedEvent || null;
+    } else {
+      ncc05EventTemplate = null;
+      if (!normalizedRecipients.length) {
+        console.log(`[App] Private service ${name} has no recipient NPUBs configured; NCC-05 locator publication disabled.`);
+      }
+      if (!publicationRelays.length) {
+        console.log(`[App] Private service ${name} has no publication relays available; NCC-05 locator publication disabled.`);
+      }
+    }
+  }
 
   // Update DB with inventory immediately so UI sees it
   updateService(id, { state: { ...state, last_inventory: inventory } });
@@ -140,7 +223,8 @@ export async function runPublishCycle(service) {
 
   const locatorChanged = !state.last_endpoints_hash || locatorHash !== state.last_endpoints_hash;
   const primaryChanged = !state.last_published_ncc02_id || primaryEndpointHash !== (state.last_primary_endpoint_hash || null);
-  const shouldPublishNcc05 = locatorChanged || isIntervalReached;
+  const shouldPublishNcc05Raw = locatorChanged || isIntervalReached;
+  const shouldPublishNcc05 = shouldPublishNcc05Raw && !!ncc05EventTemplate;
 
   const isIntervalPublish = isIntervalReached && !locatorChanged;
   const isFirstRun = isFirstRunForService;
@@ -161,14 +245,6 @@ export async function runPublishCycle(service) {
   console.log(`[App] Publishing ${name} due to: ${reason}`);
 
   // 4. Publish
-  let publicationRelays = config.publication_relays || [];
-  
-  // If Private Mode, do not publish to external relays
-  if (config.service_mode === 'private') {
-    publicationRelays = [];
-    console.log(`[App] Service ${name} is Private. Skipping external publication.`);
-  }
-
   const eventsToPublish = [];
   if (primaryChanged) {
     eventsToPublish.push(ncc02Event);
@@ -236,6 +312,9 @@ export async function runPublishCycle(service) {
   if (shouldPublishNcc05 && ncc05EventTemplate?.id) logMetadata.ncc05 = ncc05EventTemplate.id;
   const kind0Event = eventsToPublish.find(e => e.kind === 0);
   if (kind0Event) logMetadata.kind0 = kind0Event.id;
+  if (normalizedRecipients.length) {
+    logMetadata.privateRecipients = normalizedRecipients;
+  }
 
   addLog('info', `Published updates for ${name} (${reason}) [${eventInfo}]`, logMetadata);
   

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NCC Service Catalog</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <h1>NCC Service Catalog</h1>
+        <p>Discover NCC-02 service records from relays and keep a live catalogue.</p>
+      </header>
+
+      <section class="panel" id="controls">
+        <label for="relay-input">Relays (comma/newline separated)</label>
+        <textarea id="relay-input" rows="3" placeholder="wss://nostr-pub.wellorder.net"></textarea>
+        <div class="actions">
+          <button id="refresh-btn">Refresh Catalogue</button>
+          <span id="status-label" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section class="panel" id="summary">
+        <div class="summary-item">
+          <span>Last updated</span>
+          <strong id="last-updated">—</strong>
+        </div>
+        <div class="summary-item">
+          <span>Relays queried</span>
+          <strong id="relay-count">0</strong>
+        </div>
+        <div class="summary-item">
+          <span>Services seen</span>
+          <strong id="service-count">0</strong>
+        </div>
+      </section>
+
+      <section class="panel" id="catalog">
+        <h2>Services</h2>
+        <div id="catalog-list" class="catalog-list">
+          <p class="muted">No catalogue data yet. Click refresh to query relays.</p>
+        </div>
+      </section>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -24,6 +24,25 @@ const SERVICE_TYPES = [
   { id: 'custom', label: 'Custom API', icon: <Terminal className="w-4 h-4" />, defaultId: 'service' }
 ];
 
+const createDefaultServiceConfig = () => ({
+  refresh_interval_minutes: 360,
+  ncc02_expiry_days: 14,
+  ncc05_ttl_hours: 12,
+  service_mode: 'public',
+  protocols: { ipv4: true, ipv6: true, tor: true },
+  primary_protocol: 'ipv4',
+  profile: { about: '', picture: '' },
+  ncc05_recipients: []
+});
+
+const buildEmptyService = () => ({
+  type: 'relay',
+  name: '',
+  service_id: 'relay',
+  service_nsec: '',
+  config: createDefaultServiceConfig()
+});
+
 export default function App() {
   const [initialized, setInitialized] = useState(null);
   const [step, setStep] = useState(1);
@@ -31,6 +50,7 @@ export default function App() {
   const [stylesReady, setStylesReady] = useState(false);
   const [services, setServices] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [selectedLog, setSelectedLog] = useState(null);
   const [loginMode, setLoginMode] = useState('choice');
   const [nip46Uri, setNip46Uri] = useState('');
   const [manualPubkey, setManualPubkey] = useState('');
@@ -48,10 +68,72 @@ export default function App() {
   const [relayStatus, setRelayStatus] = useState({});
   const [nip46Logs, setNip46Logs] = useState([]);
   const [regeneratingTlsServiceId, setRegeneratingTlsServiceId] = useState(null);
+  const [recipientInput, setRecipientInput] = useState('');
 
   const addNip46Log = (msg) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setNip46Logs(prev => [...prev.slice(-4), `[${time}] ${msg}`]);
+  };
+
+  const parseLogMetadata = (raw) => {
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        return { raw };
+      }
+    }
+    return { raw };
+  };
+
+  const selectedLogMetadata = useMemo(() => parseLogMetadata(selectedLog?.metadata), [selectedLog]);
+
+  const handleLogClick = (log) => {
+    setSelectedLog(prev => (prev && prev.id === log.id ? null : log));
+  };
+
+  const parseRecipientInput = (value) => {
+    if (!value) return [];
+    return Array.from(new Set(value
+      .split(/[\s,]+/)
+      .map(token => token.trim())
+      .filter(Boolean)
+      .map(token => {
+        let candidate = token;
+        if (candidate.toLowerCase().startsWith('npub')) {
+          try {
+            const decoded = nip19.decode(candidate);
+            if (decoded?.type === 'npub' && typeof decoded.data === 'string') {
+              candidate = decoded.data;
+            } else {
+              return null;
+            }
+          } catch (__) {
+            return null;
+          }
+        }
+        const normalized = candidate.toLowerCase();
+        return /^[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+      })
+      .filter(Boolean)));
+  };
+
+  const formatRecipientInputValue = (recipients = []) => {
+    return recipients.map(hex => {
+      try {
+        return nip19.npubEncode(hex);
+      } catch (_) {
+        return hex;
+      }
+    }).join('\n');
+  };
+
+  const handleRecipientInputChange = (value) => {
+    setRecipientInput(value);
+    const parsed = parseRecipientInput(value);
+    setNewService(d => ({ ...d, config: { ...d.config, ncc05_recipients: parsed } }));
   };
 
   const fetchAdmins = async () => {
@@ -118,21 +200,7 @@ export default function App() {
     }
   });
 
-  const [newService, setNewService] = useState({
-    type: 'relay',
-    name: '',
-    service_id: 'relay',
-    service_nsec: '',
-    config: {
-      refresh_interval_minutes: 360,
-      ncc02_expiry_days: 14,
-      ncc05_ttl_hours: 12,
-      service_mode: 'public',
-      protocols: { ipv4: true, ipv6: true, tor: true },
-      primary_protocol: 'ipv4',
-      profile: { about: '', picture: '' }
-    }
-  });
+  const [newService, setNewService] = useState(buildEmptyService());
 
   useEffect(() => {
     // Ensure styles are parsed before revealing the UI
@@ -333,21 +401,8 @@ export default function App() {
   const handleCloseModal = () => {
     setShowNewServiceModal(false);
     setEditServiceId(null);
-    setNewService({ 
-      type: 'relay', 
-      name: '', 
-      service_id: 'relay', 
-      service_nsec: '', 
-      config: { 
-        refresh_interval_minutes: 360, 
-        ncc02_expiry_days: 14, 
-        ncc05_ttl_hours: 12, 
-        service_mode: 'public', 
-        protocols: { ipv4: true, ipv6: true, tor: true }, 
-        primary_protocol: 'ipv4', 
-        profile: { about: '', picture: '' } 
-      } 
-    });
+    setNewService(buildEmptyService());
+    setRecipientInput('');
   };
 
   const handleSaveService = async () => {
@@ -359,34 +414,26 @@ export default function App() {
       }
       setShowNewServiceModal(false);
       setEditServiceId(null);
-      setNewService({ 
-        type: 'relay', 
-        name: '', 
-        service_id: 'relay', 
-        service_nsec: '', 
-        config: { 
-          refresh_interval_minutes: 360, 
-          ncc02_expiry_days: 14, 
-          ncc05_ttl_hours: 12, 
-          service_mode: 'public', 
-          protocols: { ipv4: true, ipv6: true, tor: true }, 
-          primary_protocol: 'ipv4', 
-          profile: { about: '', picture: '' } 
-        } 
-      });
+      setNewService(buildEmptyService());
+      setRecipientInput('');
       fetchServices();
     } catch (e) { alert(`Failed to ${editServiceId ? 'update' : 'add'} service: ` + e.message); }
   };
 
   const handleEditService = (service) => {
     setEditServiceId(service.id);
+    const normalizedConfig = {
+      ...service.config,
+      ncc05_recipients: Array.isArray(service.config?.ncc05_recipients) ? service.config.ncc05_recipients : []
+    };
     setNewService({
         type: service.type,
         name: service.name,
         service_id: service.service_id,
         service_nsec: service.service_nsec,
-        config: service.config
+        config: normalizedConfig
     });
+    setRecipientInput(formatRecipientInputValue(normalizedConfig.ncc05_recipients));
     setShowNewServiceModal(true);
   };
 
@@ -667,6 +714,20 @@ export default function App() {
                             </button>
                           ))}
                         </div>
+                      </div>
+                    )}
+
+                    {newService.type !== 'sidecar' && newService.config.service_mode === 'private' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Locator Recipients</label>
+                        <textarea
+                          rows={4}
+                          value={recipientInput}
+                          onChange={(e) => handleRecipientInputChange(e.target.value)}
+                          placeholder="npub1..."
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors"
+                        />
+                        <p className="text-[9px] text-slate-400 italic">One NPUB per line or comma-separated. Only these identities can decrypt the private NCC-05 locator.</p>
                       </div>
                     )}
 
@@ -1021,6 +1082,11 @@ export default function App() {
                         )}
                       </div>
                     </div>
+                    {s.config?.service_mode === 'private' && s.config?.ncc05_recipients?.length > 0 && (
+                      <div className="px-5 pt-2">
+                        <p className="text-[10px] text-slate-500 italic">Private recipients: {s.config.ncc05_recipients.length}</p>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter pt-2 border-t border-slate-100">
                       <span>Last Update</span>
@@ -1046,22 +1112,72 @@ export default function App() {
               <Terminal className="w-5 h-5 text-slate-400" />
               <h2 className="text-xl font-black text-slate-900 tracking-tight">System Logs</h2>
             </div>
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden font-mono text-[10px]">
-              <div className="max-h-60 overflow-y-auto p-6 space-y-2">
-                {logs.length > 0 ? (
-                  logs.map((log, i) => (
-                    <div key={i} className="flex space-x-4 border-b border-slate-50 pb-2 last:border-0">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden font-mono text-[10px]">
+            <div className="max-h-60 overflow-y-auto p-6 space-y-2">
+              {logs.length > 0 ? (
+                logs.map((log, i) => {
+                  const isActive = selectedLog && selectedLog.id === log.id;
+                  return (
+                    <div
+                      key={log.id || i}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleLogClick(log)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleLogClick(log);
+                        }
+                      }}
+                      className={`flex space-x-4 border-b border-slate-50 pb-2 last:border-0 cursor-pointer ${isActive ? 'bg-slate-50' : 'hover:bg-slate-50'}`}
+                    >
                       <span className="text-slate-400 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
                       <span className={`font-bold shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500'}`}>{log.level.toUpperCase()}</span>
                       <span className="text-slate-600">{log.message}</span>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-slate-400 italic">No system logs available yet.</p>
-                )}
-              </div>
+                  );
+                })
+              ) : (
+                <p className="text-slate-400 italic">No system logs available yet.</p>
+              )}
             </div>
-          </section>
+            {selectedLog && (
+              <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-[11px] space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.4em] text-slate-500">Log Details</p>
+                    <p className="text-slate-800 text-sm font-semibold">{selectedLog.message}</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedLog(null)}
+                    className="text-[10px] uppercase tracking-[0.5em] text-slate-400 hover:text-slate-600"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-[10px] text-slate-500">
+                  <div>
+                    <p className="font-bold text-slate-900 text-xs">{selectedLog.level.toUpperCase()}</p>
+                    <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Level</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900 text-xs">{new Date(selectedLog.timestamp).toLocaleString()}</p>
+                    <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Timestamp</p>
+                  </div>
+                  {selectedLogMetadata?.serviceId && (
+                    <div>
+                      <p className="font-bold text-slate-900 text-xs">{selectedLogMetadata.serviceId}</p>
+                      <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Service</p>
+                    </div>
+                  )}
+                </div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-3 overflow-x-auto">
+                  <pre className="text-[10px] whitespace-pre-wrap break-words">{selectedLogMetadata ? JSON.stringify(selectedLogMetadata, null, 2) : 'No metadata.'}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
         </main>
       </div>
     );
