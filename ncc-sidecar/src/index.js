@@ -1,0 +1,46 @@
+import WebSocket from 'ws';
+globalThis.WebSocket = WebSocket;
+
+import { initDb, isInitialized, getServices } from './db.js';
+import { startWebServer } from './web.js';
+import { startManager } from './app.js';
+
+async function main() {
+  const command = process.argv[2] || 'daemon';
+  
+  // Initialize SQLite
+  initDb('./sidecar.db');
+
+  if (command === 'status') {
+    if (!isInitialized()) {
+      console.log('Sidecar not initialized. Please complete setup via the web interface.');
+      process.exit(0);
+    }
+    const services = getServices();
+    console.log(`--- NCC Sidecar Status ---`);
+    console.log(`Managed Services: ${services.length}`);
+    services.forEach(s => {
+      console.log(` - ${s.name} (${s.type}): ${s.status}`);
+    });
+    process.exit(0);
+  }
+
+  // Always start web server for admin UI
+  const port = Number(process.env.ADMIN_PORT || 3000);
+  await startWebServer(port);
+
+  if (!isInitialized()) {
+    console.log(`[Main] First-run setup required. Visit http://127.0.0.1:${port} to configure.`);
+    return;
+  }
+
+  if (command === 'daemon') {
+    console.log(`[Main] Starting NCC Multi-Service Manager daemon.`);
+    startManager(getServices);
+  }
+}
+
+main().catch(err => {
+  console.error(`Fatal Error: ${err.message}`);
+  process.exit(1);
+});
