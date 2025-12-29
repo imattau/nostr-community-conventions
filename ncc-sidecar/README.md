@@ -30,6 +30,43 @@ npm run first-run
 npm run reset
 ```
 
+## Running NCC-06 Sidecar
+
+1. **Prerequisites**
+   - Node.js 24+ (LTS) installed.
+   - Ports 3000 (API/UI) and 5173 (UI dev) accessible locally.
+   - Optional Tor control credentials if you intend to publish `.onion` endpoints.
+
+2. **Initialize**
+   - Start the app (`npm start`).
+   - Visit `http://127.0.0.1:3000` (or the printed URL after startup) to launch the React dashboard.
+   - Authenticate via Nostr Connect (NIP-46) or paste an admin `npub` manually in the “Force Connection” dialog. The dashboard will store the verified pubkey in local storage so you stay logged in even after restarts.
+   - The provisioning wizard runs automatically the first time you connect, creating the Sidecar Node service and generating TLS certs if configured.
+
+3. **Managing Services**
+   - Each service card shows the public `d`/`npub`, discovered endpoints (IPv4, IPv6, Tor), TLS fingerprint, and last publish timestamp.
+   - Click the card to edit the profile. Fields include `Name`, `About`, and `Picture`, along with the ability to add private recipients (`ncc05_recipients`).
+   - Regenerating TLS certs is handled either from the card (for self-signed services) or the “Danger Zone” section inside the editor. The new fingerprint is used on the next publish cycle.
+   - Service visibility modes: `public` records include endpoints/`k`; `private` records omit them and require `ncc-05` recipients plus publication relays to deliver locator payloads securely.
+
+4. **Publication Relays**
+   - Use the hamburger menu → “Publishing Relays” to adjust the shared relay list. Enter one `wss://` endpoint per line; non-`ws` values are normalized for you.
+   - Saving relays propagates the list to every stored service, so the next publish cycle uses the updated set immediately.
+   - Click “Republish All” to force every service to send its NCC-02/NCC-05/kind-0 records out over the current relay list and auto-refresh the system logs with the rich metadata that now includes event IDs, content, fingerprints, and publish results per relay.
+
+5. **System Logs & Troubleshooting**
+   - The log panel lists recent actions (publish cycles, errors, TLS regeneration, forced republish) with timestamps.
+   - Click a log entry to expand detailed metadata: NCC-02/NCC-05/kind-0 IDs, locator payloads, primary endpoint info, and any private recipient list.
+   - Use this view to confirm endpoints, fingerprints, and publication successes/failures on specific relays (the most common failures are connectivity issues or HTTP 301 redirect responses, which indicate you need the direct `wss://` URL).
+
+6. **Additional Tools**
+   - The Firefox extension `extensions/ncc-service-catalog-firefox` can subscribe to relays, collect NCC-02 cards, and show metadata, NPUBs, and the display name derived from kind-0 events. Install it to monitor how others see your published records.
+   - `read-logs.js`, `check-services.js`, and the integration tests in `ncc-sidecar/test/` help you validate that the publication pipeline is healthy.
+
+7. **Operational Notes**
+   - To run NCC-06 Sidecar under a service manager, point your unit (systemd, launchd, etc.) at `node src/index.js` with the repo as your working directory. Ensure the service has read/write access to `sidecar.db` and the `certs/` folder where TLS material is stored.
+   - Use `npm run reset` only when you need a clean slate; data, services, and logs are erased.
+
 ## Architecture
 
 - **ncc-06-js**: Core library for record building, resolution, and security validation.

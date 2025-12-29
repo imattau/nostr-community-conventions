@@ -179,6 +179,8 @@ export async function runPublishCycle(service, options = {}) {
     .update(JSON.stringify(stableProfile))
     .digest('hex');
 
+  // Keep a deterministic fingerprint of the currently configured profile so we can fire
+  // a publish cycle whenever the admin edits the displayed metadata even if endpoints unchanged.
   const profileSnapshot = config.profile ? {
     name: config.profile.name || '',
     about: config.profile.about || '',
@@ -278,7 +280,8 @@ export async function runPublishCycle(service, options = {}) {
     eventsToPublish.push(ncc05EventTemplate);
   }
 
-  // Add Kind 0 (Metadata) if profile exists and we've either got other events or the profile changed
+  // Always emit the kind-0 metadata when a profile is configured so clients stay in sync.
+  // We gate the actual publish on having something to send or a profile change so we avoid no-op network traffic.
   if (config.profile) {
     const metadata = {
       name: (config.profile.name || name).toLowerCase().replace(/\s+/g, '_'),
@@ -343,6 +346,7 @@ export async function runPublishCycle(service, options = {}) {
     tlsFingerprint: primaryEndpoint.tlsFingerprint || primaryEndpoint.k || expectedKey || null
   } : null;
 
+  // Record as much context as possible for UI/admin troubleshooting (event IDs, locator payload, TLS fingerprint, recipients, etc.).
   const logMetadata = {
     serviceId: id,
     reason,
