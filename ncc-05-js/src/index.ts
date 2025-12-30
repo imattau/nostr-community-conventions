@@ -214,6 +214,7 @@ export class NCC05Resolver {
     private _ownPool: boolean;
     private bootstrapRelays: string[];
     private timeout: number;
+    private cache: Map<string, { payload: NCC05Payload, expires: number }> = new Map();
 
     /**
      * @param options - Configuration for the resolver.
@@ -249,6 +250,19 @@ export class NCC05Resolver {
         if (targetPubkey.startsWith('npub1')) {
             const decoded = nip19.decode(targetPubkey);
             hexPubkey = decoded.data as string;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const cacheKey = `${hexPubkey}:${identifier}`;
+        
+        // Check cache
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            if (cached.expires > now) {
+                return cached.payload;
+            } else {
+                this.cache.delete(cacheKey);
+            }
         }
 
         let queryRelays = [...this.bootstrapRelays];
@@ -360,7 +374,7 @@ export class NCC05Resolver {
             }
 
             // Freshness validation
-            const now = Math.floor(Date.now() / 1000);
+            // const now = Math.floor(Date.now() / 1000); // Already defined above
             
             // Check for expiration tag
             const expirationTag = latestEvent.tags.find(t => t[0] === 'expiration');
@@ -371,6 +385,9 @@ export class NCC05Resolver {
             if (now > expiry) {
                 if (options.strict) return null;
                 console.warn('NCC-05 record expired');
+            } else {
+                 // Update cache if valid
+                 this.cache.set(cacheKey, { payload, expires: expiry });
             }
 
             return payload;
