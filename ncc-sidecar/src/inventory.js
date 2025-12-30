@@ -89,8 +89,9 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
         url = url.replace('ws://', 'http://');
     }
 
-    const endpoint = { ...ep, url, priority };
-    if (!endpoint.k && expectedKey && secureProtocols.has(rawProtocol)) {
+    const normalizedProtocol = url.split('://')[0].toLowerCase();
+    const endpoint = { ...ep, url, priority, protocol: normalizedProtocol };
+    if (!endpoint.k && expectedKey && secureProtocols.has(normalizedProtocol)) {
       endpoint.k = expectedKey;
     }
     const fingerprint = endpoint.k || expectedKey;
