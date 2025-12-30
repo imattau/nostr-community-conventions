@@ -1,7 +1,7 @@
 import { TorControl } from './tor-control.js';
 
 let controlClient = null;
-const activeServices = new Map(); // serviceId -> { address, privateKey, servicePort }
+const activeServices = new Map(); // serviceId -> { address, privateKey, servicePort, targetPort }
 
 async function getClient(config) {
   if (controlClient) return controlClient;
@@ -45,24 +45,20 @@ export async function provisionOnion({ serviceId, torControl, privateKey, localP
   }
 
   // Check cache first
+  const targetPort = localPort || 3000;
   const cached = activeServices.get(serviceId);
   if (cached) {
-    // If key matches (or we have one and input is undefined), return cached
-    if (privateKey === cached.privateKey || (!privateKey && cached.privateKey)) {
+    const needsReprovision = cached.targetPort !== targetPort;
+    if (!needsReprovision && (privateKey === cached.privateKey || (!privateKey && cached.privateKey))) {
       return cached;
     }
-    // If key changed, we need to re-provision.
-    // Tor ADD_ONION doesn't support "update" easily without "DEL_ONION" first?
-    // Actually, adding a new one is fine, but we should probably clean up old if we knew the ID?
-    // Since we don't track the ephemeral ServiceID for deletion easily here without parsing address,
-    // we'll just add new. The old one dies when connection closes or we can implement DEL_ONION later.
+    // If key or target port changed we fall through and provision a new entry.
   }
 
   const client = await getClient(torControl);
 
   const keySpec = privateKey ? privateKey : 'NEW:ED25519-V3';
   const servicePort = 80;
-  const targetPort = localPort || 3000;
   const portMapping = `${servicePort},127.0.0.1:${targetPort}`;
   
   // No Detached flag, rely on keep-alive
@@ -74,7 +70,8 @@ export async function provisionOnion({ serviceId, torControl, privateKey, localP
   const result = {
     address,
     privateKey: newKey,
-    servicePort
+    servicePort,
+    targetPort
   };
 
   activeServices.set(serviceId, result);

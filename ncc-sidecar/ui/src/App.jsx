@@ -5,7 +5,7 @@ import {
   Shield, Key, Globe, Plus, Trash2, Activity, Box, 
   ChevronRight, Smartphone, QrCode, Terminal, 
   Copy, Check, AlertCircle, RefreshCw, LogOut, ExternalLink,
-  Radio, Menu
+  Radio, Menu, Eye, EyeOff
 } from 'lucide-react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { nip19, nip04, nip44, SimplePool } from 'nostr-tools';
@@ -40,7 +40,8 @@ const buildEmptyService = () => ({
   name: '',
   service_id: 'relay',
   service_nsec: '',
-  config: createDefaultServiceConfig()
+  config: createDefaultServiceConfig(),
+  state: {}
 });
 
 export default function App() {
@@ -73,6 +74,21 @@ export default function App() {
   const [relayModalInput, setRelayModalInput] = useState('');
   const [isRepublishing, setIsRepublishing] = useState(false);
   const [appConfig, setAppConfig] = useState({});
+  const [newService, setNewService] = useState(buildEmptyService());
+  const [showServiceNsec, setShowServiceNsec] = useState(false);
+  const portIsValid = Number.isInteger(newService.config?.port) && newService.config?.port > 0;
+  const canSaveService = Boolean(newService.name && newService.service_nsec && portIsValid);
+  
+  useEffect(() => {
+    if (!newService.service_nsec) {
+      setShowServiceNsec(false);
+    }
+  }, [newService.service_nsec]);
+  const onionEndpoint = newService.state?.last_inventory?.find(ep => ep.family === 'onion');
+  const onionAddressValue = onionEndpoint?.url || '';
+  const tlsEndpoint = newService.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
+  const tlsFingerprintValue = tlsEndpoint?.tlsFingerprint || tlsEndpoint?.k || '';
+  const canRotateOnion = Boolean(editServiceId);
 
   const addNip46Log = (msg) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -139,6 +155,18 @@ export default function App() {
     setRecipientInput(value);
     const parsed = parseRecipientInput(value);
     setNewService(d => ({ ...d, config: { ...d.config, ncc05_recipients: parsed } }));
+  };
+
+  const handlePortInputChange = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    const numeric = trimmed === '' ? null : Number(trimmed);
+    setNewService(d => ({
+      ...d,
+      config: {
+        ...d.config,
+        port: Number.isNaN(numeric) ? null : numeric
+      }
+    }));
   };
 
   const normalizeRelayInput = (value) => {
@@ -223,8 +251,6 @@ export default function App() {
       primary_protocol: 'ipv4'
     }
   });
-
-  const [newService, setNewService] = useState(buildEmptyService());
 
   useEffect(() => {
     // Ensure styles are parsed before revealing the UI
@@ -440,9 +466,14 @@ export default function App() {
     setEditServiceId(null);
     setNewService(buildEmptyService());
     setRecipientInput('');
+    setShowServiceNsec(false);
   };
 
   const handleSaveService = async () => {
+    if (!canSaveService) {
+      alert('Provide a name, NSEC, and backend port before saving this discovery profile.');
+      return;
+    }
     try {
       if (editServiceId) {
         await axios.put(`${API_BASE}/service/${editServiceId}`, newService);
@@ -453,6 +484,7 @@ export default function App() {
       setEditServiceId(null);
       setNewService(buildEmptyService());
       setRecipientInput('');
+      setShowServiceNsec(false);
       fetchServices();
     } catch (e) { alert(`Failed to ${editServiceId ? 'update' : 'add'} service: ` + e.message); }
   };
@@ -468,10 +500,20 @@ export default function App() {
         name: service.name,
         service_id: service.service_id,
         service_nsec: service.service_nsec,
-        config: normalizedConfig
+        config: normalizedConfig,
+        state: service.state || {}
     });
     setRecipientInput(formatRecipientInputValue(normalizedConfig.ncc05_recipients));
     setShowNewServiceModal(true);
+    setShowServiceNsec(false);
+  };
+
+  const handleRotateOnion = () => {
+    if (!confirm('Rotate Onion Address? This will happen on next save.')) return;
+    setNewService(d => ({
+      ...d,
+      config: { ...d.config, onion_private_key: undefined }
+    }));
   };
 
   const handleDeleteService = async (id) => {
@@ -528,12 +570,6 @@ export default function App() {
     if (!editServiceId || newService.config?.generate_self_signed === false) return;
     if (!confirm('Regenerate the self-signed TLS certificate for this service?')) return;
     await regenerateTls(editServiceId);
-  };
-
-  const handleRegenerateTlsFromCard = async (service) => {
-    if (!service || service.config?.generate_self_signed === false) return;
-    if (!confirm(`Regenerate the self-signed TLS certificate for ${service.name}?`)) return;
-    await regenerateTls(service.id);
   };
 
   const copyToClipboard = (text, key) => {
@@ -821,20 +857,33 @@ export default function App() {
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Secret Key (NSEC)</label>
                       <div className="flex space-x-2">
                         <input 
-                          type="password" placeholder="nsec1..." 
+                          type={showServiceNsec ? 'text' : 'password'} placeholder="nsec1..." 
                           className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
                           value={newService.service_nsec}
                           onChange={(e) => setNewService(d => ({ ...d, service_nsec: e.target.value }))}
                         />
                         {newService.service_nsec && (
-                          <button 
-                            onClick={() => copyToClipboard(newService.service_nsec, 'nsec')}
-                            className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all"
-                          >
-                            {copiedMap['nsec'] ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                          </button>
+                          <>
+                            <button 
+                              type="button"
+                              onClick={() => copyToClipboard(newService.service_nsec, 'nsec')}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all"
+                            >
+                              {copiedMap['nsec'] ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                              <span className="sr-only">Copy NSEC</span>
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => setShowServiceNsec(prev => !prev)}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all"
+                            >
+                              {showServiceNsec ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              <span className="sr-only">{showServiceNsec ? 'Hide NSEC' : 'Show NSEC'}</span>
+                            </button>
+                          </>
                         )}
                         <button 
+                          type="button"
                           onClick={async () => {
                             const res = await axios.get(`${API_BASE}/service/generate-key`);
                             setNewService(d => ({ ...d, service_nsec: res.data.nsec }));
@@ -842,6 +891,7 @@ export default function App() {
                           className="bg-slate-900 text-white p-5 rounded-2xl hover:bg-slate-800 transition-all"
                         >
                           <RefreshCw className="w-4 h-4" />
+                          <span className="sr-only">Generate new NSEC</span>
                         </button>
                       </div>
                     </div>
@@ -851,10 +901,15 @@ export default function App() {
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service Port</label>
                         <input 
                           type="number" placeholder="e.g. 80" 
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors"
-                          value={newService.config.port || ''}
-                          onChange={(e) => setNewService(d => ({ ...d, config: { ...d.config, port: parseInt(e.target.value) } }))}
+                          className={`w-full bg-slate-50 border rounded-2xl p-5 text-sm font-bold outline-none transition-colors ${portIsValid ? 'border-slate-100 focus:border-blue-500/50' : 'border-rose-200 ring-1 ring-rose-200 focus:border-rose-400'}`}
+                          value={newService.config.port ?? ''}
+                          onChange={(e) => handlePortInputChange(e.target.value)}
                         />
+                        {!portIsValid && (
+                          <p className="text-[9px] text-rose-500 italic mt-1">
+                            Services must use a dedicated backend port so their onion address doesn’t fall back into the Sidecar UI.
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Priority</label>
@@ -917,36 +972,72 @@ export default function App() {
                       )}
                     </div>
 
-                    {editServiceId && (
-                        <div className="bg-red-50 p-4 rounded-2xl border border-red-100 space-y-3">
-                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest">Danger Zone</span>
-                            <div className="flex space-x-2">
-                                <button onClick={async () => {
-                                    if(!confirm('Regenerate NSEC? This will invalidate existing identity.')) return;
-                                    const res = await axios.get(`${API_BASE}/service/generate-key`);
-                                    setNewService(d => ({ ...d, service_nsec: res.data.nsec }));
-                                }} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50">ROTATE NSEC</button>
-                                
-                                <button onClick={() => {
-                                    if(!confirm('Rotate Onion Address? This will happen on next save.')) return;
-                                    setNewService(d => ({ ...d, config: { ...d.config, onion_private_key: undefined } }));
-                                }} className="flex-1 py-2 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50">ROTATE ONION</button>
-                            </div>
-                            <button 
-                              onClick={handleRegenerateTls}
-                              disabled={newService.config?.generate_self_signed === false || regeneratingTlsServiceId === editServiceId}
-                              title={newService.config?.generate_self_signed === false ? 'TLS managed elsewhere' : ''}
-                              className="w-full py-3 bg-white border border-red-200 text-red-500 rounded-xl text-[10px] font-bold hover:bg-red-50 transition-colors disabled:opacity-70 disabled:cursor-wait flex items-center justify-center space-x-2"
-                            >
-                              <RefreshCw className={`w-3 h-3 ${regeneratingTlsServiceId === editServiceId ? 'animate-spin' : ''}`} />
-                              <span>{regeneratingTlsServiceId === editServiceId ? 'REGENERATING TLS...' : 'REGENERATE TLS CERT'}</span>
-                            </button>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Onion Address</label>
+                        <div className="flex space-x-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={onionAddressValue}
+                            placeholder="Onion address appears after the first publish"
+                            className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono text-slate-600 outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                          <button
+                            type="button"
+                            disabled={!onionAddressValue}
+                            onClick={() => copyToClipboard(onionAddressValue, 'onion')}
+                            className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Copy className="w-4 h-4" />
+                            <span className="sr-only">Copy onion address</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canRotateOnion}
+                            onClick={handleRotateOnion}
+                            className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            <span className="sr-only">Rotate onion address</span>
+                          </button>
                         </div>
-                    )}
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">TLS Fingerprint</label>
+                        <div className="flex space-x-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={tlsFingerprintValue}
+                            placeholder="TLS fingerprint appears after cert generation"
+                            className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono text-slate-600 outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                          <button
+                            type="button"
+                            disabled={!tlsFingerprintValue}
+                            onClick={() => copyToClipboard(tlsFingerprintValue, `fingerprint-${editServiceId || 'new'}`)}
+                            className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Copy className="w-4 h-4" />
+                            <span className="sr-only">Copy TLS fingerprint</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRegenerateTls}
+                            disabled={newService.config?.generate_self_signed === false || regeneratingTlsServiceId === editServiceId}
+                            className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                          >
+                            <RefreshCw className={`w-4 h-4 ${regeneratingTlsServiceId === editServiceId ? 'animate-spin' : ''}`} />
+                            <span className="sr-only">Regenerate TLS cert</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
 
                     <button 
                       onClick={handleSaveService}
-                      disabled={!newService.name || !newService.service_nsec}
+                      disabled={!canSaveService}
                       className="w-full bg-blue-600 disabled:opacity-50 text-white font-black py-5 rounded-3xl shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all"
                     >
                       {editServiceId ? 'UPDATE PROFILE' : 'ADD DISCOVERY PROFILE'}
@@ -1175,18 +1266,8 @@ export default function App() {
                               >
                                 <Copy className="w-3.5 h-3.5" />
                               </button>
-                              {s.config?.generate_self_signed === false ? (
+                              {s.config?.generate_self_signed === false && (
                                 <span className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400">TLS EXTERNAL</span>
-                              ) : (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleRegenerateTlsFromCard(s); }}
-                                  disabled={regeneratingTlsServiceId && String(regeneratingTlsServiceId) === String(s.id)}
-                                  aria-label="Regenerate TLS certificate"
-                                  className="flex items-center justify-center px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-600 hover:border-blue-300 hover:bg-blue-100 transition-colors disabled:opacity-40 disabled:cursor-wait"
-                                >
-                                  <RefreshCw className={`w-4 h-4 ${regeneratingTlsServiceId && String(regeneratingTlsServiceId) === String(s.id) ? 'animate-spin' : ''}`} />
-                                  <span className="sr-only">Regenerate TLS cert</span>
-                                </button>
                               )}
                             </div>
                           </div>
