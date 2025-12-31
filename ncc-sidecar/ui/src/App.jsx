@@ -76,6 +76,15 @@ export default function App() {
   const [appConfig, setAppConfig] = useState({});
   const [showNodeSettingsModal, setShowNodeSettingsModal] = useState(false);
   const [allowRemoteLoading, setAllowRemoteLoading] = useState(false);
+  const [dbInfo, setDbInfo] = useState(null);
+  const [dbPasswordInput, setDbPasswordInput] = useState('');
+  const [dbNewPassword, setDbNewPassword] = useState('');
+  const [dbPasswordLoading, setDbPasswordLoading] = useState(false);
+  const [dbExporting, setDbExporting] = useState(false);
+  const [dbImporting, setDbImporting] = useState(false);
+  const [dbWiping, setDbWiping] = useState(false);
+  const [dbImportFile, setDbImportFile] = useState(null);
+  const [dbImportName, setDbImportName] = useState('');
   const [newService, setNewService] = useState(buildEmptyService());
   const [showServiceNsec, setShowServiceNsec] = useState(false);
   const [pendingOnionRefresh, setPendingOnionRefresh] = useState({});
@@ -206,6 +215,28 @@ export default function App() {
       normalized.push(candidate);
     }
     return normalized;
+  };
+
+  const arrayBufferToBase64 = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x7fff;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  };
+
+  const formatBytes = (bytes = 0) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
   };
 
   const fetchAdmins = async () => {
@@ -602,6 +633,122 @@ export default function App() {
       setShowRelaysModal(false);
     } catch (err) {
       alert(`Failed to save relays: ${err.message}`);
+    }
+  };
+
+  const loadDbInfo = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/db/info`);
+      setDbInfo(res.data);
+    } catch (err) {
+      console.warn("Failed to load database info:", err);
+      setDbInfo(null);
+    }
+  };
+
+  useEffect(() => {
+    if (showNodeSettingsModal) {
+      loadDbInfo();
+    }
+  }, [showNodeSettingsModal]);
+
+  const handleSetDbPassword = async () => {
+    if (dbPasswordLoading) return;
+    setDbPasswordLoading(true);
+    try {
+      await axios.post(`${API_BASE}/db/password`, {
+        currentPassword: dbPasswordInput || null,
+        newPassword: dbNewPassword || null
+      });
+      alert('Database password updated.');
+      setDbPasswordInput('');
+      setDbNewPassword('');
+      loadDbInfo();
+    } catch (err) {
+      alert(`Failed to update database password: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setDbPasswordLoading(false);
+    }
+  };
+
+  const handleExportDb = async () => {
+    if (dbExporting) return;
+    setDbExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (dbPasswordInput) params.set('password', dbPasswordInput);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/db/export${query}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Export failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'sidecar.db';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Failed to export database: ${err.message}`);
+    } finally {
+      setDbExporting(false);
+    }
+  };
+
+  const handleDbImportFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setDbImportFile(file);
+      setDbImportName(file.name);
+    } else {
+      setDbImportFile(null);
+      setDbImportName('');
+    }
+  };
+
+  const handleImportDb = async () => {
+    if (!dbImportFile) {
+      alert('Select a database file to import.');
+      return;
+    }
+    if (!confirm('Importing a new database will replace the current data. Continue?')) return;
+    setDbImporting(true);
+    try {
+      const buffer = await dbImportFile.arrayBuffer();
+      const base64 = arrayBufferToBase64(buffer);
+      await axios.post(`${API_BASE}/db/import`, {
+        data: base64,
+        password: dbPasswordInput || null
+      });
+      alert('Database imported successfully. Services will refresh shortly.');
+      setDbImportFile(null);
+      setDbImportName('');
+      loadDbInfo();
+      fetchServices();
+    } catch (err) {
+      alert(`Failed to import database: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setDbImporting(false);
+    }
+  };
+
+  const handleWipeDb = async () => {
+    if (!confirm('This will erase all services, logs, and configuration. Proceed?')) return;
+    if (dbWiping) return;
+    setDbWiping(true);
+    try {
+      await axios.post(`${API_BASE}/db/wipe`, { password: dbPasswordInput || null });
+      alert('Database wiped. The UI will reload so you can reconfigure the Sidecar.');
+      loadDbInfo();
+      window.location.reload();
+    } catch (err) {
+      alert(`Failed to wipe database: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setDbWiping(false);
     }
   };
 
@@ -1263,6 +1410,109 @@ export default function App() {
                     <p className="text-[11px] text-slate-400">
                       Sidecar settings are stored in `app_config` and apply globally across every service. Service-specific profiles remain unchanged.
                     </p>
+                    <div className="space-y-4 border-t border-slate-100 pt-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Database Management</p>
+                          <p className="text-[11px] text-slate-400 max-w-sm">
+                            Export, import, or reset the embedded SQLite database used by the Sidecar.
+                          </p>
+                        </div>
+                        <span className="text-[10px] uppercase tracking-[0.4em] text-slate-400">
+                          {dbInfo?.passwordProtected ? 'Passworded' : 'Unprotected'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] text-slate-500">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">File</p>
+                          <p className="font-mono truncate">{dbInfo?.path || 'Loading...'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Size</p>
+                          <p>{formatBytes(dbInfo?.size)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Modified</p>
+                          <p>{dbInfo ? new Date(dbInfo.modifiedAt).toLocaleString() : 'Loading...'}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Database password</p>
+                        <div className="grid md:grid-cols-2 gap-3">
+                          <input
+                            type="password"
+                            placeholder="Current password"
+                            value={dbPasswordInput}
+                            onChange={(e) => setDbPasswordInput(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                          <input
+                            type="password"
+                            placeholder="New password (leave blank to clear)"
+                            value={dbNewPassword}
+                            onChange={(e) => setDbNewPassword(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                        </div>
+                        <button
+                          onClick={handleSetDbPassword}
+                          disabled={dbPasswordLoading}
+                          className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl shadow-lg shadow-slate-900/30 hover:bg-slate-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {dbPasswordLoading ? 'Updating…' : 'Update password'}
+                        </button>
+                      </div>
+                      <div className="space-y-3">
+                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Export / Import</p>
+                        <div className="space-y-2">
+                          <div className="flex flex-col gap-3 md:flex-row">
+                            <input
+                              type="password"
+                              placeholder="Password for operations (if set)"
+                              value={dbPasswordInput}
+                              onChange={(e) => setDbPasswordInput(e.target.value)}
+                              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              onClick={handleExportDb}
+                              disabled={dbExporting}
+                              className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {dbExporting ? 'Exporting…' : 'Export database'}
+                            </button>
+                          </div>
+                          <div className="flex flex-col gap-3 md:flex-row items-center">
+                            <label className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-[11px] text-slate-500 font-mono cursor-pointer text-left">
+                              {dbImportName || 'Select .db recovery file'}
+                              <input type="file" accept=".db" className="hidden" onChange={handleDbImportFileChange} />
+                            </label>
+                            <button
+                              onClick={handleImportDb}
+                              disabled={dbImporting}
+                              className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {dbImporting ? 'Importing…' : 'Import database'}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400 italic">
+                            Importing replaces the current database and keeps a backup copy.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Reset database</p>
+                        <button
+                          onClick={handleWipeDb}
+                          disabled={dbWiping}
+                          className="w-full bg-rose-500 text-white font-bold py-3 rounded-2xl shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {dbWiping ? 'Resetting…' : 'Wipe database'}
+                        </button>
+                        <p className="text-[10px] text-slate-400 italic">
+                          Clears all services, logs, and admins. You will need to reconfigure the Sidecar afterward.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </Motion.div>
               </div>

@@ -1,11 +1,15 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import crypto from 'crypto';
 
 let db;
+let dbAbsolutePath = null;
+const DB_SECURITY_KEY = 'db_security';
 
 export function initDb(dbPath = './sidecar.db') {
   const absolutePath = path.resolve(process.cwd(), dbPath);
   db = new Database(absolutePath);
+  dbAbsolutePath = absolutePath;
   
   // Create tables
   db.exec(`
@@ -120,4 +124,48 @@ export function wipeDb() {
     DELETE FROM services;
     DELETE FROM logs;
   `);
+}
+
+function hashDbPassword(password) {
+  return crypto.createHash('sha256').update(String(password)).digest('hex');
+}
+
+export function getDbPath() {
+  return dbAbsolutePath;
+}
+
+export function closeDb() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+export function getDbSecurityConfig() {
+  return getConfig(DB_SECURITY_KEY, {});
+}
+
+export function setDbSecurityConfig(config) {
+  setConfig(DB_SECURITY_KEY, config);
+}
+
+export function setDbPassword(password) {
+  const config = getDbSecurityConfig();
+  if (password) {
+    config.passwordHash = hashDbPassword(password);
+  } else {
+    delete config.passwordHash;
+  }
+  setConfig(DB_SECURITY_KEY, config);
+}
+
+export function verifyDbPassword(password) {
+  const { passwordHash } = getDbSecurityConfig();
+  if (!passwordHash) return true;
+  if (!password) return false;
+  return passwordHash === hashDbPassword(password);
+}
+
+export function isDbPasswordProtected() {
+  return Boolean(getDbSecurityConfig().passwordHash);
 }

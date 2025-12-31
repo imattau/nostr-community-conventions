@@ -3,8 +3,13 @@ import cors from '@fastify/cors';
 import staticFiles from '@fastify/static';
 import path from 'path';
 import fs from 'fs';
+import { Buffer } from 'buffer';
 import { fileURLToPath } from 'url';
-import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, updateService, getServices, deleteService, addLog } from './db.js';
+import { 
+  isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin,
+  addService, updateService, getServices, deleteService, addLog, getDbPath, closeDb,
+  initDb, setDbPassword, verifyDbPassword, isDbPasswordProtected, wipeDb
+} from './db.js';
 import { checkTor } from './tor-check.js';
 import { generateKeypair, toNpub, fromNpub, fromNsec, getPublicKey, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
@@ -18,6 +23,12 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
   const { skipListen = false, bypassRemoteGuard = false } = options;
   const server = fastify({ logger: false });
   const debugSecurity = Boolean(process.env.NCC_SIDECAR_DEBUG_REMOTE);
+
+  const assertDbPassword = (password, reply) => {
+    if (verifyDbPassword(password)) return true;
+    reply.code(403).send({ error: 'Invalid database password' });
+    return false;
+  };
 
   await server.register(cors, {
     origin: (origin, callback) => {
@@ -303,6 +314,71 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     appConfig.allow_remote = allowRemote;
     setConfig('app_config', appConfig);
     return { success: true, allow_remote: appConfig.allow_remote };
+  });
+
+  server.get('/api/db/info', async () => {
+    const dbFile = getDbPath();
+    try {
+      const stats = await fs.promises.stat(dbFile);
+      return {
+        path: path.relative(process.cwd(), dbFile),
+        modifiedAt: stats.mtimeMs,
+        size: stats.size,
+        passwordProtected: isDbPasswordProtected()
+      };
+    } catch (_err) {
+      console.warn("[Web] Failed to read database info:", _err?.message || _err);
+      return { error: 'Unable to read database file info' };
+    }
+  });
+
+  server.get('/api/db/export', (request, reply) => {
+    const password = request.query.password;
+    if (!assertDbPassword(password, reply)) return;
+    const dbFile = getDbPath();
+    reply.header('Content-Type', 'application/octet-stream');
+    reply.header('Content-Disposition', 'attachment; filename="sidecar.db"');
+    return reply.send(fs.createReadStream(dbFile));
+  });
+
+  server.post('/api/db/import', async (request, reply) => {
+    const { data, password } = request.body;
+    if (!assertDbPassword(password, reply)) return;
+    if (!data) {
+      return reply.code(400).send({ error: 'Missing database payload' });
+    }
+    const buffer = Buffer.from(data, 'base64');
+    const dbFile = getDbPath();
+    const backupPath = `${dbFile}.bak-${Date.now()}`;
+    try {
+      await fs.promises.copyFile(dbFile, backupPath);
+    } catch (err) {
+      console.warn(`[Web] Failed to backup current database before import: ${err.message}`);
+    }
+    closeDb();
+    await fs.promises.writeFile(dbFile, buffer);
+    initDb(dbFile);
+    addLog('info', 'Database replaced via import', { backupPath: path.relative(process.cwd(), backupPath) });
+    return { success: true, backupPath: path.relative(process.cwd(), backupPath) };
+  });
+
+  server.post('/api/db/wipe', async (request, reply) => {
+    const { password } = request.body;
+    if (!assertDbPassword(password, reply)) return;
+    wipeDb();
+    addLog('warn', 'Database wiped via admin UI');
+    return { success: true };
+  });
+
+  server.post('/api/db/password', async (request, reply) => {
+    const { currentPassword, newPassword } = request.body;
+    if (isDbPasswordProtected() && !verifyDbPassword(currentPassword)) {
+      return reply.code(403).send({ error: 'Invalid current password' });
+    }
+    setDbPassword(newPassword);
+    const status = isDbPasswordProtected();
+    addLog('info', newPassword ? 'Database password updated via admin UI' : 'Database password cleared via admin UI');
+    return { success: true, passwordProtected: status };
   });
 
   server.get('/api/service/generate-key', async () => {
