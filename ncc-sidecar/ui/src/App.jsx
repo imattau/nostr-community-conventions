@@ -2419,6 +2419,7 @@ function ServiceCardContent({
     : 'Pending';
   const publicIdentity = serviceNpub ? `${serviceNpub.slice(0, 20)}...` : null;
   const showIdentity = Boolean(serviceNpub);
+  const displayProfileName = service.config?.profile?.display_name;
 
   return (
     <>
@@ -2439,10 +2440,15 @@ function ServiceCardContent({
         </div>
       </div>
 
-      <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={onEdit}>
-        <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{service.name}</h3>
-        <p className="text-xs font-mono text-slate-400 truncate">{service.service_id}</p>
-      </div>
+        <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={onEdit}>
+          <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{service.name}</h3>
+          {displayProfileName && (
+            <p className="text-xs text-slate-500 font-semibold tracking-tight leading-snug break-words max-w-full">
+              {displayProfileName}
+            </p>
+          )}
+          <p className="text-xs font-mono text-slate-400 break-words">{service.service_id}</p>
+        </div>
 
       <div className="space-y-4 relative z-10">
         <div className="space-y-2">
