@@ -1,25 +1,34 @@
 import { finalizeEvent } from 'nostr-tools/pure';
-import { nip44 } from 'nostr-tools';
+import { nip04, nip44 } from 'nostr-tools';
 import WebSocket from 'ws';
 
-export async function sendInviteDM({ secretKey, recipientPubkey, message, relays }) {
-  // Use NIP-44 for encryption
-  const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
-  const ciphertext = nip44.encrypt(message, conversationKey);
+export async function sendInviteDM({
+  secretKey,
+  recipientPubkey,
+  message,
+  relays,
+  encryptionMethod = 'nip44'
+}) {
+  let ciphertext;
 
-  // Using Kind 4 with NIP-44 content (indicated by encryption tag)
+  if (encryptionMethod === 'nip04') {
+    ciphertext = nip04.encrypt(secretKey, recipientPubkey, message);
+  } else {
+    const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
+    ciphertext = nip44.encrypt(message, conversationKey);
+  }
+
   const eventTemplate = {
     kind: 4,
     created_at: Math.floor(Date.now() / 1000),
     tags: [
       ['p', recipientPubkey],
-      ['encryption', 'nip44']
+      ['encryption', encryptionMethod]
     ],
     content: ciphertext
   };
 
   const signedEvent = finalizeEvent(eventTemplate, secretKey);
-  
   return await broadcastEvent(relays, signedEvent);
 }
 

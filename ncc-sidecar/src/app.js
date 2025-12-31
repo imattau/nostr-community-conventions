@@ -85,7 +85,8 @@ The updated endpoint is visible in the admin dashboard after the next publish cy
         secretKey,
         recipientPubkey: pubkey,
         message,
-        relays: Array.from(new Set(relayTargets))
+        relays: Array.from(new Set(relayTargets)),
+        encryptionMethod: 'nip04'
       });
       return { pubkey, success };
     } catch (err) {
@@ -287,7 +288,8 @@ export async function runPublishCycle(service, options = {}) {
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
   const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
-  if (onionChanged && torResponse) {
+  const shouldNotifyAdmins = onionChanged && torAddress !== state.last_onion_notified;
+  if (shouldNotifyAdmins && torResponse) {
     await notifyAdminsOnionUpdate({
       service,
       torResponse,
@@ -478,6 +480,7 @@ export async function runPublishCycle(service, options = {}) {
     last_full_publish_timestamp: now,
     tor_status: torStatus,
     last_onion_address: torAddress || state.last_onion_address,
+    last_onion_notified: shouldNotifyAdmins ? torAddress : state.last_onion_notified,
     last_publication_warning_reason: null
   };
 
