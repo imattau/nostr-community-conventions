@@ -9,10 +9,17 @@ DATA_DIR_DEFAULT="/var/lib/ncc-sidecar"
 SERVICE_NAME_DEFAULT="ncc-sidecar"
 SERVICE_USER_DEFAULT="ncc-sidecar"
 ALLOW_REMOTE=false
+NODE_VERSION="v24.12.0"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [options]
+Usage: $(basename "$0") [command] [options]
+
+Commands:
+  install      Install or update the sidecar (default)
+  update       Pull new source and rebuild in-place
+  reinstall    Remove and re-run install
+  remove       Uninstall the sidecar, service, and optionally data
 
 Options:
   --install-dir DIR     Where to deploy the code (default: $INSTALL_DIR_DEFAULT)
@@ -30,14 +37,21 @@ INSTALL_DIR="$INSTALL_DIR_DEFAULT"
 DATA_DIR="$DATA_DIR_DEFAULT"
 SERVICE_NAME="$SERVICE_NAME_DEFAULT"
 SERVICE_USER="$SERVICE_USER_DEFAULT"
+ACTION="install"
+NPM_PACKAGE=""
 
 while (( "$#" )); do
   case "$1" in
+    install|update|reinstall|remove)
+      ACTION="$1"
+      shift
+      ;;
     --install-dir) INSTALL_DIR="$2"; shift 2;;
     --data-dir) DATA_DIR="$2"; shift 2;;
     --service-name) SERVICE_NAME="$2"; shift 2;;
     --service-user) SERVICE_USER="$2"; shift 2;;
     --repo-source) REPO_SOURCE="$2"; shift 2;;
+    --npm-package) NPM_PACKAGE="$2"; shift 2;;
     --allow-remote) ALLOW_REMOTE=true; shift;;
     -h|--help) usage;;
     *)
@@ -63,15 +77,74 @@ require_cmd() {
   fi
 }
 
-require_cmd node
-require_cmd npm
 require_cmd rsync
 require_cmd systemctl
+
+install_node_dist() {
+  local cached_node="$INSTALL_DIR/.node/bin/node"
+  if [ -x "$cached_node" ] && [ -x "$(dirname "$cached_node")/npm" ]; then
+    NODE_BIN="$cached_node"
+    NPM_BIN="$(dirname "$cached_node")/npm"
+    NODE_DIR="$(dirname "$NODE_BIN")"
+    return
+  fi
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    NODE_BIN="$(command -v node)"
+    NPM_BIN="$(command -v npm)"
+    NODE_DIR="$(dirname "$NODE_BIN")"
+    return
+  fi
+  require_cmd curl
+  require_cmd tar
+  local arch
+  case "$(uname -m)" in
+    x86_64) arch="linux-x64";;
+    aarch64) arch="linux-arm64";;
+    *)
+      echo "Unsupported architecture for automatic Node download: $(uname -m)"
+      exit 1
+      ;;
+  esac
+  local node_tar="$DATA_DIR/node-$NODE_VERSION-$arch.tar.xz"
+  local url="https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-$arch.tar.xz"
+  echo "Downloading Node.js $NODE_VERSION for $arch..."
+  curl -fsSL "$url" -o "$node_tar"
+  local node_root="$INSTALL_DIR/.node"
+  rm -rf "$node_root"
+  mkdir -p "$node_root"
+  tar -xJf "$node_tar" -C "$node_root" --strip-components=1
+  NODE_BIN="$node_root/bin/node"
+  NPM_BIN="$node_root/bin/npm"
+  NODE_DIR="$(dirname "$NODE_BIN")"
+  chmod +x "$NODE_BIN" "$NPM_BIN"
+}
+
+setup_node_path() {
+  if [ -n "$NODE_DIR" ]; then
+    export PATH="$NODE_DIR:$PATH"
+  fi
+}
 
 SOURCE_DIR=""
 TEMP_SOURCE=""
 
 setup_source() {
+  if [ -n "$NPM_PACKAGE" ]; then
+    require_cmd npm
+    TEMP_SOURCE="$(mktemp -d /tmp/ncc-sidecar-npm-XXXX)"
+    echo "Fetching npm package $NPM_PACKAGE..."
+    npm pack "$NPM_PACKAGE" --pack-destination "$TEMP_SOURCE" >/dev/null
+    local tarball
+    tarball="$(find "$TEMP_SOURCE" -maxdepth 1 -name '*.tgz' -print -quit)"
+    if [ -z "$tarball" ]; then
+      echo "Failed to download npm package: $NPM_PACKAGE"
+      exit 1
+    fi
+    mkdir -p "$TEMP_SOURCE/src"
+    tar -xzf "$tarball" -C "$TEMP_SOURCE/src" --strip-components=1
+    SOURCE_DIR="$TEMP_SOURCE/src"
+    return
+  fi
   if [ -d "$REPO_SOURCE" ]; then
     SOURCE_DIR="$REPO_SOURCE"
     return
@@ -93,8 +166,9 @@ trap cleanup_source EXIT
 
 SERVICE_GROUP="$SERVICE_USER"
 SYSTEMD_UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-NODE_BIN="$(command -v node)"
-NPM_BIN="$(command -v npm)"
+NODE_BIN=""
+NPM_BIN=""
+NODE_DIR=""
 
 ensure_user() {
   if id "$SERVICE_USER" >/dev/null 2>&1; then
@@ -104,48 +178,20 @@ ensure_user() {
   fi
 }
 
-run_as_service() {
-  local cmd="$1"
-  if command -v runuser >/dev/null 2>&1; then
-    runuser -l "$SERVICE_USER" -c "$cmd"
-  else
-    su -s /bin/bash "$SERVICE_USER" -c "$cmd"
-  fi
+stop_service() {
+  systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
 }
 
-echo "Installing NCC-06 Sidecar under $INSTALL_DIR"
+disable_service() {
+  systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+}
 
-setup_source
-ensure_user
+remove_service_unit() {
+  rm -f "$SYSTEMD_UNIT_PATH"
+}
 
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$DATA_DIR"
-chown "$SERVICE_USER:$SERVICE_GROUP" "$DATA_DIR"
-
-echo "Syncing repository files..."
-rsync -a --delete \
-  --exclude 'node_modules' \
-  --exclude 'sidecar.db' \
-  --exclude '.git' \
-  --exclude '.gitignore' \
-  --exclude 'npm-debug.log' \
-  --exclude 'certs' \
-  "$SOURCE_DIR/" "$INSTALL_DIR/"
-
-mkdir -p "$INSTALL_DIR/certs"
-chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
-
-touch "$DATA_DIR/sidecar.db"
-chown "$SERVICE_USER:$SERVICE_GROUP" "$DATA_DIR/sidecar.db"
-
-ln -sf "$DATA_DIR/sidecar.db" "$INSTALL_DIR/sidecar.db"
-chown -h "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR/sidecar.db"
-
-echo "Installing Node.js dependencies..."
-run_as_service "cd '$INSTALL_DIR' && '$NPM_BIN' install"
-run_as_service "cd '$INSTALL_DIR/ui' && '$NPM_BIN' install && '$NPM_BIN' run build"
-
-cat <<EOF > "$SYSTEMD_UNIT_PATH"
+write_systemd_unit() {
+  cat <<EOF > "$SYSTEMD_UNIT_PATH"
 [Unit]
 Description=NCC-06 Sidecar
 After=network.target
@@ -168,9 +214,99 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME"
+deploy_sidecar() {
+  echo "Installing NCC-06 Sidecar under $INSTALL_DIR"
+  install_node_dist
+  setup_node_path
+  setup_source
+  ensure_user
+  mkdir -p "$INSTALL_DIR"
+  mkdir -p "$DATA_DIR"
+  chown "$SERVICE_USER:$SERVICE_GROUP" "$DATA_DIR"
 
-echo "NCC-06 Sidecar installed and started."
-echo "Visit http://127.0.0.1:3000 to complete provisioning."
+  echo "Syncing repository files..."
+  rsync -a --delete \
+    --exclude 'node_modules' \
+    --exclude 'sidecar.db' \
+    --exclude '.git' \
+    --exclude '.gitignore' \
+    --exclude 'npm-debug.log' \
+    --exclude 'certs' \
+    --exclude '.node' \
+    "$SOURCE_DIR/" "$INSTALL_DIR/"
+
+  mkdir -p "$INSTALL_DIR/certs"
+  chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+
+  touch "$DATA_DIR/sidecar.db"
+  chown "$SERVICE_USER:$SERVICE_GROUP" "$DATA_DIR/sidecar.db"
+
+  ln -sf "$DATA_DIR/sidecar.db" "$INSTALL_DIR/sidecar.db"
+  chown -h "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR/sidecar.db"
+
+  echo "Installing Node.js dependencies..."
+  cd "$INSTALL_DIR"
+  "$NPM_BIN" install
+  cd "$INSTALL_DIR/ui"
+  "$NPM_BIN" install
+  "$NPM_BIN" run build
+  cd "$INSTALL_DIR"
+  chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
+
+  write_systemd_unit
+}
+
+start_service() {
+  systemctl daemon-reload
+  systemctl enable --now "$SERVICE_NAME"
+}
+
+restart_service() {
+  systemctl daemon-reload
+  systemctl restart "$SERVICE_NAME"
+}
+
+update_sidecar() {
+  stop_service
+  deploy_sidecar
+  restart_service
+  echo "NCC-06 Sidecar updated and restarted."
+}
+
+remove_sidecar() {
+  stop_service
+  disable_service
+  remove_service_unit
+  systemctl daemon-reload
+  rm -rf "$INSTALL_DIR"
+  rm -rf "$INSTALL_DIR/.node"
+  rm -rf "$DATA_DIR"
+  userdel -r "$SERVICE_USER" >/dev/null 2>&1 || true
+  echo "NCC-06 Sidecar uninstalled. Data and service files were removed."
+}
+
+case "$ACTION" in
+  install)
+    deploy_sidecar
+    start_service
+    echo "Visit http://127.0.0.1:3000 to complete provisioning."
+    ;;
+  update)
+    update_sidecar
+    ;;
+  reinstall)
+    remove_sidecar
+    deploy_sidecar
+    start_service
+    echo "Visit http://127.0.0.1:3000 to complete provisioning."
+    ;;
+  remove)
+    remove_sidecar
+    ;;
+  *)
+    echo "Unknown command: $ACTION"
+    usage
+    ;;
+esac

@@ -44,6 +44,8 @@ const buildEmptyService = () => ({
   state: {}
 });
 
+const formatEndpointLabel = (value) => value ? value.replace(/^[a-z]+:\/\//i, '') : '';
+
 export default function App() {
   const [initialized, setInitialized] = useState(null);
   const [step, setStep] = useState(1);
@@ -91,9 +93,12 @@ export default function App() {
   const [nodeSectionOpen, setNodeSectionOpen] = useState({
     remote: false,
     publicationRelays: false,
+    protocols: false,
     identity: false,
     database: false
   });
+  const [protocolLoading, setProtocolLoading] = useState(null);
+  const [serviceModeLoading, setServiceModeLoading] = useState(null);
   const [isRotatingIdentity, setIsRotatingIdentity] = useState(false);
   const [isRotatingOnion, setIsRotatingOnion] = useState(false);
   const [newService, setNewService] = useState(buildEmptyService());
@@ -632,6 +637,39 @@ export default function App() {
     }
   };
 
+  const handleToggleProtocol = async (protocol) => {
+    if (protocolLoading) return;
+    const current = appConfig.protocols || createDefaultServiceConfig().protocols;
+    const desiredValue = !current[protocol];
+    setProtocolLoading(protocol);
+    try {
+      const res = await axios.put(`${API_BASE}/config/protocols`, {
+        protocols: { ...current, [protocol]: desiredValue }
+      });
+      const normalized = res.data?.protocols || { ...current, [protocol]: desiredValue };
+      setAppConfig(prev => ({ ...prev, protocols: normalized }));
+      fetchServices();
+    } catch (err) {
+      alert('Failed to update endpoint availability: ' + err.message);
+    } finally {
+      setProtocolLoading(null);
+    }
+  };
+
+  const handleSetServiceMode = async (mode) => {
+    if (serviceModeLoading || serviceMode === mode) return;
+    setServiceModeLoading(mode);
+    try {
+      const res = await axios.put(`${API_BASE}/config/service-mode`, { service_mode: mode });
+      setAppConfig(prev => ({ ...prev, service_mode: res.data?.service_mode || mode }));
+      fetchServices();
+    } catch (err) {
+      alert('Failed to update service visibility: ' + err.message);
+    } finally {
+      setServiceModeLoading(null);
+    }
+  };
+
   const handleSaveRelays = async () => {
     const relays = normalizeRelayInput(relayModalInput);
     try {
@@ -807,6 +845,8 @@ export default function App() {
 
   const allowRemoteEnabled = Boolean(appConfig.allow_remote);
   const publicationRelays = Array.isArray(appConfig.publication_relays) ? appConfig.publication_relays : [];
+  const protocolConfig = appConfig.protocols || { ...createDefaultServiceConfig().protocols };
+  const serviceMode = appConfig.service_mode || 'private';
   const isDataReady = initialized === false || (initialized === true && services.some(s => s.type === 'sidecar'));
 
   useEffect(() => {
@@ -921,7 +961,7 @@ export default function App() {
         <main className="max-w-6xl mx-auto px-6 py-12">
           {sidecarNode && (
             <section 
-              onClick={() => handleEditService(sidecarNode)}
+              onClick={() => openNodeSettings()}
               className="mb-16 bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl shadow-slate-900/40 relative overflow-hidden cursor-pointer border-2 border-blue-500/20"
             >
               <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
@@ -959,7 +999,7 @@ export default function App() {
                     {onionEndpoint && (
                       <div className="flex items-center space-x-2 text-purple-400 text-[10px] bg-purple-500/10 w-fit px-2 py-0.5 rounded-md border border-purple-500/20">
                         <Globe className="w-3 h-3" />
-                        <span>{onionEndpoint.url}</span>
+                        <span>{formatEndpointLabel(onionEndpoint.url)}</span>
                         <button onClick={(e) => { e.stopPropagation(); copyToClipboard(onionEndpoint.url, 'onion'); }} className="hover:text-white transition-colors">
                           {copiedMap['onion'] ? <Check className="w-2.5 h-2.5 text-green-500" /> : <Copy className="w-2.5 h-2.5" />}
                         </button>
@@ -984,25 +1024,32 @@ export default function App() {
                         <span className="text-[8px] text-blue-400 animate-pulse lowercase font-medium">probing...</span>
                       )}
                     </span>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {sidecarNode.state?.last_inventory?.map((ep, i) => (
-                        <div key={i} className="flex items-center space-x-1.5 bg-slate-800 px-2 py-1 rounded-md border border-white/5">
-                          <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-400' : 'bg-blue-400'}`} />
-                          <span className="text-[9px] font-bold uppercase">{ep.family}</span>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {['ipv4', 'ipv6', 'onion'].map((family) => {
+                      const available = protocolConfig[family === 'onion' ? 'tor' : family] !== false;
+                      const hasEndpoint = sidecarNode.state?.last_inventory?.some(e => e.family === family);
+                      const isActive = available && hasEndpoint;
+                      const dotColor = family === 'onion' ? 'bg-purple-400' : 'bg-blue-400';
+                      return (
+                        <div
+                          key={family}
+                          className={`flex items-center space-x-1.5 px-2 py-1 rounded-md border ${
+                            isActive ? 'bg-slate-800 border-white/10' : 'bg-slate-900/30 border-white/5'
+                          }`}
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full ${isActive ? dotColor : 'bg-slate-600'}`} />
+                          <span className={`text-[9px] font-bold uppercase ${isActive ? 'text-slate-100' : 'text-slate-500'}`}>
+                            {family === 'onion' ? 'Tor' : family.toUpperCase()}
+                          </span>
                         </div>
-                      ))}
-                      {sidecarNode.config?.protocols?.tor && !sidecarNode.state?.last_inventory?.some(e => e.family === 'onion') && (
-                        <div className={`flex items-center space-x-1.5 bg-slate-800 px-2 py-1 rounded-md border ${sidecarNode.state?.tor_status?.running ? 'border-yellow-500/30' : 'border-red-500/30'}`} title={sidecarNode.state?.tor_status?.running ? "Tor running but no Onion Service configured" : "Tor not detected"}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${sidecarNode.state?.tor_status?.running ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
-                          <span className={`text-[9px] font-bold uppercase ${sidecarNode.state?.tor_status?.running ? 'text-yellow-500' : 'text-red-500'}`}>TOR</span>
-                        </div>
-                      )}
-                      {(!sidecarNode.state?.last_inventory || sidecarNode.state.last_inventory.length === 0) && (!sidecarNode.config?.protocols?.tor || sidecarNode.state?.last_inventory?.some(e => e.family === 'onion')) && (
-                        <p className="text-[10px] text-slate-500 font-medium italic">
-                          {sidecarNode.state?.is_probing ? 'Probing network...' : 'No active endpoints detected'}
-                        </p>
-                      )}
-                    </div>
+                      );
+                    })}
+                    {!sidecarNode.state?.last_inventory?.length && (
+                      <p className="text-[10px] text-slate-500 font-medium italic">
+                        {sidecarNode.state?.is_probing ? 'Probing network...' : 'No active endpoints detected'}
+                      </p>
+                    )}
+                  </div>
                   </div>
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 min-w-[200px]">
                     <span className="text-[9px] font-black text-slate-500 uppercase mb-2 tracking-widest flex items-center">
@@ -1489,6 +1536,76 @@ export default function App() {
                         >
                           Manage relays
                         </button>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-100 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">Available endpoints</p>
+                          <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
+                            Control which endpoint families the Sidecar advertises on NCC-02 publications. Only enabled protocols appear on clients’ discovery results.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => toggleNodeSection('protocols')}
+                          className="p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+                          aria-expanded={nodeSectionOpen.protocols}
+                        >
+                          <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.protocols ? 'rotate-90' : ''}`} />
+                        </button>
+                      </div>
+                      <div className={`${nodeSectionOpen.protocols ? 'mt-4 space-y-4' : 'hidden'}`}>
+                        <div className="flex space-x-2">
+                          {['ipv4', 'ipv6', 'tor'].map(p => {
+                            const isAvailable = networkAvailability[p];
+                            const isEnabled = Boolean(protocolConfig[p]);
+                            const isLoading = protocolLoading === p;
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => handleToggleProtocol(p)}
+                                disabled={!isAvailable || isLoading}
+                                className={`flex-1 py-3 rounded-xl border flex items-center justify-center space-x-2 transition-all ${
+                                  !isAvailable ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed' :
+                                  isEnabled ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                                } ${isLoading ? 'opacity-70 cursor-wait' : ''}`}
+                              >
+                                <div className={`w-2 h-2 rounded-full ${!isAvailable ? 'bg-slate-300' : isEnabled ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                                <span className="text-xs font-bold uppercase">{p}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-slate-400 italic">
+                          Disabled protocols are skipped during NCC-02 publishes. Enabling them permits the sidecar to advertise the matching endpoint families again.
+                        </p>
+                        <div className="space-y-2 pt-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visibility mode</p>
+                          <div className="flex space-x-2">
+                            {['public', 'private'].map(mode => {
+                              const isActive = serviceMode === mode;
+                              const isLoadingMode = serviceModeLoading === mode;
+                              const disabled = isLoadingMode || (serviceModeLoading && serviceModeLoading !== mode);
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => handleSetServiceMode(mode)}
+                                  disabled={disabled}
+                                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
+                                    isActive ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-300'
+                                  } ${isLoadingMode ? 'opacity-80 cursor-wait' : ''}`}
+                                >
+                                  {isLoadingMode ? 'Saving…' : (mode === 'public' ? 'Public' : 'Private')}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="text-[10px] text-slate-400 italic">
+                            Public mode advertises the Sidecar endpoints directly; private mode omits them from NCC-02 so clients rely on encrypted NCC-05 locators instead.
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-400">
@@ -2178,7 +2295,7 @@ function ServiceCardContent({
                   <div className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
                     <div className="flex items-center space-x-2 truncate">
                       <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
-                      <span className="truncate max-w-[180px]">{ep.url}</span>
+                      <span className="truncate max-w-[180px]">{formatEndpointLabel(ep.url)}</span>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${service.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
                       {copiedMap[`ep-${service.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}

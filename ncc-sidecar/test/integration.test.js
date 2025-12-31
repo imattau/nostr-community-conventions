@@ -33,6 +33,7 @@ test('integration: full publish cycle to local mock relay', async () => {
     state: {
       last_published_ncc02_id: null,
       last_endpoints_hash: null,
+      last_primary_endpoint_hash: null,
       last_success_per_relay: {},
       last_full_publish_timestamp: 0
     }
@@ -92,6 +93,7 @@ test('integration: change detection logic (IP and Onion changes)', async () => {
     state: {
       last_published_ncc02_id: null,
       last_endpoints_hash: null,
+      last_primary_endpoint_hash: null,
       last_success_per_relay: {},
       last_full_publish_timestamp: 0
     }
@@ -117,11 +119,12 @@ test('integration: change detection logic (IP and Onion changes)', async () => {
     const service3 = { ...service2, state: { ...state2, last_endpoints_hash: 'stale' } };
     await runPublishCycle(service3);
     await new Promise(r => setTimeout(r, 500));
-    assert.strictEqual(relay.receivedEvents().length, 4, 'Should publish when hash changes');
+    const events = relay.receivedEvents();
+    assert.strictEqual(events.length, 3, 'Should publish only NCC-05 when locator hash changes');
+    assert.strictEqual(events.at(-1)?.kind, 30058, 'Last event should be NCC-05 locator update');
 
   } finally {
     await relay.close();
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
   }
 });
-

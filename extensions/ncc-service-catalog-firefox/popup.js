@@ -197,6 +197,11 @@
       fingerprint.textContent = entry.fingerprint ? `TLS fingerprint: ${entry.fingerprint}` : 'TLS fingerprint: unavailable';
       card.appendChild(fingerprint);
 
+      const expiresLine = document.createElement('p');
+      expiresLine.className = 'service-meta';
+      expiresLine.textContent = `Expires: ${entry.expires_at ? formatTimestamp(entry.expires_at) : '—'}`;
+      card.appendChild(expiresLine);
+
       const endpoints = document.createElement('div');
       endpoints.className = 'service-endpoint';
       const label = document.createElement('span');

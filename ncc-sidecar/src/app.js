@@ -214,9 +214,22 @@ export async function runPublishCycle(service, options = {}) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
   const effectivePublicationRelays = publicationRelays;
+  const enabledProtocols = config.protocols || {};
+  const familyMap = {
+    ipv4: 'ipv4',
+    ipv6: 'ipv6',
+    onion: 'tor'
+  };
+  const filteredInventory = inventory.filter(ep => {
+    const protocolKey = familyMap[ep.family] || ep.family;
+    return enabledProtocols[protocolKey] !== false;
+  });
+  if (filteredInventory.length !== inventory.length) {
+    console.debug(`[App] Service ${name} dropped ${inventory.length - filteredInventory.length} disabled endpoint(s) before publishing.`);
+  }
   
   // Stable hashing to prevent redundant updates
-  const stableInventory = inventory.map(e => ({ url: e.url, priority: e.priority, family: e.family }));
+  const stableInventory = filteredInventory.map(e => ({ url: e.url, priority: e.priority, family: e.family }));
   const stableProfile = {
     name: config.profile?.name,
     about: config.profile?.about,
@@ -237,7 +250,7 @@ export async function runPublishCycle(service, options = {}) {
   } : null;
   const profileHash = profileSnapshot ? crypto.createHash('sha256').update(JSON.stringify(profileSnapshot)).digest('hex') : null;
 
-  const primaryEndpoint = inventory[0] || null;
+  const primaryEndpoint = filteredInventory[0] || null;
   const primarySignature = primaryEndpoint
     ? `${primaryEndpoint.url}|${primaryEndpoint.family || ''}|${primaryEndpoint.protocol || ''}|${primaryEndpoint.k || ''}`
     : 'none';
@@ -254,7 +267,7 @@ export async function runPublishCycle(service, options = {}) {
     publicKey,
     serviceId: service_id,
     locatorId: service_id + '-locator'
-  }, inventory);
+  }, filteredInventory);
 
   let ncc05EventTemplate = baselineNcc05Event;
   if (config.service_mode === 'private') {
@@ -280,7 +293,7 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   // Update DB with inventory immediately so UI sees it
-  updateService(id, { state: { ...state, last_inventory: inventory } });
+  updateService(id, { state: { ...state, last_inventory: filteredInventory } });
 
   // 3. Change Detection
   const now = Date.now();
@@ -300,7 +313,7 @@ export async function runPublishCycle(service, options = {}) {
   const { primaryChanged, shouldAttemptNcc05, profileChanged, reason, needsPublish, isFirstRun } = changeState;
 
   if (!isFirstRun && !primaryChanged && !shouldAttemptNcc05 && !profileChanged) {
-    const finalState = { ...state, is_probing: false, last_inventory: inventory };
+    const finalState = { ...state, is_probing: false, last_inventory: filteredInventory };
     updateService(id, { state: finalState });
     return finalState;
   }
@@ -342,7 +355,7 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   if (!eventsToPublish.length) {
-    const finalState = { ...state, is_probing: false, last_inventory: inventory };
+    const finalState = { ...state, is_probing: false, last_inventory: filteredInventory };
     if (!canPublish && needsPublish) {
       if (state.last_publication_warning_reason !== reason) {
         addLog('warn', `Skipped publish for ${name}: ${reason} (no publication relays available)`, {
@@ -373,7 +386,7 @@ export async function runPublishCycle(service, options = {}) {
     last_published_ncc05_id: willPublishNcc05 ? ncc05EventTemplate?.id : state.last_published_ncc05_id,
     last_published_kind0_id: kind0Event && shouldPublishKind0 ? kind0Event.id : state.last_published_kind0_id,
     last_profile_hash: profileHash || state.last_profile_hash,
-    last_inventory: inventory,
+    last_inventory: filteredInventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now,
     tor_status: torStatus,

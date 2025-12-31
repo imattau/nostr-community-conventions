@@ -1,6 +1,6 @@
 {
   "name": "ncc-sidecar",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Multi-service NCC-06 discovery manager",
   "main": "index.js",
   "scripts": {
@@ -28,7 +28,7 @@
     "fastify": "^5.6.2",
     "ncc-02-js": "^0.3.1",
     "ncc-05-js": "^1.1.14",
-    "ncc-06-js": "file:../ncc-06-js",
+    "ncc-06-js": "^0.4.2",
     "nostr-tools": "^2.19.4",
     "ws": "^8.18.3",
     "zod": "^4.2.1"

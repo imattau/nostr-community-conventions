@@ -96,5 +96,19 @@ Available flags:
 | `--service-user` | `ncc-sidecar` | Linux user that owns the daemon |
 | `--repo-source` | current checkout | Git URL or path to the sources to build; clones automatically when a remote is provided |
 | `--allow-remote` | `false` | Sets `NCC_SIDECAR_ALLOW_REMOTE=true` for remote admin access |
+| `--npm-package` | (none) | npm package (e.g. `ncc-sidecar@latest`) to install instead of a local repo |
 
 The script copies or clones the code, installs Node and UI dependencies, rebuilds the frontend, links the data directory, and installs/enables `ncc-sidecar.service` with `NCC_SIDECAR_DB_PATH` already configured. Re-running the script updates the install and restarts the systemd service, so it doubles as your update path.
+
+If `node`/`npm` are missing, the installer downloads Node.js 24.x for the appropriate Linux architecture (using `curl` and `tar`) into `$INSTALL_DIR/.node` and uses that runtime for building and running the service. Update/reinstall commands now reuse the cached runtime so you do not redownload Node every time.
+
+The installer now accepts commands before the options. The default action is `install`. You can also use:
+
+| Command | Description |
+| --- | --- |
+| `install` | Full install (default) |
+| `update` | Pull/build fresh artifacts without deleting data |
+| `reinstall` | Remove the current install and data, then run `install` |
+| `remove` | Uninstall the service, delete the data directory, and delete the service user |
+
+`update` simply stops the service, re-syncs the source, rebuilds the UI, rewrites the systemd unit, and restarts the daemon. `reinstall` first removes everything (service, data, user) and then performs a clean `install`. If `--npm-package` is provided, the installer fetches that tarball via `npm pack` and performs the build/install from its contents rather than cloning a git repo.

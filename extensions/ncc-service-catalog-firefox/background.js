@@ -64,6 +64,13 @@
     return tag && tag[1] ? String(tag[1]) : null;
   }
 
+  function getExpirySeconds(tags) {
+    const expirationValue = getTagValue(tags, 'expiration') || getTagValue(tags, 'exp');
+    if (!expirationValue) return null;
+    const parsed = Number.parseInt(expirationValue, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
   function parseContent(content) {
     if (!content) return {};
     try {
@@ -136,14 +143,16 @@
     if (!event.pubkey || typeof event.pubkey !== 'string') return false;
     const serviceId = getTagValue(event.tags, 'd');
     if (!serviceId) return false;
+    if (!getExpirySeconds(event.tags)) return false;
     return true;
   }
 
-  function handleServiceEvent(event, relayUrl) {
+  function handleServiceEvent(event, relayUrl, seenServiceIds = null) {
     if (!isNcc02Event(event)) return;
     const tags = event.tags || [];
     const serviceId = getTagValue(tags, 'd') || event.pubkey;
     if (!serviceId) return;
+    if (seenServiceIds) seenServiceIds.add(serviceId);
 
     const endpoints = tags
       .filter(tag => Array.isArray(tag) && tag[0] === 'u')
@@ -151,8 +160,14 @@
       .filter(Boolean);
 
     const fingerprint = getTagValue(tags, 'k') || null;
-    const expiresAtTag = getTagValue(tags, 'expiration') || getTagValue(tags, 'exp');
-    const expiresAt = expiresAtTag ? parseInt(expiresAtTag, 10) * 1000 : null;
+    const expirySeconds = getExpirySeconds(tags);
+    if (!expirySeconds) {
+      return;
+    }
+    const expiresAt = expirySeconds * 1000;
+    if (expiresAt && Date.now() > expiresAt) {
+      return;
+    }
     const metadata = parseContent(event.content);
 
     const existing = catalogMap.get(serviceId) || {};
@@ -201,7 +216,7 @@
     }
   }
 
-  function queryRelay(relayUrl) {
+  function queryRelay(relayUrl, seenServiceIds) {
     return new Promise((resolve) => {
       let settled = false;
       const socket = new WebSocket(relayUrl);
@@ -265,7 +280,7 @@
           if (!subType) return;
           if (type === 'EVENT') {
             if (subType === 'service') {
-              handleServiceEvent(content, relayUrl);
+              handleServiceEvent(content, relayUrl, seenServiceIds);
             } else if (subType === 'profile') {
               handleProfileEvent(content);
             }
@@ -296,13 +311,19 @@
     const relaySources = normalizeRelayList(relays || lastRelays);
     lastRelays = relaySources;
     lastStatus = { success: false, errors: [] };
+    const seenServiceIds = new Set();
 
-    const results = await Promise.all(relaySources.map(relay => queryRelay(relay)));
+    const results = await Promise.all(relaySources.map(relay => queryRelay(relay, seenServiceIds)));
     const errors = results.filter(r => !r.success).map(r => ({ relay: r.relay, error: r.error || 'unknown error' }));
     lastStatus = {
       success: errors.length === 0,
       errors
     };
+    for (const serviceId of Array.from(catalogMap.keys())) {
+      if (!seenServiceIds.has(serviceId)) {
+        catalogMap.delete(serviceId);
+      }
+    }
     lastUpdated = Date.now();
     await persistCatalog();
     await persistMetadata();

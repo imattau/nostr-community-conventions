@@ -578,3 +578,7 @@ To make the NCC-06 resolver, selector, and NCC-02/NCC-05 helpers reusable outsid
 - **Key and trust utilities:** SPKI fingerprint calculation (`k`), keypair management, and certificate generation.
 
 The `ncc06-relay` example now installs this package via a `file:` dependency and reuses the selector helpers so that the resolver logic is consistent, testable, and easier to consume in other projects.
+
+## Installing the NCC-06 Sidecar Manager
+
+The sidecar manager that publishes NCC-02 and NCC-05 records lives under `ncc-sidecar/`. Deployment instructions, configuration options, and the automated installer script (`ncc-sidecar/scripts/install-sidecar.sh`) are documented in `ncc-sidecar/README.md`. Run that guide from within the sidecar directory to install, upgrade, or configure the service.

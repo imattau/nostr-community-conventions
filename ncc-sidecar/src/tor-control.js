@@ -43,6 +43,9 @@ export class TorControl {
     await once(this.socket, 'connect');
     // Disable timeout after connection to allow persistent session
     this.socket.setTimeout(0);
+    if (typeof this.socket.unref === 'function') {
+      this.socket.unref();
+    }
   }
 
   async authenticate() {

@@ -124,7 +124,7 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
       refresh_interval_minutes: 360,
       ncc02_expiry_days: 14,
       ncc05_ttl_hours: 12,
-      service_mode: 'public',
+      service_mode: 'private',
       generate_self_signed: true,
       protocols: { ipv4: true, ipv6: true, tor: true },
       primary_protocol: 'ipv4',
@@ -314,6 +314,65 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     appConfig.allow_remote = allowRemote;
     setConfig('app_config', appConfig);
     return { success: true, allow_remote: appConfig.allow_remote };
+  });
+
+  server.put('/api/config/protocols', async (request, reply) => {
+    const { protocols } = request.body;
+    if (!protocols || typeof protocols !== 'object') {
+      return reply.code(400).send({ error: 'protocols must be an object' });
+    }
+    const allowed = ['ipv4', 'ipv6', 'tor'];
+    const normalized = allowed.reduce((acc, key) => {
+      acc[key] = Boolean(protocols[key]);
+      return acc;
+    }, {});
+    const appConfig = getConfig('app_config') || {};
+    appConfig.protocols = { ...appConfig.protocols, ...normalized };
+    setConfig('app_config', appConfig);
+    
+    const services = getServices();
+    const sidecar = services.find(s => s.type === 'sidecar');
+    if (sidecar) {
+      updateService(sidecar.id, {
+        config: {
+          ...sidecar.config,
+          protocols: appConfig.protocols
+        }
+      });
+    }
+    return { success: true, protocols: appConfig.protocols };
+  });
+
+  server.put('/api/config/service-mode', async (request, reply) => {
+    const { service_mode } = request.body;
+    if (!['public', 'private'].includes(service_mode)) {
+      return reply.code(400).send({ error: 'service_mode must be public or private' });
+    }
+    const appConfig = getConfig('app_config') || {};
+    appConfig.service_mode = service_mode;
+    setConfig('app_config', appConfig);
+
+    const services = getServices();
+    const sidecar = services.find(s => s.type === 'sidecar');
+    if (sidecar) {
+      const existingRecipients = Array.isArray(sidecar.config?.ncc05_recipients)
+        ? sidecar.config.ncc05_recipients
+        : [];
+      let updatedConfig = {
+        ...sidecar.config,
+        service_mode
+      };
+      if (service_mode === 'private') {
+        const admins = getAdmins().map(admin => admin.pubkey).filter(Boolean);
+        const normalizedRecipients = Array.from(new Set([...existingRecipients, ...admins]));
+        updatedConfig = {
+          ...updatedConfig,
+          ncc05_recipients: normalizedRecipients
+        };
+      }
+      updateService(sidecar.id, { config: updatedConfig });
+    }
+    return { success: true, service_mode: appConfig.service_mode };
   });
 
   server.get('/api/db/info', async () => {

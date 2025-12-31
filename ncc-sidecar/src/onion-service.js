@@ -48,7 +48,7 @@ export async function provisionOnion({ serviceId, torControl, privateKey, localP
   const targetPort = localPort || 3000;
   const cached = activeServices.get(serviceId);
   if (cached) {
-    const needsReprovision = cached.targetPort !== targetPort;
+    const needsReprovision = cached.targetPort !== targetPort || privateKey === null;
     if (!needsReprovision && (privateKey === cached.privateKey || (!privateKey && cached.privateKey))) {
       return cached;
     }
