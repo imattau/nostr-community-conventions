@@ -15,6 +15,29 @@ import { QRCodeSVG } from 'qrcode.react';
 const toHex = (bytes) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 const hexToBytes = (hex) => new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
 
+const formatTimeWithZone = (value) => {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short'
+  }).format(new Date(value));
+};
+
+const formatDateTimeWithZone = (value) => {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short'
+  }).format(new Date(value));
+};
+
 const API_BASE = '/api';
 
 const SERVICE_TYPES = [
@@ -152,7 +175,7 @@ export default function App() {
   const canRotateOnion = Boolean(editServiceId);
 
   const addNip46Log = (msg) => {
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const time = formatTimeWithZone(Date.now());
     setNip46Logs(prev => [...prev.slice(-4), `[${time}] ${msg}`]);
   };
 
@@ -1741,7 +1764,7 @@ export default function App() {
                           </div>
                           <div>
                             <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Modified</p>
-                            <p>{dbInfo ? new Date(dbInfo.modifiedAt).toLocaleString() : 'Loading...'}</p>
+                            <p>{dbInfo ? formatDateTimeWithZone(dbInfo.modifiedAt) : 'Loading...'}</p>
                           </div>
                         </div>
                         <div className="space-y-2">
@@ -2106,7 +2129,7 @@ export default function App() {
                       }}
                       className={`flex space-x-4 border-b border-slate-50 pb-2 last:border-0 cursor-pointer ${isActive ? 'bg-slate-50' : 'hover:bg-slate-50'}`}
                     >
-                      <span className="text-slate-400 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                      <span className="text-slate-400 shrink-0">{formatTimeWithZone(log.timestamp)}</span>
                       <span className={`font-bold shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500'}`}>{log.level.toUpperCase()}</span>
                       <span className="text-slate-600">{log.message}</span>
                     </div>
@@ -2136,7 +2159,7 @@ export default function App() {
                       <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Level</p>
                     </div>
                     <div>
-                      <p className="font-bold text-slate-900 text-xs">{new Date(selectedLog.timestamp).toLocaleString()}</p>
+                      <p className="font-bold text-slate-900 text-xs">{formatDateTimeWithZone(selectedLog.timestamp)}</p>
                       <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Timestamp</p>
                     </div>
                     {selectedLogMetadata?.serviceId && (
@@ -2392,7 +2415,7 @@ function ServiceCardContent({
 }) {
   const { displayInventory, hasHiddenOnion, tlsFingerprint } = inventoryMeta;
   const lastUpdateText = service.state?.last_full_publish_timestamp
-    ? new Date(service.state.last_full_publish_timestamp).toLocaleTimeString()
+    ? formatTimeWithZone(service.state.last_full_publish_timestamp)
     : 'Pending';
   const publicIdentity = serviceNpub ? `${serviceNpub.slice(0, 20)}...` : null;
   const showIdentity = Boolean(serviceNpub);
