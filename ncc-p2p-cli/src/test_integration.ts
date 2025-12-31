@@ -4,7 +4,7 @@ import { P2PNode, PeerMessage } from './p2p.js';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
 import chalk from 'chalk';
 
-// --- Mock Relay Implementation ---
+// --- Improved Mock Relay (Supports Replaceable Events NIP-16) ---
 class MockRelay {
     public wss: WebSocketServer;
     private events: any[] = [];
@@ -21,197 +21,192 @@ class MockRelay {
 
                     if (type === 'EVENT') {
                         const event = msg[1];
-                        // Simple storage, no validation for speed
-                        this.events.push(event);
+                        // Replaceable event logic (Kind 30058)
+                        if (event.kind === 30058) {
+                            const dTag = event.tags.find((t: any) => t[0] === 'd')?.[1];
+                            const idx = this.events.findIndex(e => 
+                                e.pubkey === event.pubkey && 
+                                e.kind === event.kind && 
+                                e.tags.find((t: any) => t[0] === 'd')?.[1] === dTag
+                            );
+                            if (idx !== -1) {
+                                if (event.created_at >= this.events[idx].created_at) {
+                                    this.events[idx] = event;
+                                }
+                            } else {
+                                this.events.push(event);
+                            }
+                        } else {
+                            this.events.push(event);
+                        }
                         ws.send(JSON.stringify(["OK", event.id, true, ""]));
                     } else if (type === 'REQ') {
                         const subId = msg[1];
                         const filters = msg[2];
-                        
                         this.events.forEach(event => {
                             let match = true;
                             if (filters.authors && !filters.authors.includes(event.pubkey)) match = false;
                             if (filters.kinds && !filters.kinds.includes(event.kind)) match = false;
-                            // Basic tag filtering
                             if (filters['#d']) {
                                 const dTag = event.tags.find((t: any) => t[0] === 'd')?.[1];
                                 if (!filters['#d'].includes(dTag)) match = false;
                             }
-                            
-                            if (match) {
-                                ws.send(JSON.stringify(["EVENT", subId, event]));
-                            }
+                            if (match) ws.send(JSON.stringify(["EVENT", subId, event]));
                         });
                         ws.send(JSON.stringify(["EOSE", subId]));
                     }
-                } catch (e) {
-                    console.error("Relay error processing message:", e);
-                }
+                } catch (e) {}
             });
         });
     }
 
-    stop() {
-        this.wss.close();
-    }
-    
-    get url() {
-        return `ws://localhost:${this.port}`;
-    }
+    stop() { this.wss.close(); }
+    get url() { return `ws://localhost:${this.port}`}
+    get storedEvents() { return this.events; }
 }
 
-// --- Integration Test ---
+async function runTests() {
+    console.log(chalk.bold.cyan("\n>>> Starting Comprehensive NCC-P2P Integration Tests <<<\n"));
 
-async function runTest() {
-    console.log(chalk.bold("Starting P2P Integration Test..."));
-
-    // 1. Start Relay
-    const RELAY_PORT = 8899;
-    const relay = new MockRelay(RELAY_PORT);
-    console.log(`[Relay] Started on ${relay.url}`);
+    // 1. Setup Infrastructure
+    const relay1 = new MockRelay(8801);
+    const relay2 = new MockRelay(8802);
+    const relays = [relay1.url, relay2.url];
+    console.log(`[Relays] Running on ${relays.join(', ')}`);
 
     // 2. Setup Identities
     const aliceSk = generateSecretKey();
-    const aliceIdentity = {
-        sk: aliceSk,
-        pk: getPublicKey(aliceSk),
+    const aliceId = { 
+        sk: aliceSk, 
+        pk: getPublicKey(aliceSk), 
         nsec: nip19.nsecEncode(aliceSk),
-        npub: nip19.npubEncode(getPublicKey(aliceSk))
+        npub: nip19.npubEncode(getPublicKey(aliceSk)) 
     };
-
     const bobSk = generateSecretKey();
-    const bobIdentity = {
-        sk: bobSk,
-        pk: getPublicKey(bobSk),
+    const bobId = { 
+        sk: bobSk, 
+        pk: getPublicKey(bobSk), 
         nsec: nip19.nsecEncode(bobSk),
-        npub: nip19.npubEncode(getPublicKey(bobSk))
+        npub: nip19.npubEncode(getPublicKey(bobSk)) 
     };
 
-    console.log(`[Alice] ${aliceIdentity.npub}`);
-    console.log(`[Bob]   ${bobIdentity.npub}`);
-
-    // 3. Start P2P Nodes
-    const aliceNode = new P2PNode(aliceIdentity);
-    const aliceHost = '127.0.0.2';
-    const alicePort = await aliceNode.startServer(0, aliceHost);
-    console.log(`[Alice] Listening on ${aliceHost}:${alicePort}`);
-
-    const bobNode = new P2PNode(bobIdentity);
-    const bobHost = '127.0.0.3';
-    const bobPort = await bobNode.startServer(0, bobHost);
-    console.log(`[Bob]   Listening on ${bobHost}:${bobPort}`);
-
-    // 4. Publish Alice's Record (Encrypted for Bob)
+    const aliceNode = new P2PNode(aliceId);
+    const bobNode = new P2PNode(bobId);
     const publisher = new NCC05Publisher();
-    const aliceEndpoints: NCC05Endpoint[] = [{
-        type: 'ws',
-        url: `ws://${aliceHost}:${alicePort}`,
-        priority: 1,
-        family: 'ipv4'
-    }];
-    
-    const payload: NCC05Payload = {
-        v: 1,
-        ttl: 300,
-        updated_at: Math.floor(Date.now() / 1000),
-        endpoints: aliceEndpoints,
-        notes: "Alice's Test Node"
-    };
+    const resolver = new NCC05Resolver({ bootstrapRelays: relays });
 
-    console.log("[Alice] Publishing ENCRYPTED NCC-05 Record for Bob...");
-    await publisher.publish([relay.url], aliceIdentity.sk, payload, { 
-        public: false, 
-        recipientPubkey: bobIdentity.pk 
-    });
+    // ---------------------------------------------------------
+    // PHASE 1: Initial Port
+    // ---------------------------------------------------------
+    const portA = await aliceNode.startServer(0, '127.0.0.2');
+    console.log(chalk.yellow(`[Alice] Started on Port A: ${portA}`));
 
-    // 4b. Verify Relay content is encrypted
-    const storedEvent = (relay as any).events.find((e: any) => e.pubkey === aliceIdentity.pk);
-    if (storedEvent) {
-        const isEncrypted = !storedEvent.content.startsWith('{');
-        console.log(`[Relay] Stored event content: ${storedEvent.content.slice(0, 32)}...`);
-        console.log(`[Relay] Is content encrypted? ${isEncrypted ? chalk.green('YES') : chalk.red('NO')}`);
-        if (!isEncrypted) throw new Error("Relay stored plaintext instead of ciphertext!");
+    await publisher.publish(relays, aliceId.sk, {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'ws', url: `ws://127.0.0.2:${portA}`, family: 'ipv4', priority: 1 }]
+    }, { public: false, recipientPubkey: bobId.pk });
+    console.log("[Alice] Published Port A (Encrypted for Bob).");
+
+    // VERIFY ENCRYPTION
+    const storedEvent = relay1.storedEvents.find(e => e.pubkey === aliceId.pk);
+    if (storedEvent && !storedEvent.content.startsWith('{')) {
+        console.log(chalk.green("PASS: Relay content is encrypted (ciphertext)."));
+    } else {
+        throw new Error("Relay content is plaintext! Encryption failed.");
     }
 
-    // 5. Bob Resolves and Connects to Alice
-    const resolver = new NCC05Resolver({ bootstrapRelays: [relay.url] });
+    console.log("[Bob] Resolving Alice...");
+    const recordA = await resolver.resolve(aliceId.npub, bobId.sk);
+    console.log(`[Bob] Resolved Alice to: ${recordA?.endpoints[0].url}`);
+
+    await bobNode.connectToPeer(recordA!.endpoints[0].url, aliceId.npub);
     
-    // Setup message listeners before connecting
-    const messagePromise = new Promise((resolve, reject) => {
-        let aliceReceived = false;
-        let bobReceived = false;
-        const checkDone = () => {
-            if (aliceReceived && bobReceived) resolve(true);
-        };
-
-        aliceNode.on('message', (msg) => {
-            console.log(chalk.green(`[Alice] Received from ${msg.from.slice(0,8)}: ${JSON.stringify(msg.payload)}`));
-            if (msg.payload.text === "Hello Alice!") {
-                aliceReceived = true;
-                checkDone();
-            }
-        });
-
+    // VERIFY CHAT & ACCEPT
+    const chatPromise = new Promise(resolve => {
         bobNode.on('message', (msg) => {
-            console.log(chalk.blue(`[Bob]   Received from ${msg.from.slice(0,8)}: ${JSON.stringify(msg.payload)}`));
-            if (msg.payload.text === "Hello Bob!") {
-                bobReceived = true;
-                checkDone();
-            }
+            if (msg.payload.text === 'Hello Bob!') resolve(true);
         });
-        
-        // Timeout
-        setTimeout(() => reject(new Error("Test timed out waiting for messages")), 5000);
     });
 
-    console.log("[Bob] Resolving Alice (with decryption key)...");
-    const record = await resolver.resolve(aliceIdentity.npub, bobIdentity.sk);
-    
-    if (!record) {
-        console.error(chalk.red("Failed to resolve Alice!"));
-        process.exit(1);
-    }
-    
-    console.log(`[Bob] Resolved Alice to: ${record.endpoints[0].url}`);
-
-    await bobNode.connectToPeer(record.endpoints[0].url, aliceIdentity.npub);
-    console.log("[Bob] Connected to Alice");
-
-    // Give a moment for handshakes (implicit/explicit)
+    // Wait for connection
     await new Promise(r => setTimeout(r, 500));
     
-    // NEW: Alice must accept Bob
     console.log("[Alice] Accepting Bob...");
-    aliceNode.acceptPeer(bobIdentity.pk);
-
-    // 6. Exchange Messages
-    console.log("[Bob] Sending 'Hello Alice!'...");
-    bobNode.sendMessage(aliceIdentity.pk, 'chat', { text: "Hello Alice!" });
-
-    // Wait for Bob's connection to be established on Alice's side (incoming)
-    // Alice needs to know Bob's PK to send back.
-    // In our P2PNode implementation, incoming connections might need a moment to identify the peer 
-    // via the handshake we implemented.
+    aliceNode.acceptPeer(bobId.pk);
     
-    await new Promise(r => setTimeout(r, 200)); 
     console.log("[Alice] Sending 'Hello Bob!'...");
-    aliceNode.sendMessage(bobIdentity.pk, 'chat', { text: "Hello Bob!" });
+    aliceNode.sendMessage(bobId.pk, 'chat', { text: 'Hello Bob!' });
+    
+    await chatPromise;
+    console.log(chalk.green("PASS: Encrypted chat received in Phase 1."));
 
-    // 7. Verify
-    try {
-        await messagePromise;
-        console.log(chalk.bold.green("\nSUCCESS: Bidirectional encrypted communication verified!"));
-    } catch (e: any) {
-        console.error(chalk.bold.red(`\nFAILURE: ${e.message}`));
-    } finally {
-        relay.stop();
-        publisher.close([relay.url]);
-        resolver.close();
-        process.exit(0);
+    console.log(chalk.green("[P2P] Initial connection established."));
+
+    // ---------------------------------------------------------
+    // PHASE 2: Migration to Port B
+    // ---------------------------------------------------------
+    console.log(chalk.bold.magenta("\n[Migration] Alice is changing networks...\n"));
+    
+    // Simulate Alice's server "moving" (shut down old, start new)
+    (aliceNode as any).server.close();
+    const portB = await aliceNode.startServer(0, '127.0.0.2');
+    console.log(chalk.yellow(`[Alice] Now listening on new Port B: ${portB}`));
+
+    // Publish update (must have higher timestamp)
+    await publisher.publish(relays, aliceId.sk, {
+        v: 1, ttl: 60, updated_at: Math.floor(Date.now() / 1000) + 1,
+        endpoints: [{ type: 'ws', url: `ws://127.0.0.2:${portB}`, family: 'ipv4', priority: 1 }]
+    }, { public: true });
+    console.log("[Alice] Published updated record to relays.");
+
+    // Bob re-resolves (simulating discovery of the new location)
+    console.log("[Bob] Re-resolving Alice...");
+    const bobResolver2 = new NCC05Resolver({ bootstrapRelays: relays }); // Fresh resolver to bypass simple memory cache if any
+    const recordB = await bobResolver2.resolve(aliceId.npub);
+    console.log(`[Bob] Resolved Alice to NEW address: ${recordB?.endpoints[0].url}`);
+
+    if (recordB?.endpoints[0].url.includes(portB.toString())) {
+        console.log(chalk.green("SUCCESS: Bob discovered Alice's new port via NCC-05!"));
+    } else {
+        throw new Error(`Failed to resolve new port. Got: ${recordB?.endpoints[0].url}`);
     }
+
+    // Connect to new port
+    console.log("[Bob] Connecting to new port...");
+    
+    // Wait for Alice to receive Bob's connection handshake before accepting
+    const connectionPromise = new Promise(resolve => {
+        const handler = (evt: any) => {
+            const pk = evt.pubkey || evt;
+            if (pk === bobId.pk) {
+                aliceNode.off('peer:connected', handler);
+                resolve(true);
+            }
+        };
+        aliceNode.on('peer:connected', handler);
+    });
+
+    await bobNode.connectToPeer(recordB!.endpoints[0].url, aliceId.npub);
+    await connectionPromise;
+    aliceNode.acceptPeer(bobId.pk);
+
+    // Final Chat Verification
+    const finalChatPromise = new Promise((resolve) => {
+        aliceNode.on('message', (msg) => {
+            if (msg.payload.text === "Migration successful!") resolve(true);
+        });
+    });
+
+    bobNode.sendMessage(aliceId.pk, 'chat', { text: "Migration successful!" });
+    await finalChatPromise;
+    console.log(chalk.bold.green("\n>>> TEST PASSED: Discovery handles dynamic endpoint changes across multiple relays! <<<\n"));
+
+    relay1.stop();
+    relay2.stop();
+    process.exit(0);
 }
 
-runTest().catch(e => {
-    console.error(e);
+runTests().catch(e => {
+    console.error(chalk.red(`TEST FAILED: ${e.message}`));
     process.exit(1);
 });
