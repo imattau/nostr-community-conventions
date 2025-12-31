@@ -580,6 +580,7 @@ Optional flags:
 | `--install-dir` | `/opt/ncc-sidecar` | Where the code is placed |
 | `--data-dir` | `/var/lib/ncc-sidecar` | Where `sidecar.db`, certs, and runtime state live |
 | `--service-user` | `ncc-sidecar` | Linux user that owns the daemon |
+| `--repo-source` | current directory | Git clone URL or path to source before building |
 | `--allow-remote` | `false` | Sets `NCC_SIDECAR_ALLOW_REMOTE=true` for remote admin access |
 
 Re-running the script pulls updates (via `rsync`), rebuilds the UI, and restarts the systemd service, so it doubles as your update mechanism.

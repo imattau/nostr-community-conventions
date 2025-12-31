@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 INSTALL_DIR_DEFAULT="/opt/ncc-sidecar"
 DATA_DIR_DEFAULT="/var/lib/ncc-sidecar"
@@ -19,6 +19,7 @@ Options:
   --data-dir DIR        Where to keep runtime data like sidecar.db (default: $DATA_DIR_DEFAULT)
   --service-name NAME   systemd unit name (default: $SERVICE_NAME_DEFAULT)
   --service-user USER   Linux user that runs the sidecar (default: $SERVICE_USER_DEFAULT)
+  --repo-source URL     Git URL or path to the source repo (default: current checkout)
   --allow-remote        Enable remote admin access (sets NCC_SIDECAR_ALLOW_REMOTE=true)
   --help                Show this message
 EOF
@@ -36,6 +37,7 @@ while (( "$#" )); do
     --data-dir) DATA_DIR="$2"; shift 2;;
     --service-name) SERVICE_NAME="$2"; shift 2;;
     --service-user) SERVICE_USER="$2"; shift 2;;
+    --repo-source) REPO_SOURCE="$2"; shift 2;;
     --allow-remote) ALLOW_REMOTE=true; shift;;
     -h|--help) usage;;
     *)
@@ -44,6 +46,10 @@ while (( "$#" )); do
       ;;
   esac
 done
+
+if [ -z "${REPO_SOURCE:-}" ]; then
+  REPO_SOURCE="$DEFAULT_REPO_ROOT"
+fi
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run this script as root."
@@ -61,6 +67,29 @@ require_cmd node
 require_cmd npm
 require_cmd rsync
 require_cmd systemctl
+
+SOURCE_DIR=""
+TEMP_SOURCE=""
+
+setup_source() {
+  if [ -d "$REPO_SOURCE" ]; then
+    SOURCE_DIR="$REPO_SOURCE"
+    return
+  fi
+  require_cmd git
+  TEMP_SOURCE="$(mktemp -d /tmp/ncc-sidecar-install-XXXX)"
+  echo "Cloning source from $REPO_SOURCE..."
+  git clone --depth 1 "$REPO_SOURCE" "$TEMP_SOURCE"
+  SOURCE_DIR="$TEMP_SOURCE"
+}
+
+cleanup_source() {
+  if [ -n "$TEMP_SOURCE" ] && [ -d "$TEMP_SOURCE" ]; then
+    rm -rf "$TEMP_SOURCE"
+  fi
+}
+
+trap cleanup_source EXIT
 
 SERVICE_GROUP="$SERVICE_USER"
 SYSTEMD_UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -86,6 +115,7 @@ run_as_service() {
 
 echo "Installing NCC-06 Sidecar under $INSTALL_DIR"
 
+setup_source
 ensure_user
 
 mkdir -p "$INSTALL_DIR"
@@ -100,7 +130,7 @@ rsync -a --delete \
   --exclude '.gitignore' \
   --exclude 'npm-debug.log' \
   --exclude 'certs' \
-  "$REPO_ROOT/" "$INSTALL_DIR/"
+  "$SOURCE_DIR/" "$INSTALL_DIR/"
 
 mkdir -p "$INSTALL_DIR/certs"
 chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
