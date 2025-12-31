@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import { scheduleWithJitter, ensureSelfSignedCert, fromNsec, fromNpub, getPublicIPv4, detectGlobalIPv6, computeKFromCertPem } from 'ncc-06-js';
+import { ensureSelfSignedCert, fromNsec, fromNpub, getPublicIPv4, detectGlobalIPv6, computeKFromCertPem } from 'ncc-06-js';
 import { getPublicKey } from 'nostr-tools/pure';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
@@ -60,6 +60,65 @@ async function buildEncryptedLocatorEvent({ publicationRelays, recipients, paylo
     });
     return null;
   }
+}
+
+function resolvePublicationContext(config, normalizedRecipients) {
+  const configuredAppConfig = getConfig('app_config') || {};
+  const appRelays = Array.isArray(configuredAppConfig.publication_relays) ? configuredAppConfig.publication_relays : [];
+  let fallbackRelays = appRelays;
+  if (!fallbackRelays.length) {
+    const allServices = getServices();
+    const sidecarService = allServices.find(s => s.type === 'sidecar');
+    if (sidecarService && Array.isArray(sidecarService.config?.publication_relays) && sidecarService.config.publication_relays.length) {
+      fallbackRelays = sidecarService.config.publication_relays;
+    }
+  }
+
+  const configuredPublicationRelays = Array.isArray(config.publication_relays) && config.publication_relays.length
+    ? config.publication_relays
+    : fallbackRelays;
+
+  let publicationRelays = Array.isArray(configuredPublicationRelays) ? configuredPublicationRelays.slice() : [];
+  if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
+    publicationRelays = [];
+  }
+
+  publicationRelays = publicationRelays.filter(Boolean);
+  return {
+    publicationRelays,
+    canPublish: publicationRelays.length > 0
+  };
+}
+
+function describePublishState({ state, config, forcePublish, primaryEndpointHash, locatorHash, profileHash, ncc05EventTemplate, now = Date.now() }) {
+  const timeSinceLastPublish = now - (state.last_full_publish_timestamp || 0);
+  const refreshInterval = (config.refresh_interval_minutes || 60) * 60 * 1000;
+  const isIntervalReached = timeSinceLastPublish > refreshInterval;
+
+  const isFirstRun = !state.last_published_ncc02_id;
+  const primaryChanged = forcePublish || !state.last_published_ncc02_id || primaryEndpointHash !== (state.last_primary_endpoint_hash || null);
+  const locatorChanged = !state.last_endpoints_hash || locatorHash !== state.last_endpoints_hash;
+  const shouldAttemptNcc05 = (forcePublish || locatorChanged || isIntervalReached) && !!ncc05EventTemplate;
+  const profileChanged = Boolean(profileHash && profileHash !== state.last_profile_hash);
+
+  const reasonParts = [];
+  if (isFirstRun) reasonParts.push('Initial');
+  if (primaryChanged && !isFirstRun) reasonParts.push('Primary endpoint change');
+  if (locatorChanged) reasonParts.push('Locator change');
+  if (isIntervalReached && !locatorChanged) reasonParts.push('Interval');
+  if (forcePublish) reasonParts.push('Manual republish');
+  if (profileChanged) reasonParts.push('Profile update');
+  const reason = reasonParts.length ? reasonParts.join(' / ') : 'Trigger';
+
+  return {
+    primaryChanged,
+    locatorChanged,
+    shouldAttemptNcc05,
+    profileChanged,
+    reason,
+    needsPublish: primaryChanged || shouldAttemptNcc05 || profileChanged,
+    isFirstRun
+  };
 }
 
 export async function runPublishCycle(service, options = {}) {
@@ -148,24 +207,11 @@ export async function runPublishCycle(service, options = {}) {
   
   const inventory = await buildInventory({ ...config, type, torAddress, ncc02ExpectedKey: expectedKey }, { ipv4, ipv6 }, torStatus);
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
-  const configuredAppConfig = getConfig('app_config') || {};
-  const appPublicationRelays = Array.isArray(configuredAppConfig.publication_relays) ? configuredAppConfig.publication_relays : [];
-  let fallbackPublicationRelays = appPublicationRelays;
-  if (!fallbackPublicationRelays.length) {
-    const allServices = getServices();
-    const sidecarService = allServices.find(s => s.type === 'sidecar');
-    if (sidecarService && Array.isArray(sidecarService.config?.publication_relays) && sidecarService.config.publication_relays.length) {
-      fallbackPublicationRelays = sidecarService.config.publication_relays;
-    }
-  }
-  const configuredPublicationRelays = Array.isArray(config.publication_relays) && config.publication_relays.length
-    ? config.publication_relays
-    : fallbackPublicationRelays;
-  let publicationRelays = configuredPublicationRelays;
+  const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
-    publicationRelays = [];
-    console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured. Skipping locator publication.`);
+    console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
+  const effectivePublicationRelays = publicationRelays;
   
   // Stable hashing to prevent redundant updates
   const stableInventory = inventory.map(e => ({ url: e.url, priority: e.priority, family: e.family }));
@@ -188,7 +234,6 @@ export async function runPublishCycle(service, options = {}) {
     nip05: config.profile.nip05 || ''
   } : null;
   const profileHash = profileSnapshot ? crypto.createHash('sha256').update(JSON.stringify(profileSnapshot)).digest('hex') : null;
-  const profileChanged = profileHash && profileHash !== state.last_profile_hash;
 
   const primaryEndpoint = inventory[0] || null;
   const primarySignature = primaryEndpoint
@@ -237,51 +282,41 @@ export async function runPublishCycle(service, options = {}) {
 
   // 3. Change Detection
   const now = Date.now();
-  const timeSinceLastPublish = now - (state.last_full_publish_timestamp || 0);
-  const isIntervalReached = timeSinceLastPublish > (config.refresh_interval_minutes || 60) * 60 * 1000;
-
   console.debug(`[App] Service ${name} hash comparison (primary): current=${primaryEndpointHash}, last=${state.last_primary_endpoint_hash}`);
   console.debug(`[App] Service ${name} hash comparison (locator): current=${locatorHash}, last=${state.last_endpoints_hash}`);
 
-  const isFirstRunForService = !state.last_published_ncc02_id;
+  const changeState = describePublishState({
+    state,
+    config,
+    forcePublish,
+    primaryEndpointHash,
+    locatorHash,
+    profileHash,
+    ncc05EventTemplate,
+    now
+  });
+  const { primaryChanged, shouldAttemptNcc05, profileChanged, reason, needsPublish, isFirstRun } = changeState;
 
-  const locatorChanged = !state.last_endpoints_hash || locatorHash !== state.last_endpoints_hash;
-  const actualPrimaryChanged = !state.last_published_ncc02_id || primaryEndpointHash !== (state.last_primary_endpoint_hash || null);
-  const primaryChanged = forcePublish || actualPrimaryChanged;
-  const shouldPublishNcc05Raw = forcePublish || locatorChanged || isIntervalReached;
-  const shouldPublishNcc05 = shouldPublishNcc05Raw && !!ncc05EventTemplate;
-
-  const isIntervalPublish = isIntervalReached && !locatorChanged;
-  const isFirstRun = isFirstRunForService;
-
-  if (!isFirstRun && !primaryChanged && !shouldPublishNcc05 && !profileChanged) {
+  if (!isFirstRun && !primaryChanged && !shouldAttemptNcc05 && !profileChanged) {
     const finalState = { ...state, is_probing: false, last_inventory: inventory };
     updateService(id, { state: finalState });
     return finalState;
   }
-
-  const reasonParts = [];
-  if (isFirstRun) reasonParts.push('Initial');
-  if (actualPrimaryChanged && !isFirstRun) reasonParts.push('Primary endpoint change');
-  if (locatorChanged) reasonParts.push('Locator change');
-  if (isIntervalPublish) reasonParts.push('Interval');
-  if (forcePublish) reasonParts.push('Manual republish');
-  if (profileChanged) reasonParts.push('Profile update');
-  const reason = reasonParts.length ? reasonParts.join(' / ') : 'Trigger';
-
   console.log(`[App] Publishing ${name} due to: ${reason}`);
 
-  // 4. Publish
+  const willPublishNcc02 = primaryChanged && canPublish;
+  const willPublishNcc05 = shouldAttemptNcc05 && canPublish;
+  const shouldPublishKind0 = canPublish && (willPublishNcc02 || willPublishNcc05 || profileChanged);
+
   const eventsToPublish = [];
-  if (primaryChanged) {
+  if (willPublishNcc02) {
     eventsToPublish.push(ncc02Event);
   }
-  if (shouldPublishNcc05) {
+  if (willPublishNcc05) {
     eventsToPublish.push(ncc05EventTemplate);
   }
 
-  // Always emit the kind-0 metadata when a profile is configured so clients stay in sync.
-  // We gate the actual publish on having something to send or a profile change so we avoid no-op network traffic.
+  let kind0Event = null;
   if (config.profile) {
     const metadata = {
       name: (config.profile.name || name).toLowerCase().replace(/\s+/g, '_'),
@@ -293,47 +328,64 @@ export async function runPublishCycle(service, options = {}) {
     // Remove undefined keys
     Object.keys(metadata).forEach(k => metadata[k] === undefined && delete metadata[k]);
 
-    const kind0Event = {
+    kind0Event = {
       kind: 0,
       created_at: Math.floor(Date.now() / 1000),
       tags: [],
       content: JSON.stringify(metadata)
     };
-    if (eventsToPublish.length > 0 || profileChanged) {
+    if (shouldPublishKind0) {
       eventsToPublish.push(kind0Event);
     }
   }
 
-  const publishResults = eventsToPublish.length > 0
-    ? await publishToRelays(publicationRelays, eventsToPublish, secretKey)
-    : {};
+  if (!eventsToPublish.length) {
+    const finalState = { ...state, is_probing: false, last_inventory: inventory };
+    if (!canPublish && needsPublish) {
+      if (state.last_publication_warning_reason !== reason) {
+        addLog('warn', `Skipped publish for ${name}: ${reason} (no publication relays available)`, {
+          serviceId: id,
+          reason,
+          publicationRelays: effectivePublicationRelays,
+          privateRecipients: normalizedRecipients
+        });
+      }
+      finalState.last_publication_warning_reason = reason;
+    } else {
+      finalState.last_publication_warning_reason = null;
+    }
+    updateService(id, { state: finalState });
+    return finalState;
+  }
 
-  const kind0Event = eventsToPublish.find(e => e.kind === 0);
+  const publishResults = await publishToRelays(effectivePublicationRelays, eventsToPublish, secretKey);
+
 
   // 5. Update State in DB
   const newState = {
     ...state,
     is_probing: false,
-    last_published_ncc02_id: primaryChanged ? ncc02Event.id : state.last_published_ncc02_id,
-    last_primary_endpoint_hash: primaryChanged ? primaryEndpointHash : state.last_primary_endpoint_hash,
-    last_endpoints_hash: shouldPublishNcc05 ? locatorHash : state.last_endpoints_hash,
-    last_published_ncc05_id: shouldPublishNcc05 ? ncc05EventTemplate?.id : state.last_published_ncc05_id,
-    last_published_kind0_id: kind0Event ? kind0Event.id : state.last_published_kind0_id,
+    last_published_ncc02_id: willPublishNcc02 ? ncc02Event.id : state.last_published_ncc02_id,
+    last_primary_endpoint_hash: willPublishNcc02 ? primaryEndpointHash : state.last_primary_endpoint_hash,
+    last_endpoints_hash: willPublishNcc05 ? locatorHash : state.last_endpoints_hash,
+    last_published_ncc05_id: willPublishNcc05 ? ncc05EventTemplate?.id : state.last_published_ncc05_id,
+    last_published_kind0_id: kind0Event && shouldPublishKind0 ? kind0Event.id : state.last_published_kind0_id,
     last_profile_hash: profileHash || state.last_profile_hash,
     last_inventory: inventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now,
-    tor_status: torStatus
+    tor_status: torStatus,
+    last_publication_warning_reason: null
   };
 
   updateService(id, { state: newState });
   
   const publishedSummaries = [];
-  if (primaryChanged) {
+  if (willPublishNcc02) {
     const summaryId = ncc02Event?.id ? `${ncc02Event.id.slice(0, 8)}...` : 'pending';
     publishedSummaries.push(`NCC-02: ${summaryId}`);
   }
-  if (shouldPublishNcc05) {
+  if (willPublishNcc05) {
     const summaryId = ncc05EventTemplate?.id ? `${ncc05EventTemplate.id.slice(0, 8)}...` : 'pending';
     publishedSummaries.push(`NCC-05: ${summaryId}`);
   }
@@ -350,10 +402,11 @@ export async function runPublishCycle(service, options = {}) {
   const logMetadata = {
     serviceId: id,
     reason,
-    publishResults
+    publishResults,
+    publicationRelays: effectivePublicationRelays
   };
-  if (primaryChanged && ncc02Event?.id) logMetadata.ncc02 = ncc02Event.id;
-  if (shouldPublishNcc05 && ncc05EventTemplate?.id) logMetadata.ncc05 = ncc05EventTemplate.id;
+  if (willPublishNcc02 && ncc02Event?.id) logMetadata.ncc02 = ncc02Event.id;
+  if (willPublishNcc05 && ncc05EventTemplate?.id) logMetadata.ncc05 = ncc05EventTemplate.id;
   if (kind0Event) logMetadata.kind0 = kind0Event.id;
   if (normalizedRecipients.length) {
     logMetadata.privateRecipients = normalizedRecipients;
@@ -361,11 +414,11 @@ export async function runPublishCycle(service, options = {}) {
   if (primarySummary) {
     logMetadata.primaryEndpoint = primarySummary;
   }
-  if (ncc02Event) {
+  if (willPublishNcc02 && ncc02Event) {
     logMetadata.ncc02Content = ncc02Event.content;
     logMetadata.ncc02Tags = ncc02Event.tags;
   }
-  if (shouldPublishNcc05 && locatorPayload) {
+  if (willPublishNcc05 && locatorPayload) {
     logMetadata.ncc05Content = ncc05EventTemplate?.content;
     logMetadata.ncc05Tags = ncc05EventTemplate?.tags;
     logMetadata.locatorPayload = locatorPayload;

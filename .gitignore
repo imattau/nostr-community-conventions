@@ -1,3 +1,5 @@
+ncc-sidecar/node_modules/
+node_modules/
 ncc-06-example/ncc06-relay/node_modules/
 ncc-06-example/ncc06-relay/ncc06-sidecar/onion-service.json
 ncc-06-example/ncc06-relay/certs/
