@@ -80,9 +80,10 @@ NCC-06 relies on **SPKI pinning** via the `k` tag. The sidecar manages these pin
 
 ## Automated installation
 
-For production deployments you can use the provided installer at the repo root:
+For production deployments you can use the installer inside this package:
 
 ```bash
+cd ncc-sidecar
 sudo ./scripts/install-sidecar.sh [flags]
 ```
 
