@@ -39,12 +39,25 @@ function normalizeRecipientPubkeys(values = []) {
   return Array.from(cleaned);
 }
 
+function formatEventLink(relayUrl, eventId) {
+  if (!relayUrl || !eventId) return null;
+  try {
+    const parsed = new URL(relayUrl);
+    parsed.pathname = eventId;
+    parsed.search = '';
+    return parsed.toString();
+  } catch (_err) {
+    return `${relayUrl.replace(/\/+$/, '')}/${eventId}`;
+  }
+}
+
 async function notifyAdminsOnionUpdate({
   service,
   torResponse,
   previousAddress,
   secretKey,
-  relays
+  relays,
+  eventIds
 }) {
   if (!torResponse?.address) return;
   const admins = getAdmins().filter(admin => admin.pubkey).map(admin => admin.pubkey);
@@ -72,11 +85,23 @@ async function notifyAdminsOnionUpdate({
     .map(link => `• ${link}`)
     .join('\n');
 
+  const primaryRelay = relayTargets[0] || null;
+  const eventLines = [];
+  if (eventIds?.ncc02) {
+    const link = formatEventLink(primaryRelay, eventIds.ncc02);
+    eventLines.push(`• NCC-02 event: ${eventIds.ncc02}${link ? ` (${link})` : ''}`);
+  }
+  if (eventIds?.ncc05) {
+    const link = formatEventLink(primaryRelay, eventIds.ncc05);
+    eventLines.push(`• NCC-05 event: ${eventIds.ncc05}${link ? ` (${link})` : ''}`);
+  }
+
   const message = `NCC-06 service "${service.name}" (${service.service_id}) refreshed its Tor endpoint.
 
 New onion address:
 ${linkLines}
 
+${eventLines.length ? `Published events:\n${eventLines.join('\n')}\n\n` : ''}
 The updated endpoint is visible in the admin dashboard after the next publish cycle.`;
 
   const sendResults = await Promise.all(admins.map(async (pubkey) => {
@@ -289,15 +314,6 @@ export async function runPublishCycle(service, options = {}) {
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
   const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
   const shouldNotifyAdmins = onionChanged && torAddress !== state.last_onion_notified;
-  if (shouldNotifyAdmins && torResponse) {
-    await notifyAdminsOnionUpdate({
-      service,
-      torResponse,
-      previousAddress: state.last_onion_address || null,
-      secretKey,
-      relays: publicationRelays
-    });
-  }
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
@@ -463,6 +479,21 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   const publishResults = await publishToRelays(effectivePublicationRelays, eventsToPublish, secretKey);
+  let notificationSent = false;
+  if (shouldNotifyAdmins && torResponse) {
+    await notifyAdminsOnionUpdate({
+      service,
+      torResponse,
+      previousAddress: state.last_onion_address || null,
+      secretKey,
+      relays: effectivePublicationRelays,
+      eventIds: {
+        ncc02: ncc02Event?.id,
+        ncc05: ncc05EventTemplate?.id
+      }
+    });
+    notificationSent = true;
+  }
 
 
   // 5. Update State in DB
@@ -480,7 +511,7 @@ export async function runPublishCycle(service, options = {}) {
     last_full_publish_timestamp: now,
     tor_status: torStatus,
     last_onion_address: torAddress || state.last_onion_address,
-    last_onion_notified: shouldNotifyAdmins ? torAddress : state.last_onion_notified,
+    last_onion_notified: notificationSent ? torAddress : state.last_onion_notified,
     last_publication_warning_reason: null
   };
 
