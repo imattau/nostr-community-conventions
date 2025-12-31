@@ -110,8 +110,7 @@ The updated endpoint is visible in the admin dashboard after the next publish cy
         secretKey,
         recipientPubkey: pubkey,
         message,
-        relays: Array.from(new Set(relayTargets)),
-        encryptionMethod: 'nip04'
+        relays: Array.from(new Set(relayTargets))
       });
       return { pubkey, success };
     } catch (err) {

@@ -1,31 +1,34 @@
 import { finalizeEvent } from 'nostr-tools/pure';
-import { nip04, nip44 } from 'nostr-tools';
+import { nip44 } from 'nostr-tools';
 import WebSocket from 'ws';
 
 export async function sendInviteDM({
   secretKey,
   recipientPubkey,
   message,
-  relays,
-  encryptionMethod = 'nip44'
+  relays
 }) {
-  let ciphertext;
-
-  if (encryptionMethod === 'nip04') {
-    ciphertext = nip04.encrypt(secretKey, recipientPubkey, message);
-  } else {
-    const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
-    ciphertext = nip44.encrypt(message, conversationKey);
-  }
+  const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
+  const ciphertext = nip44.encrypt(message, conversationKey);
+  const payload = {
+    version: '17',
+    method: 'nip44',
+    ciphertext,
+    metadata: {
+      type: 'notice',
+      summary: message,
+      timestamp: Math.floor(Date.now() / 1000)
+    }
+  };
 
   const eventTemplate = {
     kind: 4,
     created_at: Math.floor(Date.now() / 1000),
     tags: [
       ['p', recipientPubkey],
-      ['encryption', encryptionMethod]
+      ['encryption', 'nip17']
     ],
-    content: ciphertext
+    content: JSON.stringify(payload)
   };
 
   const signedEvent = finalizeEvent(eventTemplate, secretKey);
