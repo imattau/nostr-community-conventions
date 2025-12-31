@@ -11,6 +11,11 @@ A multimodal identity manager for Nostr services. It ensures your service (Relay
 - **React Admin Dashboard**: Professional UI for managing services, viewing status, and inviting admins.
 - **Smart Change Detection**: Only publishes updates when network conditions change or records expire.
 
+## Recent updates
+
+- **Admin notification messages** now wrap the NIP-44 ciphertext inside a NIP-17 envelope, keeping the encrypted alerts compatible with modern Nostr clients and covered by `test/dm.test.js`.
+- **Timestamps in the admin UI** render with the viewer’s timezone context so every log row clearly states when an action occurred in your locale.
+
 ## Quick Start
 
 ```bash

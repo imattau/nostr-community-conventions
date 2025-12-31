@@ -6,12 +6,13 @@ export async function sendInviteDM({
   secretKey,
   recipientPubkey,
   message,
-  relays
+  relays,
+  broadcast = broadcastEvent
 }) {
   const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
   const ciphertext = nip44.encrypt(message, conversationKey);
   const payload = {
-    version: '17',
+    version: 'nip17',
     method: 'nip44',
     ciphertext,
     metadata: {
@@ -32,7 +33,7 @@ export async function sendInviteDM({
   };
 
   const signedEvent = finalizeEvent(eventTemplate, secretKey);
-  return await broadcastEvent(relays, signedEvent);
+  return await broadcast(relays, signedEvent);
 }
 
 async function broadcastEvent(relays, event) {

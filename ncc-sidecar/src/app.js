@@ -230,6 +230,7 @@ export async function runPublishCycle(service, options = {}) {
   if (storedNotified && storedNotified !== cachedNotified) {
     onionNotificationCache.set(id, storedNotified);
   }
+  const lastNotified = storedNotified || cachedNotified || null;
   const secretKey = fromNsec(service_nsec);
   const publicKey = getPublicKey(secretKey);
   
@@ -319,8 +320,6 @@ export async function runPublishCycle(service, options = {}) {
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
   const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
-  const lastNotified = storedNotified || cachedNotified || null;
-  const shouldNotifyAdmins = onionChanged && torAddress !== lastNotified;
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
@@ -486,8 +485,9 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   const publishResults = await publishToRelays(effectivePublicationRelays, eventsToPublish, secretKey);
+  const shouldNotifyAdmins = onionChanged && torResponse && willPublishNcc05 && torAddress !== lastNotified;
   let notificationSent = false;
-  if (shouldNotifyAdmins && torResponse) {
+  if (shouldNotifyAdmins) {
     await notifyAdminsOnionUpdate({
       service,
       torResponse,

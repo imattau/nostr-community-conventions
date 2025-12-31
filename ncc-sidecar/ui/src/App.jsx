@@ -143,6 +143,7 @@ export default function App() {
   const [isRotatingOnion, setIsRotatingOnion] = useState(false);
   const [newService, setNewService] = useState(buildEmptyService());
   const [showServiceNsec, setShowServiceNsec] = useState(false);
+  const [showNodeNsec, setShowNodeNsec] = useState(false);
   const [pendingOnionRefresh, setPendingOnionRefresh] = useState({});
   const portIsValid = Number.isInteger(newService.config?.port) && newService.config?.port > 0;
   const canSaveService = Boolean(newService.name && newService.service_nsec && portIsValid);
@@ -152,6 +153,12 @@ export default function App() {
       setShowServiceNsec(false);
     }
   }, [newService.service_nsec]);
+  useEffect(() => {
+    const sidecarNode = services.find(s => s.type === 'sidecar');
+    if (!sidecarNode?.service_nsec && showNodeNsec) {
+      setShowNodeNsec(false);
+    }
+  }, [services, showNodeNsec]);
   useEffect(() => {
     if (!Object.keys(pendingOnionRefresh).length) return;
     setPendingOnionRefresh((prev) => {
@@ -939,6 +946,11 @@ export default function App() {
   if (isAuthenticated) {
     const sidecarNode = services.find(s => s.type === 'sidecar');
     const managedServices = services.filter(s => s.type !== 'sidecar');
+    const nodeInventory = sidecarNode?.state?.last_inventory || [];
+    const nodeNsecValue = sidecarNode?.service_nsec || '';
+    const nodeOnionValue = nodeInventory.find(ep => ep.family === 'onion')?.url || '';
+    const nodeTlsMatch = nodeInventory.find(ep => ep.tlsFingerprint || ep.k);
+    const nodeTlsValue = nodeTlsMatch?.tlsFingerprint || nodeTlsMatch?.k || '';
     const onionEndpoint = sidecarNode?.state?.last_inventory?.find(e => e.family === 'onion');
     const sidecarCanRegenerateTls = sidecarNode?.config?.generate_self_signed !== false;
     const isNodeTlsRegenerating = regeneratingTlsServiceId === sidecarNode?.id;
@@ -969,8 +981,7 @@ export default function App() {
         [sidecarNode.id]: { previousOnion: currentOnionUrl }
       }));
       try {
-        const nextConfig = { ...sidecarNode.config };
-        delete nextConfig.onion_private_key;
+      const nextConfig = { ...sidecarNode.config, onion_private_key: null };
         await axios.put(`${API_BASE}/service/${sidecarNode.id}`, { config: nextConfig });
         alert('Onion rotation requested. The new address will appear after the publish cycle completes.');
         fetchServices();
@@ -1707,28 +1718,106 @@ export default function App() {
                           <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.identity ? 'rotate-90' : ''}`} />
                         </button>
                       </div>
-                      <div className={`${nodeSectionOpen.identity ? 'mt-4 space-y-3' : 'hidden'}`}>
-                        <button
-                          onClick={handleNodeGenerateIdentity}
-                          disabled={isRotatingIdentity}
-                          className="w-full bg-slate-900 text-white py-3 rounded-2xl font-bold uppercase tracking-[0.3em] shadow-lg shadow-slate-900/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isRotatingIdentity ? 'Regenerating identity…' : 'Regenerate management key'}
-                        </button>
-                        <button
-                          onClick={handleNodeRotateOnion}
-                          disabled={isRotatingOnion}
-                          className="w-full bg-slate-50 border border-slate-200 py-3 rounded-2xl font-bold uppercase tracking-[0.3em] text-slate-600 hover:border-slate-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isRotatingOnion ? 'Rotating onion…' : 'Rotate onion address'}
-                        </button>
-                        <button
-                          onClick={handleNodeRegenerateTls}
-                          disabled={!sidecarCanRegenerateTls || isNodeTlsRegenerating}
-                          className="w-full bg-slate-50 border border-slate-200 py-3 rounded-2xl font-bold uppercase tracking-[0.3em] text-slate-600 hover:border-slate-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {isNodeTlsRegenerating ? 'Regenerating TLS…' : 'Regenerate TLS certificate'}
-                        </button>
+                      <div className={`${nodeSectionOpen.identity ? 'mt-4 space-y-4' : 'hidden'}`}>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Management NSEC</label>
+                          <div className="flex space-x-2">
+                            <input
+                              type={showNodeNsec ? 'text' : 'password'}
+                              readOnly
+                              value={nodeNsecValue}
+                              placeholder="Secret key appears after setup"
+                              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono text-slate-600 outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              type="button"
+                              disabled={!nodeNsecValue}
+                              onClick={() => copyToClipboard(nodeNsecValue, 'node-nsec')}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Copy className="w-4 h-4" />
+                              <span className="sr-only">Copy management key</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!nodeNsecValue}
+                              onClick={() => setShowNodeNsec(prev => !prev)}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {showNodeNsec ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              <span className="sr-only">{showNodeNsec ? 'Hide management key' : 'Show management key'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleNodeGenerateIdentity}
+                              disabled={!nodeNsecValue || isRotatingIdentity}
+                              className="bg-slate-900 text-white p-5 rounded-2xl hover:bg-slate-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center"
+                            >
+                              <RefreshCw className={`w-4 h-4 ${isRotatingIdentity ? 'animate-spin' : ''}`} />
+                              <span className="sr-only">Regenerate management key</span>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Onion Address</label>
+                          <div className="flex space-x-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={nodeOnionValue}
+                              placeholder="Onion address appears after the next publish"
+                              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono text-slate-600 outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              type="button"
+                              disabled={!nodeOnionValue}
+                              onClick={() => copyToClipboard(nodeOnionValue, 'node-onion')}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Copy className="w-4 h-4" />
+                              <span className="sr-only">Copy onion address</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleNodeRotateOnion}
+                              disabled={isRotatingOnion}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                            >
+                              <RefreshCw className={`w-4 h-4 ${isRotatingOnion ? 'animate-spin' : ''}`} />
+                              <span className="sr-only">Rotate onion address</span>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">TLS Fingerprint</label>
+                          <div className="flex space-x-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={nodeTlsValue}
+                              placeholder="TLS fingerprint appears after cert generation"
+                              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono text-slate-600 outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              type="button"
+                              disabled={!nodeTlsValue}
+                              onClick={() => copyToClipboard(nodeTlsValue, 'node-tls')}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Copy className="w-4 h-4" />
+                              <span className="sr-only">Copy TLS fingerprint</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleNodeRegenerateTls}
+                              disabled={!sidecarCanRegenerateTls || isNodeTlsRegenerating}
+                              className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                            >
+                              <RefreshCw className={`w-4 h-4 ${isNodeTlsRegenerating ? 'animate-spin' : ''}`} />
+                              <span className="sr-only">Regenerate TLS certificate</span>
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <div className="rounded-2xl border border-slate-100 p-4">
