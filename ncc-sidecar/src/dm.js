@@ -1,4 +1,4 @@
-import { finalizeEvent, verifyEvent, getPublicKey } from 'nostr-tools/pure';
+import { finalizeEvent } from 'nostr-tools/pure';
 import { nip44 } from 'nostr-tools';
 import WebSocket from 'ws';
 
@@ -39,7 +39,9 @@ async function broadcastEvent(relays, event) {
             ws.close();
             resolve(true);
           }
-        } catch (e) {}
+        } catch (_err) {
+          console.warn("[DM] Failed to parse relay message:", _err);
+        }
       });
       ws.on('error', () => resolve(false));
     });

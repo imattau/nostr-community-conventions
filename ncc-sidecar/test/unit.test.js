@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { buildInventory } from '../src/inventory.js';
 import { buildRecords } from '../src/builder.js';
-import { generateKeypair, toNsec } from 'ncc-06-js';
+import { generateKeypair } from 'ncc-06-js';
 
 test('inventory sorting logic', async () => {
   const endpoints = [

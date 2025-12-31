@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion as Motion } from 'framer-motion';
 import { 
   Shield, Key, Globe, Plus, Trash2, Activity, Box, 
   ChevronRight, Smartphone, QrCode, Terminal, 
@@ -52,12 +52,12 @@ export default function App() {
   const [services, setServices] = useState([]);
   const [logs, setLogs] = useState([]);
   const [selectedLog, setSelectedLog] = useState(null);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [loginMode, setLoginMode] = useState('choice');
   const [nip46Uri, setNip46Uri] = useState('');
   const [manualPubkey, setManualPubkey] = useState('');
   const [localNsec, setLocalNsec] = useState('');
   const [copiedMap, setCopiedMap] = useState({});
-  const [connectionStatus, setConnectionStatus] = useState('idle');
   const [showNewServiceModal, setShowNewServiceModal] = useState(false);
   const [proxyCheckResult, setProxyCheckResult] = useState(null);
   const [networkAvailability, setNetworkAvailability] = useState({ ipv4: false, ipv6: false, tor: false });
@@ -74,8 +74,11 @@ export default function App() {
   const [relayModalInput, setRelayModalInput] = useState('');
   const [isRepublishing, setIsRepublishing] = useState(false);
   const [appConfig, setAppConfig] = useState({});
+  const [showNodeSettingsModal, setShowNodeSettingsModal] = useState(false);
+  const [allowRemoteLoading, setAllowRemoteLoading] = useState(false);
   const [newService, setNewService] = useState(buildEmptyService());
   const [showServiceNsec, setShowServiceNsec] = useState(false);
+  const [pendingOnionRefresh, setPendingOnionRefresh] = useState({});
   const portIsValid = Number.isInteger(newService.config?.port) && newService.config?.port > 0;
   const canSaveService = Boolean(newService.name && newService.service_nsec && portIsValid);
   
@@ -84,6 +87,22 @@ export default function App() {
       setShowServiceNsec(false);
     }
   }, [newService.service_nsec]);
+  useEffect(() => {
+    if (!Object.keys(pendingOnionRefresh).length) return;
+    setPendingOnionRefresh((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [serviceId, info] of Object.entries(prev)) {
+        const service = services.find((s) => String(s.id) === String(serviceId));
+        const currentOnionUrl = service?.state?.last_inventory?.find((ep) => ep.family === 'onion')?.url || null;
+        if (currentOnionUrl && currentOnionUrl !== info.previousOnion) {
+          delete next[serviceId];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [services, pendingOnionRefresh]);
   const onionEndpoint = newService.state?.last_inventory?.find(ep => ep.family === 'onion');
   const onionAddressValue = onionEndpoint?.url || '';
   const tlsEndpoint = newService.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
@@ -101,7 +120,8 @@ export default function App() {
     if (typeof raw === 'string') {
       try {
         return JSON.parse(raw);
-      } catch (err) {
+      } catch (metadataErr) {
+        console.warn("[Logs] Failed to parse metadata:", metadataErr);
         return { raw };
       }
     }
@@ -131,7 +151,7 @@ export default function App() {
             } else {
               return null;
             }
-          } catch (__) {
+          } catch {
             return null;
           }
         }
@@ -145,7 +165,7 @@ export default function App() {
     return recipients.map(hex => {
       try {
         return nip19.npubEncode(hex);
-      } catch (_) {
+      } catch {
         return hex;
       }
     }).join('\n');
@@ -192,7 +212,9 @@ export default function App() {
     try {
       const res = await axios.get(`${API_BASE}/admins`);
       setAdmins(res.data);
-    } catch (e) {}
+    } catch (_err) {
+      console.warn("Failed to fetch admins:", _err);
+    }
   };
 
   const handleInviteAdmin = async () => {
@@ -269,6 +291,7 @@ export default function App() {
   }, [initialized]);
 
   const fetchServices = async () => {
+    setLoadingLogs(true);
     try {
       const res = await axios.get(`${API_BASE}/services`);
       setServices(prev => {
@@ -276,7 +299,6 @@ export default function App() {
         if (JSON.stringify(prev) === JSON.stringify(res.data)) return prev;
         return res.data;
       });
-      
       const logRes = await axios.get(`${API_BASE}/status`);
       setAppConfig(logRes.data.config || {});
       if (logRes.data.logs) {
@@ -285,7 +307,12 @@ export default function App() {
           return logRes.data.logs;
         });
       }
-    } catch (e) {}
+    } catch (_err) {
+      console.warn("Failed to refresh services:", _err);
+    }
+    finally {
+      setLoadingLogs(false);
+    }
   };
 
   const handleRepublish = async () => {
@@ -293,8 +320,8 @@ export default function App() {
     try {
       await axios.post(`${API_BASE}/services/republish`);
       fetchServices();
-    } catch (err) {
-      alert(`Failed to republish services: ${err.message}`);
+    } catch (_err) {
+      alert(`Failed to republish services: ${_err.message}`);
     } finally {
       setIsRepublishing(false);
     }
@@ -312,7 +339,7 @@ export default function App() {
     try {
       const decoded = nip19.decode(nsec);
       return decoded.data;
-    } catch (e) { return null; }
+    } catch { return null; }
   };
 
   const saveAdminPk = (pk) => {
@@ -376,7 +403,6 @@ export default function App() {
       'wss://relay.nostr.band'
     ];
     
-    setConnectionStatus('listening');
     setRelayStatus(Object.fromEntries(relays.map(r => [r, 'connecting'])));
     setNip46Logs([]);
     addNip46Log("Initializing secure channel...");
@@ -392,7 +418,8 @@ export default function App() {
         let decrypted;
         try {
           decrypted = await nip04.decrypt(sk, event.pubkey, event.content);
-        } catch (err) {
+        } catch (_err) {
+          console.debug("[NIP-46] nip04 decrypt failed, falling back to nip44:", _err);
           const conversationKey = nip44.getConversationKey(sk, hexToBytes(event.pubkey));
           decrypted = nip44.decrypt(event.content, conversationKey);
         }
@@ -423,8 +450,9 @@ export default function App() {
         const sub = relay.sub([{ kinds: [24133], "#p": [pk] }]);
         sub.on('event', handleEvent);
         sub.on('eose', () => console.log(`[NIP-46] EOSE from ${url}`));
-      } catch (e) {
+      } catch (_err) {
         setRelayStatus(prev => ({ ...prev, [url]: 'failed' }));
+        console.warn("[NIP-46] Relay connection failed:", url, _err);
       }
     });
   };
@@ -510,6 +538,14 @@ export default function App() {
 
   const handleRotateOnion = () => {
     if (!confirm('Rotate Onion Address? This will happen on next save.')) return;
+    if (editServiceId) {
+      const currentService = services.find((s) => String(s.id) === String(editServiceId));
+      const currentOnionUrl = currentService?.state?.last_inventory?.find((ep) => ep.family === 'onion')?.url || null;
+      setPendingOnionRefresh(prev => ({
+        ...prev,
+        [editServiceId]: { previousOnion: currentOnionUrl }
+      }));
+    }
     setNewService(d => ({
       ...d,
       config: { ...d.config, onion_private_key: undefined }
@@ -532,6 +568,26 @@ export default function App() {
       : (sidecar?.config?.publication_relays || []);
     setRelayModalInput(configuredRelays.join('\n'));
     setShowRelaysModal(true);
+  };
+
+  const openNodeSettings = () => {
+    setShowMenu(false);
+    setShowNodeSettingsModal(true);
+  };
+
+  const handleToggleAllowRemote = async () => {
+    if (allowRemoteLoading) return;
+    setAllowRemoteLoading(true);
+    try {
+      const desiredAllowRemote = !allowRemoteEnabled;
+      const res = await axios.put(`${API_BASE}/config/allow-remote`, { allowRemote: desiredAllowRemote });
+      setAppConfig(prev => ({ ...prev, allow_remote: res.data?.allow_remote ?? desiredAllowRemote }));
+      fetchServices();
+    } catch (err) {
+      alert('Failed to update remote access policy: ' + err.message);
+    } finally {
+      setAllowRemoteLoading(false);
+    }
   };
 
   const handleSaveRelays = async () => {
@@ -579,6 +635,20 @@ export default function App() {
     setTimeout(() => setCopiedMap(prev => ({ ...prev, [key]: false })), 2000);
   };
 
+  const getServiceInventoryMeta = (service) => {
+    const baseInventory = service.state?.last_inventory || [];
+    const isRefreshingOnion = Boolean(pendingOnionRefresh[service.id]);
+    const displayInventory = isRefreshingOnion
+      ? baseInventory.filter(ep => ep.family !== 'onion')
+      : baseInventory;
+    const hasHiddenOnion = isRefreshingOnion && baseInventory.some(ep => ep.family === 'onion');
+    const tlsMatch = displayInventory.find(ep => ep.tlsFingerprint || ep.k);
+    const tlsFingerprint = tlsMatch?.tlsFingerprint || tlsMatch?.k || 'N/A';
+    return { displayInventory, hasHiddenOnion, tlsFingerprint };
+  };
+
+  const allowRemoteEnabled = Boolean(appConfig.allow_remote);
+  const publicationRelays = Array.isArray(appConfig.publication_relays) ? appConfig.publication_relays : [];
   const isDataReady = initialized === false || (initialized === true && services.some(s => s.type === 'sidecar'));
 
   useEffect(() => {
@@ -620,21 +690,18 @@ export default function App() {
                   <Menu className="w-5 h-5" />
                 </button>
                 {showMenu && (
-                  <motion.div 
+                  <Motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50"
                   >
-                  <button onClick={() => { setShowMenu(false); handleEditService(sidecarNode); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
+                  <button onClick={openNodeSettings} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
                     Node Settings
-                  </button>
-                  <button onClick={() => { setShowMenu(false); openRelaySettings(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
-                    Publishing Relays
                   </button>
                   <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
                     Administrators
                   </button>
-                  </motion.div>
+                  </Motion.div>
                 )}
               </div>
               <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
@@ -697,7 +764,7 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full md:w-auto">
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col justify-between relative overflow-hidden min-w-[200px]">
                     {sidecarNode.state?.is_probing && (
-                      <motion.div 
+                      <Motion.div 
                         initial={{ x: '-100%' }}
                         animate={{ x: '100%' }}
                         transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
@@ -743,33 +810,65 @@ export default function App() {
               </div>
             </section>
           )}
+          {sidecarNode && (
+            <section className="mb-12 bg-white rounded-[2.5rem] p-6 border border-slate-100 shadow-lg shadow-slate-900/5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight text-slate-900">Publication Relays</h3>
+                  <p className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Sidecar broadcast targets</p>
+                </div>
+                <button 
+                  onClick={() => { setShowMenu(false); openNodeSettings(); }}
+                  className="text-xs font-black uppercase tracking-[0.2em] text-blue-600 hover:text-blue-500 transition-colors"
+                >
+                  Manage
+                </button>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                These relays are used whenever the Sidecar publishes NCC-02/NCC-05 updates or services push profile and locator data.
+              </p>
+              {publicationRelays.length ? (
+                <ul className="space-y-2 text-[12px] text-slate-700 max-h-40 overflow-y-auto">
+                  {publicationRelays.map(relay => (
+                    <li key={relay} className="flex items-center justify-between gap-3 bg-slate-50 rounded-2xl border border-slate-100 px-4 py-2 truncate">
+                      <span className="truncate">{relay}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-[12px] text-slate-500">
+                  No publication relays configured yet.
+                </div>
+              )}
+            </section>
+          )}
 
           <header className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
             <div>
               <h2 className="text-3xl font-black tracking-tight text-slate-900">Managed Services</h2>
               <p className="text-slate-500 font-medium mt-1">Active discovery profiles for hosted applications.</p>
             </div>
-            <motion.button 
+            <Motion.button 
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => setShowNewServiceModal(true)}
               className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold flex items-center shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all"
             >
               <Plus className="w-5 h-5 mr-2" /> NEW SERVICE PROFILE
-            </motion.button>
+            </Motion.button>
           </header>
 
           <AnimatePresence>
             {showNewServiceModal && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={handleCloseModal}
                   className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
                 />
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -1043,7 +1142,7 @@ export default function App() {
                       {editServiceId ? 'UPDATE PROFILE' : 'ADD DISCOVERY PROFILE'}
                     </button>
                   </div>
-                </motion.div>
+                </Motion.div>
               </div>
             )}
           </AnimatePresence>
@@ -1051,14 +1150,14 @@ export default function App() {
           <AnimatePresence>
             {showRelaysModal && (
               <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setShowRelaysModal(false)}
                   className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
                 />
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -1092,7 +1191,80 @@ export default function App() {
                       Save Relays
                     </button>
                   </div>
-                </motion.div>
+                </Motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showNodeSettingsModal && (
+              <div className="fixed inset-0 z-[115] flex items-center justify-center p-6">
+                <Motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowNodeSettingsModal(false)}
+                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+                />
+                <Motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                  className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+                >
+                  <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
+                    <h2 className="text-2xl font-black tracking-tight">Node Settings</h2>
+                    <button onClick={() => setShowNodeSettingsModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                      <Plus className="w-6 h-6 rotate-45" />
+                    </button>
+                  </div>
+                  <div className="p-6 space-y-6">
+                    <div className="rounded-2xl border border-slate-100 p-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-700">Allow remote admin access</p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
+                          Toggle whether the Sidecar accepts API requests from non-local hosts while the guard is in effect.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleToggleAllowRemote}
+                        disabled={allowRemoteLoading}
+                        className={`px-4 py-2 rounded-2xl font-bold uppercase tracking-widest transition-colors ${allowRemoteEnabled ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-600'} ${allowRemoteLoading ? 'opacity-60 cursor-not-allowed' : 'hover:bg-opacity-90'}`}
+                      >
+                        {allowRemoteLoading ? 'Updating...' : (allowRemoteEnabled ? 'Enabled' : 'Local only')}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold uppercase tracking-widest text-slate-500">Publication relays</p>
+                        <span className="text-[11px] text-slate-400">{publicationRelays.length} configured</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        These relays are used when the Sidecar publishes NCC-02/NCC-05 updates or services push profile changes.
+                      </p>
+                      {publicationRelays.length ? (
+                        <div className="max-h-48 overflow-y-auto rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 space-y-1">
+                          {publicationRelays.map(relay => (
+                            <p key={relay} className="truncate">{relay}</p>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-400 text-center">
+                          No publication relays configured yet.
+                        </div>
+                      )}
+                      <button 
+                        onClick={() => { setShowNodeSettingsModal(false); openRelaySettings(); }}
+                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-2xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all"
+                      >
+                        Manage relays
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Sidecar settings are stored in `app_config` and apply globally across every service. Service-specific profiles remain unchanged.
+                    </p>
+                  </div>
+                </Motion.div>
               </div>
             )}
           </AnimatePresence>
@@ -1100,14 +1272,14 @@ export default function App() {
           <AnimatePresence>
             {showAdminModal && (
               <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setShowAdminModal(false)}
                   className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
                 />
-                <motion.div 
+                <Motion.div 
                   initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -1160,7 +1332,7 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                </motion.div>
+                </Motion.div>
               </div>
             )}
           </AnimatePresence>
@@ -1169,135 +1341,40 @@ export default function App() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <AnimatePresence>
-              {managedServices.map((s, i) => (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  key={s.id} 
-                  className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200 hover:shadow-2xl hover:border-slate-300 transition-all group relative overflow-hidden"
-                >
-                  <div className="flex justify-between items-start mb-8 relative z-10">
-                    <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-900 border border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                      <Box className="w-7 h-7" />
+              {managedServices.map((s, i) => {
+                const inventoryMeta = getServiceInventoryMeta(s);
+                const serviceNpub = s.service_nsec ? nip19.npubEncode(getPublicKey(fromNsecLocal(s.service_nsec))) : null;
+                const showTorBadge = s.config?.protocols?.tor && !s.state?.last_inventory?.some(e => e.family === 'onion');
+                const torRunning = Boolean(s.state?.tor_status?.running);
+                return (
+                  <Motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    key={s.id} 
+                    className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200 hover:shadow-2xl hover:border-slate-300 transition-all group relative overflow-hidden"
+                  >
+                    <ServiceCardContent
+                      service={s}
+                      inventoryMeta={inventoryMeta}
+                      serviceNpub={serviceNpub}
+                      showTorBadge={showTorBadge}
+                      torRunning={torRunning}
+                      copyToClipboard={copyToClipboard}
+                      onEdit={() => handleEditService(s)}
+                      copiedMap={copiedMap}
+                    />
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeleteService(s.id); }}
+                        className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div className="flex flex-col items-end">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.type}</span>
-                      <div className="flex items-center space-x-1">
-                        <motion.div 
-                          animate={{ opacity: [0.3, 1, 0.3] }}
-                          transition={{ repeat: Infinity, duration: 2 }}
-                          className="w-2 h-2 bg-green-500 rounded-full" 
-                        />
-                        <span className="text-[10px] font-bold text-green-600 uppercase">Active</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={() => handleEditService(s)}>
-                    <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{s.name}</h3>
-                    <p className="text-xs font-mono text-slate-400 truncate">{s.service_id}</p>
-                  </div>
-
-                  <div className="space-y-4 relative z-10">
-                    <div className="space-y-2">
-                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Public Identity</div>
-                      {s.service_nsec && (
-                        <div className="flex items-center space-x-2 text-slate-500 font-mono text-xs">
-                          <span>{nip19.npubEncode(getPublicKey(fromNsecLocal(s.service_nsec))).slice(0, 20)}...</span>
-                          <button onClick={(e) => { e.stopPropagation(); copyToClipboard(nip19.npubEncode(getPublicKey(fromNsecLocal(s.service_nsec))), `npub-${s.id}`); }} className="hover:text-blue-500 transition-colors">
-                            {copiedMap[`npub-${s.id}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Endpoints</span>
-                        {s.config?.protocols?.tor && !s.state?.last_inventory?.some(e => e.family === 'onion') && (
-                           <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded border ${s.state?.tor_status?.running ? 'border-yellow-500/50 bg-yellow-50 text-yellow-600' : 'border-red-500/50 bg-red-50 text-red-500'}`} title={s.state?.tor_status?.running ? "Tor running but no Onion Service configured" : "Tor not detected"}>
-                             <div className={`w-1 h-1 rounded-full ${s.state?.tor_status?.running ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
-                             <span className="text-[8px] font-bold uppercase">TOR</span>
-                           </div>
-                        )}
-                      </div>
-                      
-                      {s.state?.last_inventory?.length > 0 ? (
-                        <div className="space-y-1.5">
-                          {s.state.last_inventory.map((ep, idx) => (
-                            <div key={idx} className="space-y-1.5">
-                              <div className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
-                                <div className="flex items-center space-x-2 truncate">
-                                  <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
-                                  <span className="truncate max-w-[180px]">{ep.url}</span>
-                                </div>
-                                <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${s.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
-                                  {copiedMap[`ep-${s.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-400 italic">
-                          {s.state?.is_probing ? 'Probing...' : 'No active endpoints'}
-                        </p>
-                      )}
-                      <div className="mt-3 space-y-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TLS fingerprint</span>
-                        {(s.state?.last_inventory?.length || 0) > 0 ? (
-                          <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-2xl border border-slate-200 text-[10px] font-mono text-slate-600">
-                            <span className="truncate">
-                              {(() => {
-                                const match = s.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
-                                return match?.tlsFingerprint || match?.k || 'N/A';
-                              })()}
-                            </span>
-                            <div className="flex items-center space-x-2">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const match = s.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
-                                  const value = match?.tlsFingerprint || match?.k;
-                                  if (value) copyToClipboard(value, `fingerprint-${s.id}`);
-                                }}
-                                className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
-                              >
-                                <Copy className="w-3.5 h-3.5" />
-                              </button>
-                              {s.config?.generate_self_signed === false && (
-                                <span className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400">TLS EXTERNAL</span>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-[10px] text-slate-500 italic">No TLS fingerprints available yet.</p>
-                        )}
-                      </div>
-                    </div>
-                    {s.config?.service_mode === 'private' && s.config?.ncc05_recipients?.length > 0 && (
-                      <div className="px-5 pt-2">
-                        <p className="text-[10px] text-slate-500 italic">Private recipients: {s.config.ncc05_recipients.length}</p>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter pt-2 border-t border-slate-100">
-                      <span>Last Update</span>
-                      <span className="text-slate-900">{s.state?.last_full_publish_timestamp ? new Date(s.state.last_full_publish_timestamp).toLocaleTimeString() : 'Pending'}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteService(s.id); }}
-                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
+                  </Motion.div>
+                );
+              })}
             </AnimatePresence>
           </div>
 
@@ -1310,9 +1387,11 @@ export default function App() {
               <div className="flex items-center space-x-3">
                 <button
                   onClick={fetchServices}
-                  className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 hover:text-blue-600 transition-colors"
+                  disabled={loadingLogs}
+                  className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 hover:text-blue-600 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-2"
                 >
-                  Refresh Logs
+                  <Activity className={`w-3 h-3 ${loadingLogs ? 'animate-spin text-blue-600' : ''}`} />
+                  {loadingLogs ? 'Refreshing…' : 'Refresh Logs'}
                 </button>
                 <button
                   onClick={handleRepublish}
@@ -1413,14 +1492,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6 font-sans">
-      <motion.div 
+      <Motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="max-w-xl w-full"
       >
         <div className="bg-slate-900 rounded-[3rem] shadow-2xl border border-white/5 overflow-hidden">
           <div className="h-2 bg-slate-800 w-full overflow-hidden">
-            <motion.div 
+            <Motion.div 
               initial={{ width: 0 }}
               animate={{ width: `${(step / 3) * 100}%` }}
               className="h-full bg-gradient-to-r from-blue-600 to-indigo-500"
@@ -1430,7 +1509,7 @@ export default function App() {
           <div className="p-12">
             <AnimatePresence mode="wait">
               {step === 1 && (
-                <motion.div 
+                <Motion.div 
                   key="step1"
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -1546,37 +1625,40 @@ export default function App() {
                           try {
                             const pk = localNsec.startsWith('nsec1') ? getPublicKey(nip19.decode(localNsec).data) : getPublicKey(new Uint8Array(localNsec.match(/.{1,2}/g).map(byte => parseInt(byte, 16))));
                             verifyAndSaveAdmin(pk);
-                          } catch(e) { alert("Invalid Key"); }
+                          } catch (_err) {
+                            console.warn("Invalid local key:", _err);
+                            alert("Invalid Key");
+                          }
                         }} className="w-full bg-white text-slate-900 font-black py-5 rounded-3xl shadow-xl hover:bg-slate-100 transition-all">{initialized ? 'CONNECT' : 'START PROVISIONING'}</button>
                       </div>
                       <button onClick={() => setLoginMode('choice')} className="text-slate-500 font-bold text-xs uppercase tracking-widest hover:text-white transition-colors text-center">Return to Safety</button>
                     </div>
                   )}
-                </motion.div>
+                </Motion.div>
               )}
 
               {step === 2 && (
-                <motion.div 
+                <Motion.div 
                   key="step2"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   className="space-y-10"
                 >
                   <div className="space-y-2 text-center">
-                    <motion.div 
+                    <Motion.div 
                       animate={{ rotate: 360 }}
                       transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
                       className="w-24 h-24 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl shadow-blue-500/20 mb-8"
                     >
                       <RefreshCw className="w-10 h-10 text-white" />
-                    </motion.div>
+                    </Motion.div>
                     <h1 className="text-3xl font-black tracking-tight">Provisioning Node</h1>
                     <p className="text-slate-400 font-medium italic">Automating secure identity and network discovery...</p>
                   </div>
 
                   <div className="space-y-6">
                     <div className="h-3 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                      <motion.div 
+                      <Motion.div 
                         initial={{ width: 0 }}
                         animate={{ width: `${provisioningProgress}%` }}
                         className="h-full bg-gradient-to-r from-blue-600 to-indigo-400"
@@ -1585,7 +1667,7 @@ export default function App() {
 
                     <div className="bg-slate-950/50 rounded-3xl p-6 border border-white/5 font-mono text-[10px] space-y-2 h-40 overflow-y-auto">
                       {provisioningLogs.map((log, i) => (
-                        <motion.div 
+                        <Motion.div 
                           initial={{ opacity: 0, x: -5 }}
                           animate={{ opacity: 1, x: 0 }}
                           key={i} 
@@ -1595,11 +1677,11 @@ export default function App() {
                           <span className="text-slate-300">{log}</span>
                           {i === provisioningLogs.length - 1 && i < 5 && <span className="w-1 h-3 bg-blue-500 animate-pulse" />}
                           {i < provisioningLogs.length - 1 && <Check className="w-3 h-3 text-green-500 ml-auto" />}
-                        </motion.div>
+                        </Motion.div>
                       ))}
                     </div>
                   </div>
-                </motion.div>
+                </Motion.div>
               )}
             </AnimatePresence>
           </div>
@@ -1608,7 +1690,139 @@ export default function App() {
         <p className="text-center mt-8 text-slate-600 text-[10px] font-black uppercase tracking-[0.3em] opacity-50">
           Identity Discovery Node • v1.0.0
         </p>
-      </motion.div>
+      </Motion.div>
     </div>
+  );
+}
+
+function ServiceCardContent({
+  service,
+  inventoryMeta,
+  serviceNpub,
+  showTorBadge,
+  torRunning,
+  copyToClipboard,
+  onEdit,
+  copiedMap
+}) {
+  const { displayInventory, hasHiddenOnion, tlsFingerprint } = inventoryMeta;
+  const lastUpdateText = service.state?.last_full_publish_timestamp
+    ? new Date(service.state.last_full_publish_timestamp).toLocaleTimeString()
+    : 'Pending';
+  const publicIdentity = serviceNpub ? `${serviceNpub.slice(0, 20)}...` : null;
+  const showIdentity = Boolean(serviceNpub);
+
+  return (
+    <>
+      <div className="flex justify-between items-start mb-8 relative z-10">
+        <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-900 border border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+          <Box className="w-7 h-7" />
+        </div>
+        <div className="flex flex-col items-end">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{service.type}</span>
+          <div className="flex items-center space-x-1">
+            <Motion.div 
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ repeat: Infinity, duration: 2 }}
+              className="w-2 h-2 bg-green-500 rounded-full" 
+            />
+            <span className="text-[10px] font-bold text-green-600 uppercase">Active</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={onEdit}>
+        <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{service.name}</h3>
+        <p className="text-xs font-mono text-slate-400 truncate">{service.service_id}</p>
+      </div>
+
+      <div className="space-y-4 relative z-10">
+        <div className="space-y-2">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Public Identity</div>
+          {showIdentity ? (
+            <div className="flex items-center space-x-2 text-slate-500 font-mono text-xs">
+              <span>{publicIdentity}</span>
+              <button onClick={(e) => { e.stopPropagation(); copyToClipboard(serviceNpub, `npub-${service.id}`); }} className="hover:text-blue-500 transition-colors">
+                {copiedMap[`npub-${service.id}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </div>
+          ) : (
+            <p className="text-[10px] text-slate-400 italic">Identity pending</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex justify-between items-start">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Endpoints</span>
+            {showTorBadge && (
+              <div className={`flex items-center space-x-1 px-1.5 py-0.5 rounded border ${torRunning ? 'border-yellow-500/50 bg-yellow-50 text-yellow-600' : 'border-red-500/50 bg-red-50 text-red-500'}`} title={torRunning ? "Tor running but no Onion Service configured" : "Tor not detected"}>
+                <div className={`w-1 h-1 rounded-full ${torRunning ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`} />
+                <span className="text-[8px] font-bold uppercase">TOR</span>
+              </div>
+            )}
+          </div>
+
+          {displayInventory.length > 0 ? (
+            <div className="space-y-1.5">
+              {displayInventory.map((ep, idx) => (
+                <div key={`${ep.url}-${idx}`} className="space-y-1.5">
+                  <div className="flex items-center justify-between bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100 text-[10px] font-mono text-slate-600">
+                    <div className="flex items-center space-x-2 truncate">
+                      <div className={`w-1.5 h-1.5 rounded-full ${ep.family === 'onion' ? 'bg-purple-500' : 'bg-blue-500'}`} />
+                      <span className="truncate max-w-[180px]">{ep.url}</span>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); copyToClipboard(ep.url, `ep-${service.id}-${idx}`); }} className="ml-2 hover:text-blue-500 transition-colors shrink-0">
+                      {copiedMap[`ep-${service.id}-${idx}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-slate-400 italic">
+              {service.state?.is_probing ? 'Probing...' : 'No active endpoints'}
+            </p>
+          )}
+          {hasHiddenOnion && (
+            <p className="text-[10px] text-slate-500 italic">Onion address rotation pending — new address will appear after the next publish.</p>
+          )}
+          <div className="mt-3 space-y-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TLS fingerprint</span>
+            {displayInventory.length > 0 ? (
+              <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-2xl border border-slate-200 text-[10px] font-mono text-slate-600">
+                <span className="truncate">{tlsFingerprint}</span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const value = tlsFingerprint === 'N/A' ? null : tlsFingerprint;
+                      if (value) copyToClipboard(value, `fingerprint-${service.id}`);
+                    }}
+                    className="p-1 text-slate-400 hover:text-blue-500 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  {service.config?.generate_self_signed === false && (
+                    <span className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400">TLS EXTERNAL</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-500 italic">No TLS fingerprints available yet.</p>
+            )}
+          </div>
+        </div>
+        {service.config?.service_mode === 'private' && service.config?.ncc05_recipients?.length > 0 && (
+          <div className="px-5 pt-2">
+            <p className="text-[10px] text-slate-500 italic">Private recipients: {service.config.ncc05_recipients.length}</p>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 uppercase tracking-tighter pt-2 border-t border-slate-100">
+          <span>Last Update</span>
+          <span className="text-slate-900">{lastUpdateText}</span>
+        </div>
+      </div>
+    </>
   );
 }

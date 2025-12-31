@@ -43,7 +43,9 @@ function publishToRelay(relayUrl, events, secretKey) {
           ws.close();
           resolve();
         }
-      } catch (e) {}
+      } catch (_err) {
+        console.warn("[Publisher] Malformed relay message:", _err);
+      }
     });
 
     // Fallback: wait a bit for OKs then close

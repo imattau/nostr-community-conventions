@@ -31,8 +31,8 @@ function normalizeRecipientPubkeys(values = []) {
       if (/^[0-9a-f]{64}$/i.test(decoded)) {
         cleaned.add(decoded.toLowerCase());
       }
-    } catch (err) {
-      // ignore invalid transmissions
+    } catch (_err) {
+      console.warn(`[App] Invalid recipient in config for ${candidate}:`, _err?.message || _err);
     }
   }
   return Array.from(cleaned);
@@ -177,7 +177,9 @@ export async function runPublishCycle(service, options = {}) {
             existingKey = data.privateKey;
             console.log(`[App] Migrated onion key for ${name} from ${fileToRead}`);
             fs.unlinkSync(fileToRead); // Clean up
-          } catch (e) {}
+          } catch (_err) {
+            console.warn(`[App] Failed to parse migrated onion key for ${name}:`, _err);
+          }
         }
       }
 

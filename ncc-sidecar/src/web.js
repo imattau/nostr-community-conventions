@@ -6,17 +6,64 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { isInitialized, getConfig, setConfig, getLogs, addAdmin, getAdmins, removeAdmin, addService, updateService, getServices, deleteService, addLog } from './db.js';
 import { checkTor } from './tor-check.js';
-import { generateKeypair, toNsec, fromNpub, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
+import { generateKeypair, toNpub, fromNpub, fromNsec, getPublicKey, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
 import { runPublishCycle } from './app.js';
+import { isLocalHostname, isLocalAddress, shouldAllowRemoteAccess } from './security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export async function startWebServer(initialPort = 3000, onInitialized) {
+export async function startWebServer(initialPort = 3000, onInitialized, options = {}) {
+  const { skipListen = false, bypassRemoteGuard = false } = options;
   const server = fastify({ logger: false });
+  const debugSecurity = Boolean(process.env.NCC_SIDECAR_DEBUG_REMOTE);
 
-  await server.register(cors, { origin: true });
+  await server.register(cors, {
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+      try {
+        const parsed = new URL(origin);
+        if (isLocalHostname(parsed.hostname)) {
+          return callback(null, true);
+        }
+      } catch (_err) {
+        console.warn("[CORS] Origin parsing failed:", _err.message);
+        return callback(new Error('CORS origin denied'));
+      }
+      callback(new Error('CORS origin denied'));
+    },
+    credentials: true
+  });
+
+  if (!bypassRemoteGuard) {
+    server.addHook('onRequest', (request, reply, done) => {
+      if (!isInitialized()) {
+        done();
+        return;
+      }
+      const appConfig = getConfig('app_config') || {};
+      if (shouldAllowRemoteAccess(appConfig)) {
+        done();
+        return;
+      }
+      const forwarded = request.headers['x-forwarded-for'];
+      const remoteAddress = typeof forwarded === 'string' && forwarded.length
+        ? forwarded.split(',')[0].trim()
+        : request.ip;
+      if (debugSecurity) {
+        console.log(`[Security] ${request.method} ${request.url} from ${remoteAddress}`);
+      }
+      if (!isLocalAddress(remoteAddress)) {
+        reply.code(403).send({ error: 'Remote access disabled. Set NCC_SIDECAR_ALLOW_REMOTE=true to override.' });
+        done();
+        return;
+      }
+      done();
+    });
+  }
 
   // API Routes
   server.get('/api/setup/status', async () => {
@@ -70,6 +117,7 @@ export async function startWebServer(initialPort = 3000, onInitialized) {
       generate_self_signed: true,
       protocols: { ipv4: true, ipv6: true, tor: true },
       primary_protocol: 'ipv4',
+      allow_remote: false,
       ...userConfig
     };
 
@@ -128,16 +176,16 @@ export async function startWebServer(initialPort = 3000, onInitialized) {
     if (service.config?.probe_url) {
       try {
         altNames.push(new URL(service.config.probe_url).hostname);
-      } catch (err) {
-        // ignore invalid URL
+      } catch (_err) {
+        console.warn(`[Web] Invalid probe URL for ${service.name}:`, _err.message);
       }
     }
     if (altNames.length === 0) altNames.push('localhost');
 
     try {
       await fs.promises.rm(targetDir, { recursive: true, force: true });
-    } catch (err) {
-      // best effort removal
+    } catch (_err) {
+      console.warn(`[Web] Failed to clear TLS cert for ${service.name}:`, _err.message);
     }
 
     try {
@@ -246,6 +294,17 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     return { success: true, publication_relays: appConfig.publication_relays };
   });
 
+  server.put('/api/config/allow-remote', async (request, reply) => {
+    const { allowRemote } = request.body;
+    if (typeof allowRemote !== 'boolean') {
+      return reply.code(400).send({ error: 'allowRemote must be a boolean' });
+    }
+    const appConfig = getConfig('app_config') || {};
+    appConfig.allow_remote = allowRemote;
+    setConfig('app_config', appConfig);
+    return { success: true, allow_remote: appConfig.allow_remote };
+  });
+
   server.get('/api/service/generate-key', async () => {
     const keys = generateKeypair();
     return { nsec: keys.nsec, npub: keys.npub };
@@ -271,8 +330,13 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     server.setNotFoundHandler((request, reply) => {
       reply.sendFile('index.html');
     });
-  } catch (err) {
-    // ignore
+  } catch (_err) {
+    console.warn("[Web] UI build not found, skipping static host:", _err.message);
+  }
+
+  if (skipListen) {
+    await server.ready();
+    return server;
   }
 
   let port = initialPort;
@@ -281,7 +345,7 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      await server.listen({ port, host: '0.0.0.0' });
+      await server.listen({ port, host: '127.0.0.1' });
       success = true;
       break;
     } catch (err) {

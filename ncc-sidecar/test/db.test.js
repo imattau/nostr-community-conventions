@@ -1,4 +1,4 @@
-import { test, beforeEach, after } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import fs from 'fs';
 import { initDb, getConfig, setConfig, isInitialized, addLog, getLogs, addAdmin } from '../src/db.js';

@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import path from 'path';
-import { fromNsec, fromNpub, toNpub } from 'ncc-06-js';
+import { fromNsec, toNpub } from 'ncc-06-js';
 import { getPublicKey } from 'nostr-tools/pure';
 
 export function loadConfig(configPath = './config.json') {

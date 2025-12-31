@@ -4,7 +4,7 @@ import { buildExternalEndpoints } from 'ncc-06-js';
 /**
  * Builds a multimodal list of endpoints using detection and user preferences.
  */
-export async function buildInventory(config = {}, networkProbe = {}, torStatus = {}) {
+export async function buildInventory(config = {}, networkProbe = {}, _torStatus = {}) {
   const { protocols = {}, primary_protocol = 'ipv4' } = config;
   
   // If we have manual endpoints in config, we use them. 
@@ -76,7 +76,6 @@ export async function buildInventory(config = {}, networkProbe = {}, torStatus =
 
     // Adjust URI scheme based on service type
     let url = ep.url;
-    const rawProtocol = (ep.protocol || url.split('://')[0]).toLowerCase();
     const isWeb = config.type === 'blossom' || config.type === 'custom';
     
     if (isWeb) {
