@@ -77,7 +77,7 @@ export default function App() {
   const [showNodeSettingsModal, setShowNodeSettingsModal] = useState(false);
   const [allowRemoteLoading, setAllowRemoteLoading] = useState(false);
   const [dbInfo, setDbInfo] = useState(null);
-  const [dbPasswordInput, setDbPasswordInput] = useState('');
+  const [dbCurrentPassword, setDbCurrentPassword] = useState('');
   const [dbNewPassword, setDbNewPassword] = useState('');
   const [dbPasswordLoading, setDbPasswordLoading] = useState(false);
   const [dbExporting, setDbExporting] = useState(false);
@@ -85,6 +85,11 @@ export default function App() {
   const [dbWiping, setDbWiping] = useState(false);
   const [dbImportFile, setDbImportFile] = useState(null);
   const [dbImportName, setDbImportName] = useState('');
+  const [dbExportPassword, setDbExportPassword] = useState('');
+  const [dbImportPassword, setDbImportPassword] = useState('');
+  const [dbWipePassword, setDbWipePassword] = useState('');
+  const [isRotatingIdentity, setIsRotatingIdentity] = useState(false);
+  const [isRotatingOnion, setIsRotatingOnion] = useState(false);
   const [newService, setNewService] = useState(buildEmptyService());
   const [showServiceNsec, setShowServiceNsec] = useState(false);
   const [pendingOnionRefresh, setPendingOnionRefresh] = useState({});
@@ -657,11 +662,11 @@ export default function App() {
     setDbPasswordLoading(true);
     try {
       await axios.post(`${API_BASE}/db/password`, {
-        currentPassword: dbPasswordInput || null,
+        currentPassword: dbCurrentPassword || null,
         newPassword: dbNewPassword || null
       });
       alert('Database password updated.');
-      setDbPasswordInput('');
+      setDbCurrentPassword('');
       setDbNewPassword('');
       loadDbInfo();
     } catch (err) {
@@ -676,7 +681,7 @@ export default function App() {
     setDbExporting(true);
     try {
       const params = new URLSearchParams();
-      if (dbPasswordInput) params.set('password', dbPasswordInput);
+      if (dbExportPassword) params.set('password', dbExportPassword);
       const query = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`${API_BASE}/db/export${query}`);
       if (!res.ok) {
@@ -722,7 +727,7 @@ export default function App() {
       const base64 = arrayBufferToBase64(buffer);
       await axios.post(`${API_BASE}/db/import`, {
         data: base64,
-        password: dbPasswordInput || null
+        password: dbImportPassword || null
       });
       alert('Database imported successfully. Services will refresh shortly.');
       setDbImportFile(null);
@@ -741,7 +746,7 @@ export default function App() {
     if (dbWiping) return;
     setDbWiping(true);
     try {
-      await axios.post(`${API_BASE}/db/wipe`, { password: dbPasswordInput || null });
+      await axios.post(`${API_BASE}/db/wipe`, { password: dbWipePassword || null });
       alert('Database wiped. The UI will reload so you can reconfigure the Sidecar.');
       loadDbInfo();
       window.location.reload();
@@ -812,6 +817,51 @@ export default function App() {
     const sidecarNode = services.find(s => s.type === 'sidecar');
     const managedServices = services.filter(s => s.type !== 'sidecar');
     const onionEndpoint = sidecarNode?.state?.last_inventory?.find(e => e.family === 'onion');
+    const sidecarCanRegenerateTls = sidecarNode?.config?.generate_self_signed !== false;
+    const isNodeTlsRegenerating = regeneratingTlsServiceId === sidecarNode?.id;
+
+    const handleNodeGenerateIdentity = async () => {
+      if (!sidecarNode) return;
+      if (!confirm('Regenerating the management identity will require reauthorizing with the new key. Continue?')) return;
+      setIsRotatingIdentity(true);
+      try {
+        const keyRes = await axios.get(`${API_BASE}/service/generate-key`);
+        await axios.put(`${API_BASE}/service/${sidecarNode.id}`, { service_nsec: keyRes.data.nsec });
+        alert('Management identity regenerated. Save the new key and reauthorize admin clients.');
+        fetchServices();
+      } catch (err) {
+        alert('Failed to regenerate identity: ' + (err.response?.data?.error || err.message));
+      } finally {
+        setIsRotatingIdentity(false);
+      }
+    };
+
+    const handleNodeRotateOnion = async () => {
+      if (!sidecarNode) return;
+      if (!confirm('Rotate Onion Address? This will generate a new Tor hostname after the next publish.')) return;
+      setIsRotatingOnion(true);
+      const currentOnionUrl = sidecarNode.state?.last_inventory?.find((ep) => ep.family === 'onion')?.url || null;
+      setPendingOnionRefresh(prev => ({
+        ...prev,
+        [sidecarNode.id]: { previousOnion: currentOnionUrl }
+      }));
+      try {
+        const nextConfig = { ...sidecarNode.config };
+        delete nextConfig.onion_private_key;
+        await axios.put(`${API_BASE}/service/${sidecarNode.id}`, { config: nextConfig });
+        alert('Onion rotation requested. The new address will appear after the publish cycle completes.');
+        fetchServices();
+      } catch (err) {
+        alert('Failed to rotate onion address: ' + (err.response?.data?.error || err.message));
+      } finally {
+        setIsRotatingOnion(false);
+      }
+    };
+
+    const handleNodeRegenerateTls = async () => {
+      if (!sidecarNode) return;
+      await regenerateTls(sidecarNode.id);
+    };
 
     return (
       <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans selection:bg-blue-100 pb-20">
@@ -1357,7 +1407,7 @@ export default function App() {
                   initial={{ opacity: 0, scale: 0.9, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                  className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+                  className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 max-h-[90vh]"
                 >
                   <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
                     <h2 className="text-2xl font-black tracking-tight">Node Settings</h2>
@@ -1365,7 +1415,7 @@ export default function App() {
                       <Plus className="w-6 h-6 rotate-45" />
                     </button>
                   </div>
-                  <div className="p-6 space-y-6">
+                  <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-96px)]">
                     <div className="rounded-2xl border border-slate-100 p-4 flex items-center justify-between">
                       <div>
                         <p className="text-sm font-bold text-slate-700">Allow remote admin access</p>
@@ -1410,6 +1460,35 @@ export default function App() {
                     <p className="text-[11px] text-slate-400">
                       Sidecar settings are stored in `app_config` and apply globally across every service. Service-specific profiles remain unchanged.
                     </p>
+                    <div className="space-y-3 border-t border-slate-100 pt-4">
+                      <p className="text-[12px] font-black uppercase tracking-[0.3em] text-slate-600">Identity controls</p>
+                      <p className="text-[11px] text-slate-500">
+                        Rotate the management identity, Tor onion address, or TLS certificate using the same controls exposed on the service editor.
+                      </p>
+                      <div className="grid gap-3 text-[10px]">
+                        <button
+                          onClick={handleNodeGenerateIdentity}
+                          disabled={isRotatingIdentity}
+                          className="w-full bg-slate-900 text-white py-3 rounded-2xl font-bold uppercase tracking-[0.3em] shadow-lg shadow-slate-900/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isRotatingIdentity ? 'Regenerating identity…' : 'Regenerate management key'}
+                        </button>
+                        <button
+                          onClick={handleNodeRotateOnion}
+                          disabled={isRotatingOnion}
+                          className="w-full bg-slate-50 border border-slate-200 py-3 rounded-2xl font-bold uppercase tracking-[0.3em] text-slate-600 hover:border-slate-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isRotatingOnion ? 'Rotating onion…' : 'Rotate onion address'}
+                        </button>
+                        <button
+                          onClick={handleNodeRegenerateTls}
+                          disabled={!sidecarCanRegenerateTls || isNodeTlsRegenerating}
+                          className="w-full bg-slate-50 border border-slate-200 py-3 rounded-2xl font-bold uppercase tracking-[0.3em] text-slate-600 hover:border-slate-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {isNodeTlsRegenerating ? 'Regenerating TLS…' : 'Regenerate TLS certificate'}
+                        </button>
+                      </div>
+                    </div>
                     <div className="space-y-4 border-t border-slate-100 pt-4">
                       <div className="flex items-start justify-between">
                         <div>
@@ -1442,8 +1521,8 @@ export default function App() {
                           <input
                             type="password"
                             placeholder="Current password"
-                            value={dbPasswordInput}
-                            onChange={(e) => setDbPasswordInput(e.target.value)}
+                            value={dbCurrentPassword}
+                            onChange={(e) => setDbCurrentPassword(e.target.value)}
                             className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
                           />
                           <input
@@ -1465,49 +1544,73 @@ export default function App() {
                       <div className="space-y-3">
                         <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Export / Import</p>
                         <div className="space-y-2">
-                          <div className="flex flex-col gap-3 md:flex-row">
-                            <input
-                              type="password"
-                              placeholder="Password for operations (if set)"
-                              value={dbPasswordInput}
-                              onChange={(e) => setDbPasswordInput(e.target.value)}
-                              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                            <button
-                              onClick={handleExportDb}
-                              disabled={dbExporting}
-                              className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              {dbExporting ? 'Exporting…' : 'Export database'}
-                            </button>
+                          <div className="space-y-3">
+                            <div className="flex flex-col gap-3 md:flex-row items-center">
+                              <div className="flex-1 space-y-1">
+                                <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Export password</p>
+                                <input
+                                  type="password"
+                                  placeholder="Password for export (if set)"
+                                  value={dbExportPassword}
+                                  onChange={(e) => setDbExportPassword(e.target.value)}
+                                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                              </div>
+                              <button
+                                onClick={handleExportDb}
+                                disabled={dbExporting}
+                                className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                {dbExporting ? 'Exporting…' : 'Export database'}
+                              </button>
+                            </div>
+                            <div className="flex flex-col gap-3 md:flex-row items-center">
+                              <div className="flex-1 space-y-1">
+                                <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Import password</p>
+                                <input
+                                  type="password"
+                                  placeholder="Password for import (if set)"
+                                  value={dbImportPassword}
+                                  onChange={(e) => setDbImportPassword(e.target.value)}
+                                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                              </div>
+                              <label className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-[11px] text-slate-500 font-mono cursor-pointer text-left">
+                                {dbImportName || 'Select .db recovery file'}
+                                <input type="file" accept=".db" className="hidden" onChange={handleDbImportFileChange} />
+                              </label>
+                              <button
+                                onClick={handleImportDb}
+                                disabled={dbImporting}
+                                className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                {dbImporting ? 'Importing…' : 'Import database'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-slate-400 italic">
+                              Importing replaces the current database and keeps a backup copy.
+                            </p>
                           </div>
-                          <div className="flex flex-col gap-3 md:flex-row items-center">
-                            <label className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-[11px] text-slate-500 font-mono cursor-pointer text-left">
-                              {dbImportName || 'Select .db recovery file'}
-                              <input type="file" accept=".db" className="hidden" onChange={handleDbImportFileChange} />
-                            </label>
-                            <button
-                              onClick={handleImportDb}
-                              disabled={dbImporting}
-                              className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              {dbImporting ? 'Importing…' : 'Import database'}
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-slate-400 italic">
-                            Importing replaces the current database and keeps a backup copy.
-                          </p>
                         </div>
                       </div>
                       <div className="space-y-2">
                         <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Reset database</p>
-                        <button
-                          onClick={handleWipeDb}
-                          disabled={dbWiping}
-                          className="w-full bg-rose-500 text-white font-bold py-3 rounded-2xl shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {dbWiping ? 'Resetting…' : 'Wipe database'}
-                        </button>
+                        <div className="flex flex-col gap-3">
+                          <input
+                            type="password"
+                            placeholder="Password for reset (if set)"
+                            value={dbWipePassword}
+                            onChange={(e) => setDbWipePassword(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                          />
+                          <button
+                            onClick={handleWipeDb}
+                            disabled={dbWiping}
+                            className="w-full bg-rose-500 text-white font-bold py-3 rounded-2xl shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {dbWiping ? 'Resetting…' : 'Wipe database'}
+                          </button>
+                        </div>
                         <p className="text-[10px] text-slate-400 italic">
                           Clears all services, logs, and admins. You will need to reconfigure the Sidecar afterward.
                         </p>
