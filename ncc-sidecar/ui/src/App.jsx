@@ -88,6 +88,12 @@ export default function App() {
   const [dbExportPassword, setDbExportPassword] = useState('');
   const [dbImportPassword, setDbImportPassword] = useState('');
   const [dbWipePassword, setDbWipePassword] = useState('');
+  const [nodeSectionOpen, setNodeSectionOpen] = useState({
+    remote: false,
+    publicationRelays: false,
+    identity: false,
+    database: false
+  });
   const [isRotatingIdentity, setIsRotatingIdentity] = useState(false);
   const [isRotatingOnion, setIsRotatingOnion] = useState(false);
   const [newService, setNewService] = useState(buildEmptyService());
@@ -858,10 +864,14 @@ export default function App() {
       }
     };
 
-    const handleNodeRegenerateTls = async () => {
-      if (!sidecarNode) return;
-      await regenerateTls(sidecarNode.id);
-    };
+  const handleNodeRegenerateTls = async () => {
+    if (!sidecarNode) return;
+    await regenerateTls(sidecarNode.id);
+  };
+
+  const toggleNodeSection = (key) => {
+    setNodeSectionOpen(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
     return (
       <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans selection:bg-blue-100 pb-20">
@@ -1416,56 +1426,91 @@ export default function App() {
                     </button>
                   </div>
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-96px)]">
-                    <div className="rounded-2xl border border-slate-100 p-4 flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-bold text-slate-700">Allow remote admin access</p>
-                        <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
-                          Toggle whether the Sidecar accepts API requests from non-local hosts while the guard is in effect.
-                        </p>
+                    <div className="rounded-2xl border border-slate-100 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">Allow remote admin access</p>
+                          <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
+                            Toggle whether the Sidecar accepts API requests from non-local hosts while the guard is in effect.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => toggleNodeSection('remote')}
+                          className="p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+                          aria-expanded={nodeSectionOpen.remote}
+                        >
+                          <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.remote ? 'rotate-90' : ''}`} />
+                        </button>
                       </div>
-                      <button
-                        onClick={handleToggleAllowRemote}
-                        disabled={allowRemoteLoading}
-                        className={`px-4 py-2 rounded-2xl font-bold uppercase tracking-widest transition-colors ${allowRemoteEnabled ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-600'} ${allowRemoteLoading ? 'opacity-60 cursor-not-allowed' : 'hover:bg-opacity-90'}`}
-                      >
-                        {allowRemoteLoading ? 'Updating...' : (allowRemoteEnabled ? 'Enabled' : 'Local only')}
-                      </button>
+                      <div className={`${nodeSectionOpen.remote ? 'mt-4' : 'hidden'} space-y-2 pt-2`}>
+                        <button
+                          onClick={handleToggleAllowRemote}
+                          disabled={allowRemoteLoading}
+                          className={`px-4 py-2 rounded-2xl font-bold uppercase tracking-widest transition-colors ${allowRemoteEnabled ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-600'} ${allowRemoteLoading ? 'opacity-60 cursor-not-allowed' : 'hover:bg-opacity-90'}`}
+                        >
+                          {allowRemoteLoading ? 'Updating...' : (allowRemoteEnabled ? 'Enabled' : 'Local only')}
+                        </button>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold uppercase tracking-widest text-slate-500">Publication relays</p>
-                        <span className="text-[11px] text-slate-400">{publicationRelays.length} configured</span>
+                    <div className="rounded-2xl border border-slate-100 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-sm font-bold uppercase tracking-widest text-slate-500">Publication relays</p>
+                          <p className="text-[11px] text-slate-400">
+                            These relays are used when the Sidecar publishes NCC-02/NCC-05 updates or services push profile changes.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => toggleNodeSection('publicationRelays')}
+                          className="p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+                          aria-expanded={nodeSectionOpen.publicationRelays}
+                        >
+                          <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.publicationRelays ? 'rotate-90' : ''}`} />
+                        </button>
                       </div>
-                      <p className="text-[11px] text-slate-400">
-                        These relays are used when the Sidecar publishes NCC-02/NCC-05 updates or services push profile changes.
-                      </p>
-                      {publicationRelays.length ? (
-                        <div className="max-h-48 overflow-y-auto rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 space-y-1">
-                          {publicationRelays.map(relay => (
-                            <p key={relay} className="truncate">{relay}</p>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-400 text-center">
-                          No publication relays configured yet.
-                        </div>
-                      )}
-                      <button 
-                        onClick={() => { setShowNodeSettingsModal(false); openRelaySettings(); }}
-                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-2xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all"
-                      >
-                        Manage relays
-                      </button>
+                      <div className={`${nodeSectionOpen.publicationRelays ? 'mt-3 space-y-3' : 'hidden'}`}>
+                        <p className="text-[11px] text-slate-400 flex justify-between">
+                          <span>{publicationRelays.length} configured</span>
+                        </p>
+                        {publicationRelays.length ? (
+                          <div className="max-h-48 overflow-y-auto rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 space-y-1">
+                            {publicationRelays.map(relay => (
+                              <p key={relay} className="truncate">{relay}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-400 text-center">
+                            No publication relays configured yet.
+                          </div>
+                        )}
+                        <button 
+                          onClick={() => { setShowNodeSettingsModal(false); openRelaySettings(); }}
+                          className="w-full bg-blue-600 text-white font-bold py-3 rounded-2xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all"
+                        >
+                          Manage relays
+                        </button>
+                      </div>
                     </div>
                     <p className="text-[11px] text-slate-400">
                       Sidecar settings are stored in `app_config` and apply globally across every service. Service-specific profiles remain unchanged.
                     </p>
-                    <div className="space-y-3 border-t border-slate-100 pt-4">
-                      <p className="text-[12px] font-black uppercase tracking-[0.3em] text-slate-600">Identity controls</p>
-                      <p className="text-[11px] text-slate-500">
-                        Rotate the management identity, Tor onion address, or TLS certificate using the same controls exposed on the service editor.
-                      </p>
-                      <div className="grid gap-3 text-[10px]">
+                    <div className="rounded-2xl border border-slate-100 p-4">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="text-[12px] font-black uppercase tracking-[0.3em] text-slate-600">Identity controls</p>
+                          <p className="text-[11px] text-slate-500">
+                            Rotate the management identity, Tor onion address, or TLS certificate using the same controls exposed on the service editor.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => toggleNodeSection('identity')}
+                          className="p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+                          aria-expanded={nodeSectionOpen.identity}
+                        >
+                          <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.identity ? 'rotate-90' : ''}`} />
+                        </button>
+                      </div>
+                      <div className={`${nodeSectionOpen.identity ? 'mt-4 space-y-3' : 'hidden'}`}>
                         <button
                           onClick={handleNodeGenerateIdentity}
                           disabled={isRotatingIdentity}
@@ -1489,7 +1534,7 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                    <div className="space-y-4 border-t border-slate-100 pt-4">
+                    <div className="rounded-2xl border border-slate-100 p-4">
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Database Management</p>
@@ -1497,123 +1542,134 @@ export default function App() {
                             Export, import, or reset the embedded SQLite database used by the Sidecar.
                           </p>
                         </div>
-                        <span className="text-[10px] uppercase tracking-[0.4em] text-slate-400">
-                          {dbInfo?.passwordProtected ? 'Passworded' : 'Unprotected'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] text-slate-500">
-                        <div>
-                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">File</p>
-                          <p className="font-mono truncate">{dbInfo?.path || 'Loading...'}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Size</p>
-                          <p>{formatBytes(dbInfo?.size)}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Modified</p>
-                          <p>{dbInfo ? new Date(dbInfo.modifiedAt).toLocaleString() : 'Loading...'}</p>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Database password</p>
-                        <div className="grid md:grid-cols-2 gap-3">
-                          <input
-                            type="password"
-                            placeholder="Current password"
-                            value={dbCurrentPassword}
-                            onChange={(e) => setDbCurrentPassword(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                          />
-                          <input
-                            type="password"
-                            placeholder="New password (leave blank to clear)"
-                            value={dbNewPassword}
-                            onChange={(e) => setDbNewPassword(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                          />
-                        </div>
-                        <button
-                          onClick={handleSetDbPassword}
-                          disabled={dbPasswordLoading}
-                          className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl shadow-lg shadow-slate-900/30 hover:bg-slate-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {dbPasswordLoading ? 'Updating…' : 'Update password'}
-                        </button>
-                      </div>
-                      <div className="space-y-3">
-                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Export / Import</p>
-                        <div className="space-y-2">
-                          <div className="space-y-3">
-                            <div className="flex flex-col gap-3 md:flex-row items-center">
-                              <div className="flex-1 space-y-1">
-                                <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Export password</p>
-                                <input
-                                  type="password"
-                                  placeholder="Password for export (if set)"
-                                  value={dbExportPassword}
-                                  onChange={(e) => setDbExportPassword(e.target.value)}
-                                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                                />
-                              </div>
-                              <button
-                                onClick={handleExportDb}
-                                disabled={dbExporting}
-                                className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                {dbExporting ? 'Exporting…' : 'Export database'}
-                              </button>
-                            </div>
-                            <div className="flex flex-col gap-3 md:flex-row items-center">
-                              <div className="flex-1 space-y-1">
-                                <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Import password</p>
-                                <input
-                                  type="password"
-                                  placeholder="Password for import (if set)"
-                                  value={dbImportPassword}
-                                  onChange={(e) => setDbImportPassword(e.target.value)}
-                                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                                />
-                              </div>
-                              <label className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-[11px] text-slate-500 font-mono cursor-pointer text-left">
-                                {dbImportName || 'Select .db recovery file'}
-                                <input type="file" accept=".db" className="hidden" onChange={handleDbImportFileChange} />
-                              </label>
-                              <button
-                                onClick={handleImportDb}
-                                disabled={dbImporting}
-                                className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                              >
-                                {dbImporting ? 'Importing…' : 'Import database'}
-                              </button>
-                            </div>
-                            <p className="text-[10px] text-slate-400 italic">
-                              Importing replaces the current database and keeps a backup copy.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Reset database</p>
-                        <div className="flex flex-col gap-3">
-                          <input
-                            type="password"
-                            placeholder="Password for reset (if set)"
-                            value={dbWipePassword}
-                            onChange={(e) => setDbWipePassword(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
-                          />
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] uppercase tracking-[0.4em] text-slate-400">
+                            {dbInfo?.passwordProtected ? 'Passworded' : 'Unprotected'}
+                          </span>
                           <button
-                            onClick={handleWipeDb}
-                            disabled={dbWiping}
-                            className="w-full bg-rose-500 text-white font-bold py-3 rounded-2xl shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            onClick={() => toggleNodeSection('database')}
+                            className="p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-500 hover:text-slate-700 transition-colors"
+                            aria-expanded={nodeSectionOpen.database}
                           >
-                            {dbWiping ? 'Resetting…' : 'Wipe database'}
+                            <ChevronRight className={`w-3 h-3 transition-transform ${nodeSectionOpen.database ? 'rotate-90' : ''}`} />
                           </button>
                         </div>
-                        <p className="text-[10px] text-slate-400 italic">
-                          Clears all services, logs, and admins. You will need to reconfigure the Sidecar afterward.
-                        </p>
+                      </div>
+                      <div className={`${nodeSectionOpen.database ? 'mt-4 space-y-4' : 'hidden'}`}>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] text-slate-500">
+                          <div>
+                            <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">File</p>
+                            <p className="font-mono truncate">{dbInfo?.path || 'Loading...'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Size</p>
+                            <p>{formatBytes(dbInfo?.size)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400">Modified</p>
+                            <p>{dbInfo ? new Date(dbInfo.modifiedAt).toLocaleString() : 'Loading...'}</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Database password</p>
+                          <div className="grid md:grid-cols-2 gap-3">
+                            <input
+                              type="password"
+                              placeholder="Current password"
+                              value={dbCurrentPassword}
+                              onChange={(e) => setDbCurrentPassword(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <input
+                              type="password"
+                              placeholder="New password (leave blank to clear)"
+                              value={dbNewPassword}
+                              onChange={(e) => setDbNewPassword(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                          </div>
+                          <button
+                            onClick={handleSetDbPassword}
+                            disabled={dbPasswordLoading}
+                            className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl shadow-lg shadow-slate-900/30 hover:bg-slate-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {dbPasswordLoading ? 'Updating…' : 'Update password'}
+                          </button>
+                        </div>
+                        <div className="space-y-3">
+                          <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Export / Import</p>
+                          <div className="space-y-2">
+                            <div className="space-y-3">
+                              <div className="flex flex-col gap-3 md:flex-row items-center">
+                                <div className="flex-1 space-y-1">
+                                  <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Export password</p>
+                                  <input
+                                    type="password"
+                                    placeholder="Password for export (if set)"
+                                    value={dbExportPassword}
+                                    onChange={(e) => setDbExportPassword(e.target.value)}
+                                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                                  />
+                                </div>
+                                <button
+                                  onClick={handleExportDb}
+                                  disabled={dbExporting}
+                                  className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                  {dbExporting ? 'Exporting…' : 'Export database'}
+                                </button>
+                              </div>
+                              <div className="flex flex-col gap-3 md:flex-row items-center">
+                                <div className="flex-1 space-y-1">
+                                  <p className="text-[9px] uppercase tracking-[0.3em] text-slate-400">Import password</p>
+                                  <input
+                                    type="password"
+                                    placeholder="Password for import (if set)"
+                                    value={dbImportPassword}
+                                    onChange={(e) => setDbImportPassword(e.target.value)}
+                                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                                  />
+                                </div>
+                                <label className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-[11px] text-slate-500 font-mono cursor-pointer text-left">
+                                  {dbImportName || 'Select .db recovery file'}
+                                  <input type="file" accept=".db" className="hidden" onChange={handleDbImportFileChange} />
+                                </label>
+                                <button
+                                  onClick={handleImportDb}
+                                  disabled={dbImporting}
+                                  className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                  {dbImporting ? 'Importing…' : 'Import database'}
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-slate-400 italic">
+                                Importing replaces the current database and keeps a backup copy.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Reset database</p>
+                          <div className="flex flex-col gap-3">
+                            <input
+                              type="password"
+                              placeholder="Password for reset (if set)"
+                              value={dbWipePassword}
+                              onChange={(e) => setDbWipePassword(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              onClick={handleWipeDb}
+                              disabled={dbWiping}
+                              className="w-full bg-rose-500 text-white font-bold py-3 rounded-2xl shadow-lg shadow-rose-500/30 hover:bg-rose-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {dbWiping ? 'Resetting…' : 'Wipe database'}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400 italic">
+                            Clears all services, logs, and admins. You will need to reconfigure the Sidecar afterward.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
