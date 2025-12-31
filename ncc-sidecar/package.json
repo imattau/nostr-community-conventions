@@ -1,6 +1,6 @@
 {
   "name": "ncc-sidecar",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Multi-service NCC-06 discovery manager",
   "main": "index.js",
   "scripts": {
