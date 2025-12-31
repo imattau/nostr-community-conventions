@@ -5,10 +5,11 @@ import { getPublicKey } from 'nostr-tools/pure';
 import { buildInventory } from './inventory.js';
 import { buildRecords } from './builder.js';
 import { publishToRelays } from './publisher.js';
-import { updateService, addLog, getConfig, getServices } from './db.js';
+import { updateService, addLog, getConfig, getServices, getAdmins } from './db.js';
 import { checkTor } from './tor-check.js';
 import { provisionOnion } from './onion-service.js';
 import { NCC05Publisher } from 'ncc-05-js';
+import { sendInviteDM } from './dm.js';
 
 const locatorPublisher = new NCC05Publisher({ timeout: 5000 });
 
@@ -36,6 +37,79 @@ function normalizeRecipientPubkeys(values = []) {
     }
   }
   return Array.from(cleaned);
+}
+
+async function notifyAdminsOnionUpdate({
+  service,
+  torResponse,
+  previousAddress,
+  secretKey,
+  relays
+}) {
+  if (!torResponse?.address) return;
+  const admins = getAdmins().filter(admin => admin.pubkey).map(admin => admin.pubkey);
+  if (!admins.length) return;
+
+  const appConfig = getConfig('app_config') || {};
+  const fallbackRelays = Array.isArray(appConfig.publication_relays) ? appConfig.publication_relays : [];
+  const relayTargets = Array.isArray(relays) && relays.length ? relays : fallbackRelays;
+  if (!relayTargets.length) {
+    addLog('warn', `Onion update for ${service.name} detected but no relays configured for DM delivery`, {
+      serviceId: service.id,
+      torAddress: torResponse.address
+    });
+    return;
+  }
+
+  const uniqueLinks = new Set();
+  uniqueLinks.add(torResponse.address);
+  if (torResponse.servicePort) {
+    uniqueLinks.add(`http://${torResponse.address}:${torResponse.servicePort}`);
+    uniqueLinks.add(`ws://${torResponse.address}:${torResponse.servicePort}`);
+  }
+
+  const linkLines = Array.from(uniqueLinks)
+    .map(link => `• ${link}`)
+    .join('\n');
+
+  const message = `NCC-06 service "${service.name}" (${service.service_id}) refreshed its Tor endpoint.
+
+New onion address:
+${linkLines}
+
+The updated endpoint is visible in the admin dashboard after the next publish cycle.`;
+
+  const sendResults = await Promise.all(admins.map(async (pubkey) => {
+    try {
+      const success = await sendInviteDM({
+        secretKey,
+        recipientPubkey: pubkey,
+        message,
+        relays: Array.from(new Set(relayTargets))
+      });
+      return { pubkey, success };
+    } catch (err) {
+      return { pubkey, success: false, error: err?.message || 'unknown' };
+    }
+  }));
+
+  const successCount = sendResults.filter(r => r.success).length;
+  const failed = sendResults.filter(r => !r.success);
+  addLog('info', `Notified admins about onion update for ${service.name}`, {
+    serviceId: service.id,
+    previousAddress,
+    newAddress: torResponse.address,
+    relays: relayTargets,
+    recipients: admins,
+    notified: successCount,
+    failures: failed.length
+  });
+  if (failed.length) {
+    addLog('warn', `Failed to deliver some onion update DMs for ${service.name}`, {
+      serviceId: service.id,
+      failures: failed.map(f => ({ pubkey: f.pubkey, error: f.error }))
+    });
+  }
 }
 
 async function buildEncryptedLocatorEvent({ publicationRelays, recipients, payload, secretKey, identifier, service }) {
@@ -162,6 +236,7 @@ export async function runPublishCycle(service, options = {}) {
 
   // 1. Tor Provisioning (Stored in DB)
   let torAddress = null;
+  let torResponse = null;
   if (config.protocols?.tor) {
     try {
       // Migration check: if onion-service.json exists, use it once and delete it
@@ -192,6 +267,7 @@ export async function runPublishCycle(service, options = {}) {
 
       if (torRes) {
         torAddress = torRes.address;
+        torResponse = torRes;
         // If key changed (or was migrated), persist to DB
         if (torRes.privateKey !== config.onion_private_key) {
           updateService(id, { config: { ...config, onion_private_key: torRes.privateKey } });
@@ -210,6 +286,16 @@ export async function runPublishCycle(service, options = {}) {
   const inventory = await buildInventory({ ...config, type, torAddress, ncc02ExpectedKey: expectedKey }, { ipv4, ipv6 }, torStatus);
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
+  const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
+  if (onionChanged && torResponse) {
+    await notifyAdminsOnionUpdate({
+      service,
+      torResponse,
+      previousAddress: state.last_onion_address || null,
+      secretKey,
+      relays: publicationRelays
+    });
+  }
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
@@ -244,6 +330,7 @@ export async function runPublishCycle(service, options = {}) {
   // a publish cycle whenever the admin edits the displayed metadata even if endpoints unchanged.
   const profileSnapshot = config.profile ? {
     name: config.profile.name || '',
+    display_name: config.profile.display_name || '',
     about: config.profile.about || '',
     picture: config.profile.picture || '',
     nip05: config.profile.nip05 || ''
@@ -335,7 +422,7 @@ export async function runPublishCycle(service, options = {}) {
   if (config.profile) {
     const metadata = {
       name: (config.profile.name || name).toLowerCase().replace(/\s+/g, '_'),
-      display_name: config.profile.name || name,
+      display_name: config.profile.display_name || config.profile.name || name,
       about: config.profile.about,
       picture: config.profile.picture,
       nip05: config.profile.nip05
@@ -390,6 +477,7 @@ export async function runPublishCycle(service, options = {}) {
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now,
     tor_status: torStatus,
+    last_onion_address: torAddress || state.last_onion_address,
     last_publication_warning_reason: null
   };
 

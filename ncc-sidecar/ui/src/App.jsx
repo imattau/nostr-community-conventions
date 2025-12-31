@@ -31,7 +31,13 @@ const createDefaultServiceConfig = () => ({
   service_mode: 'public',
   protocols: { ipv4: true, ipv6: true, tor: true },
   primary_protocol: 'ipv4',
-  profile: { about: '', picture: '' },
+  profile: {
+    name: '',
+    display_name: '',
+    about: '',
+    picture: '',
+    nip05: ''
+  },
   ncc05_recipients: []
 });
 
@@ -45,6 +51,14 @@ const buildEmptyService = () => ({
 });
 
 const formatEndpointLabel = (value) => value ? value.replace(/^[a-z]+:\/\//i, '') : '';
+
+const buildProfileDraft = (profile = {}) => ({
+  name: profile.name || '',
+  display_name: profile.display_name || '',
+  about: profile.about || '',
+  picture: profile.picture || '',
+  nip05: profile.nip05 || ''
+});
 
 export default function App() {
   const [initialized, setInitialized] = useState(null);
@@ -97,6 +111,9 @@ export default function App() {
     identity: false,
     database: false
   });
+  const [showSidecarProfileModal, setShowSidecarProfileModal] = useState(false);
+  const [sidecarProfileDraft, setSidecarProfileDraft] = useState(buildProfileDraft());
+  const [isSavingSidecarProfile, setIsSavingSidecarProfile] = useState(false);
   const [protocolLoading, setProtocolLoading] = useState(null);
   const [serviceModeLoading, setServiceModeLoading] = useState(null);
   const [isRotatingIdentity, setIsRotatingIdentity] = useState(false);
@@ -622,6 +639,43 @@ export default function App() {
     setShowNodeSettingsModal(true);
   };
 
+  const openSidecarProfileSettings = () => {
+    const sidecar = services.find(s => s.type === 'sidecar');
+    if (!sidecar) return;
+    setSidecarProfileDraft(buildProfileDraft(sidecar.config?.profile));
+    setShowSidecarProfileModal(true);
+  };
+
+  const handleSidecarProfileChange = (field, value) => {
+    setSidecarProfileDraft(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSaveSidecarProfile = async () => {
+    if (isSavingSidecarProfile) return;
+    const sidecar = services.find(s => s.type === 'sidecar');
+    if (!sidecar) return;
+    setIsSavingSidecarProfile(true);
+    try {
+      const updatedConfig = {
+        ...sidecar.config,
+        profile: {
+          ...sidecar.config.profile,
+          ...sidecarProfileDraft
+        }
+      };
+      await axios.put(`${API_BASE}/service/${sidecar.id}`, { config: updatedConfig });
+      fetchServices();
+      setShowSidecarProfileModal(false);
+    } catch (err) {
+      alert('Failed to update sidecar profile: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsSavingSidecarProfile(false);
+    }
+  };
+
   const handleToggleAllowRemote = async () => {
     if (allowRemoteLoading) return;
     setAllowRemoteLoading(true);
@@ -942,12 +996,15 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50"
                   >
-                  <button onClick={openNodeSettings} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
-                    Node Settings
-                  </button>
-                  <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
-                    Administrators
-                  </button>
+                    <button onClick={openNodeSettings} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
+                      Node Settings
+                    </button>
+                    <button onClick={() => { setShowMenu(false); openSidecarProfileSettings(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors">
+                      Sidecar Profile
+                    </button>
+                    <button onClick={() => { setShowMenu(false); setShowAdminModal(true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 border-t border-slate-50 transition-colors">
+                      Administrators
+                    </button>
                   </Motion.div>
                 )}
               </div>
@@ -1788,6 +1845,108 @@ export default function App() {
                           </p>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </Motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {showSidecarProfileModal && (
+              <div className="fixed inset-0 z-[115] flex items-center justify-center p-6">
+                <Motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowSidecarProfileModal(false)}
+                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+                />
+                <Motion.div 
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="relative bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+                >
+                  <div className="bg-slate-900 p-6 text-white flex justify-between items-center">
+                    <h2 className="text-2xl font-black tracking-tight">Sidecar Profile</h2>
+                    <button onClick={() => setShowSidecarProfileModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                      <Plus className="w-6 h-6 rotate-45" />
+                    </button>
+                  </div>
+                  <div className="p-8 space-y-5">
+                    <p className="text-sm text-slate-500">
+                      These fields populate the Sidecar’s Nostr profile metadata (kind 0) and appear whenever clients inspect the management identity.
+                    </p>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Profile name</label>
+                        <input
+                          type="text"
+                          value={sidecarProfileDraft.name}
+                          onChange={(e) => handleSidecarProfileChange('name', e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors"
+                          placeholder="machine-readable name"
+                        />
+                        <p className="text-[10px] text-slate-400 italic">
+                          Lowercase, underscore-friendly identifier used in your Sidecar’s profile name tag.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Display name</label>
+                        <input
+                          type="text"
+                          value={sidecarProfileDraft.display_name}
+                          onChange={(e) => handleSidecarProfileChange('display_name', e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors"
+                          placeholder="Human-friendly label"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">About / bio</label>
+                        <textarea
+                          rows={3}
+                          value={sidecarProfileDraft.about}
+                          onChange={(e) => handleSidecarProfileChange('about', e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors resize-none"
+                          placeholder="Describe the Sidecar purpose or characteristics"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">Picture</label>
+                        <input
+                          type="url"
+                          value={sidecarProfileDraft.picture}
+                          onChange={(e) => handleSidecarProfileChange('picture', e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors"
+                          placeholder="https://example.com/avatar.png"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500">NIP-05</label>
+                        <input
+                          type="text"
+                          value={sidecarProfileDraft.nip05}
+                          onChange={(e) => handleSidecarProfileChange('nip05', e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors"
+                          placeholder="user@example.com"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-3">
+                      <button
+                        onClick={() => setShowSidecarProfileModal(false)}
+                        className="px-5 py-3 rounded-2xl border border-slate-200 text-[10px] font-black uppercase tracking-[0.3em] text-slate-600 hover:border-slate-300 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveSidecarProfile}
+                        disabled={isSavingSidecarProfile}
+                        className="px-5 py-3 rounded-2xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isSavingSidecarProfile ? 'Saving…' : 'Save profile'}
+                      </button>
                     </div>
                   </div>
                 </Motion.div>
