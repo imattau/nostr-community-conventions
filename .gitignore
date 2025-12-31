@@ -8,3 +8,4 @@ ncc-06-example/ncc06-relay/ncc06-client/config.json
 ncc-06-example/ncc06-relay/ncc06-sidecar/k.txt
 
 ncc-06-js/node_modules/
+ncc-sidecar/tsconfig.tsbuildinfo
