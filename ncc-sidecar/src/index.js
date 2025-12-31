@@ -11,7 +11,8 @@ async function main() {
   const command = args.find(a => !a.startsWith('--')) || 'daemon';
   
   // Initialize SQLite
-  initDb('./sidecar.db');
+  const dbPath = process.env.NCC_SIDECAR_DB_PATH || './sidecar.db';
+  initDb(dbPath);
 
   if (isFirstRun) {
     console.log('[Main] --first-run detected. Wiping database...');

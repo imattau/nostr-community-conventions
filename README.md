@@ -567,6 +567,23 @@ This reference implementation demonstrates that:
 
 NCC-06 achieves robustness through **composition and policy**, not through additional protocol features or service intelligence.
 
+## Installation
+
+1. Clone or download this repository somewhere persistent (e.g. `/opt/ncc-sidecar`).
+2. Run the bundled installer: `sudo ./scripts/install-sidecar.sh`. It will copy the latest code into the install directory, install Node.js dependencies (backend + UI), create the `ncc-sidecar` system user, prepare `/var/lib/ncc-sidecar/sidecar.db`, and drop a systemd unit that wires the service into the OS.
+3. Visit `http://127.0.0.1:3000` to finish the first-run provisioning flow.
+
+Optional flags:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--install-dir` | `/opt/ncc-sidecar` | Where the code is placed |
+| `--data-dir` | `/var/lib/ncc-sidecar` | Where `sidecar.db`, certs, and runtime state live |
+| `--service-user` | `ncc-sidecar` | Linux user that owns the daemon |
+| `--allow-remote` | `false` | Sets `NCC_SIDECAR_ALLOW_REMOTE=true` for remote admin access |
+
+Re-running the script pulls updates (via `rsync`), rebuilds the UI, and restarts the systemd service, so it doubles as your update mechanism.
+
 ## Companion `ncc-06-js` package
 
 To make the NCC-06 resolver, selector, and NCC-02/NCC-05 helpers reusable outside of this specific example harness, there's a dedicated `ncc-06-js` npm package in the repository. It provides:
