@@ -9,27 +9,16 @@ export async function sendInviteDM({
   relays,
   broadcast = broadcastEvent
 }) {
-  const conversationKey = nip44.getConversationKey(secretKey, recipientPubkey);
-  const ciphertext = nip44.encrypt(message, conversationKey);
-  const payload = {
-    version: 'nip17',
-    method: 'nip44',
-    ciphertext,
-    metadata: {
-      type: 'notice',
-      summary: message,
-      timestamp: Math.floor(Date.now() / 1000)
-    }
-  };
+  const ciphertext = nip44.encrypt(message, nip44.getConversationKey(secretKey, recipientPubkey));
 
   const eventTemplate = {
     kind: 4,
     created_at: Math.floor(Date.now() / 1000),
     tags: [
       ['p', recipientPubkey],
-      ['encryption', 'nip17']
+      ['encryption', 'nip44']
     ],
-    content: JSON.stringify(payload)
+    content: ciphertext
   };
 
   const signedEvent = finalizeEvent(eventTemplate, secretKey);
