@@ -77,3 +77,23 @@ npm run reset
 ## Security
 
 NCC-06 relies on **SPKI pinning** via the `k` tag. The sidecar manages these pins automatically, ensuring that clients can verify the authenticity of your service's TLS/WSS certificates even when they are self-signed.
+
+## Automated installation
+
+For production deployments you can use the provided installer at the repo root:
+
+```bash
+sudo ./scripts/install-sidecar.sh [flags]
+```
+
+Available flags:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--install-dir` | `/opt/ncc-sidecar` | Where the source is deployed |
+| `--data-dir` | `/var/lib/ncc-sidecar` | Location of `sidecar.db`, TLS certs, and runtime files |
+| `--service-user` | `ncc-sidecar` | Linux user that owns the daemon |
+| `--repo-source` | current checkout | Git URL or path to the sources to build; clones automatically when a remote is provided |
+| `--allow-remote` | `false` | Sets `NCC_SIDECAR_ALLOW_REMOTE=true` for remote admin access |
+
+The script copies or clones the code, installs Node and UI dependencies, rebuilds the frontend, links the data directory, and installs/enables `ncc-sidecar.service` with `NCC_SIDECAR_DB_PATH` already configured. Re-running the script updates the install and restarts the systemd service, so it doubles as your update path.
