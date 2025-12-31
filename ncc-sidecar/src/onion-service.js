@@ -49,10 +49,14 @@ export async function provisionOnion({ serviceId, torControl, privateKey, localP
   const cached = activeServices.get(serviceId);
   if (cached) {
     const needsReprovision = cached.targetPort !== targetPort || privateKey === null;
-    if (!needsReprovision && (privateKey === cached.privateKey || (!privateKey && cached.privateKey))) {
+    const canReuse = !needsReprovision && (
+      (privateKey && privateKey === cached.privateKey) ||
+      (!privateKey && !cached.privateKey)
+    );
+    if (canReuse) {
       return cached;
     }
-    // If key or target port changed we fall through and provision a new entry.
+    activeServices.delete(serviceId);
   }
 
   const client = await getClient(torControl);
