@@ -12,6 +12,7 @@ import { NCC05Publisher } from 'ncc-05-js';
 import { sendInviteDM } from './dm.js';
 
 const locatorPublisher = new NCC05Publisher({ timeout: 5000 });
+const onionNotificationCache = new Map();
 
 function normalizeRecipientPubkeys(values = []) {
   if (!Array.isArray(values)) return [];
@@ -135,6 +136,7 @@ The updated endpoint is visible in the admin dashboard after the next publish cy
       failures: failed.map(f => ({ pubkey: f.pubkey, error: f.error }))
     });
   }
+  onionNotificationCache.set(service.id, torResponse.address);
 }
 
 async function buildEncryptedLocatorEvent({ publicationRelays, recipients, payload, secretKey, identifier, service }) {
@@ -223,6 +225,11 @@ function describePublishState({ state, config, forcePublish, primaryEndpointHash
 export async function runPublishCycle(service, options = {}) {
   const { forcePublish = false } = options;
   const { id, name, service_nsec, service_id, config, state, type } = service;
+  const cachedNotified = onionNotificationCache.get(id) || null;
+  const storedNotified = state.last_onion_notified || null;
+  if (storedNotified && storedNotified !== cachedNotified) {
+    onionNotificationCache.set(id, storedNotified);
+  }
   const secretKey = fromNsec(service_nsec);
   const publicKey = getPublicKey(secretKey);
   
@@ -312,7 +319,8 @@ export async function runPublishCycle(service, options = {}) {
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
   const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
-  const shouldNotifyAdmins = onionChanged && torAddress !== state.last_onion_notified;
+  const lastNotified = storedNotified || cachedNotified || null;
+  const shouldNotifyAdmins = onionChanged && torAddress !== lastNotified;
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
