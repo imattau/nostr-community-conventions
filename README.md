@@ -4,7 +4,8 @@ Pubkey-Owned Service Discovery and Trust
 **Type:** Convention  
 **Layer:** Application  
 **Author:** lostcause  
-**License:** CC0-1.0
+**License:** CC0-1.0  
+**Package:** `ncc-02-js` 0.4.0
 
 ---
 
@@ -369,5 +370,4 @@ Publish a signed attestation event that references the relevant Service Record a
 - No global registry is required  
 - Trust stores are application-defined  
 - Fail-closed defaults are recommended  
-
 
