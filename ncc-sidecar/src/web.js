@@ -16,6 +16,8 @@ import { sendInviteDM } from './dm.js';
 import { runPublishCycle } from './app.js';
 import { provisionOnion } from './onion-service.js';
 import { isLocalHostname, isLocalAddress, shouldAllowRemoteAccess } from './security.js';
+import { buildBackupPayload, createBackupEvent, parseBackupEvent } from './list-backup.js';
+import { restoreBackupPayload, fetchRemoteBackup } from './list-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -475,6 +477,56 @@ Login here: ${publicUrl || 'http://' + request.headers.host}`;
     wipeDb();
     addLog('warn', 'Database wiped via admin UI');
     return { success: true };
+  });
+
+  server.get('/api/backup/list', async (request, reply) => {
+    const services = getServices();
+    const sidecarService = services.find(s => s.type === 'sidecar');
+    if (!sidecarService) {
+      return reply.code(400).send({ error: 'Sidecar service not configured' });
+    }
+    const payload = buildBackupPayload({
+      services,
+      admins: getAdmins(),
+      appConfig: getConfig('app_config') || {}
+    });
+    try {
+      const secretKey = fromNsec(sidecarService.service_nsec);
+      const event = createBackupEvent({ secretKey, payload });
+      return { event, payload };
+    } catch (err) {
+      console.error('[Web] Failed to build list backup event:', err.message);
+      return reply.code(500).send({ error: 'Unable to build backup event' });
+    }
+  });
+
+  server.post('/api/backup/list', async (request, reply) => {
+    const { event } = request.body || {};
+    if (!event) {
+      return reply.code(400).send({ error: 'Missing backup event' });
+    }
+    try {
+      const payload = parseBackupEvent(event);
+      const restored = restoreBackupPayload(payload, { log: false });
+      addLog('info', 'Restored configuration from Nostr backup', {
+        restoredServices: restored.restoredServices,
+        restoredAdmins: restored.restoredAdmins
+      });
+      return { success: true, ...restored };
+    } catch (err) {
+      return reply.code(400).send({ error: err.message });
+    }
+  });
+
+  server.get('/api/backup/remote', async (request, reply) => {
+    try {
+      const force = String(request.query.force) === 'true';
+      const result = await fetchRemoteBackup({ force });
+      return result;
+    } catch (err) {
+      console.error('[Web] Remote backup sync failed:', err.message);
+      return reply.code(500).send({ error: err.message });
+    }
   });
 
   server.post('/api/db/password', async (request, reply) => {

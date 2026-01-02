@@ -140,6 +140,11 @@ export default function App() {
   const [dbExportPassword, setDbExportPassword] = useState('');
   const [dbImportPassword, setDbImportPassword] = useState('');
   const [dbWipePassword, setDbWipePassword] = useState('');
+  const [listBackupEvent, setListBackupEvent] = useState('');
+  const [listBackupLoading, setListBackupLoading] = useState(false);
+  const [listBackupImportValue, setListBackupImportValue] = useState('');
+  const [listBackupImporting, setListBackupImporting] = useState(false);
+  const [listBackupMessage, setListBackupMessage] = useState('');
   const [nodeSectionOpen, setNodeSectionOpen] = useState({
     remote: false,
     publicationRelays: false,
@@ -493,6 +498,24 @@ export default function App() {
   const handleAuthComplete = () => {
     if (!initialized) {
       startProvisioning();
+      return;
+    }
+    maybeAutoRestoreBackup();
+  };
+
+  const maybeAutoRestoreBackup = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/backup/remote`);
+      if (res.data?.success) {
+        if (res.data.restoredServices?.length || res.data.restoredAdmins) {
+          setListBackupMessage('Remote list backup applied automatically.');
+          await fetchServices();
+        }
+      } else if (res.data?.skipped && res.data.reason) {
+        console.debug('Backup auto-sync skipped:', res.data.reason);
+      }
+    } catch (err) {
+      console.warn('[Backup] Auto-sync failed:', err.message || err);
     }
   };
 
@@ -890,6 +913,52 @@ export default function App() {
       alert(`Failed to import database: ${err.response?.data?.error || err.message}`);
     } finally {
       setDbImporting(false);
+    }
+  };
+
+  const handleGenerateListBackup = async () => {
+    if (listBackupLoading) return;
+    setListBackupLoading(true);
+    setListBackupMessage('');
+    try {
+      const res = await axios.get(`${API_BASE}/backup/list`);
+      if (!res.data?.event) {
+        throw new Error('Backup event missing');
+      }
+      setListBackupEvent(JSON.stringify(res.data.event, null, 2));
+      setListBackupMessage('Backup event ready. Copy it to your secure storage.');
+    } catch (err) {
+      setListBackupMessage(err.response?.data?.error || err.message);
+      setListBackupEvent('');
+    } finally {
+      setListBackupLoading(false);
+    }
+  };
+
+  const handleImportListBackup = async () => {
+    if (listBackupImporting) return;
+    if (!listBackupImportValue.trim()) {
+      setListBackupMessage('Paste a backup event before importing.');
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(listBackupImportValue.trim());
+    } catch (err) {
+      setListBackupMessage('Invalid JSON payload: ' + err.message);
+      return;
+    }
+    setListBackupImporting(true);
+    setListBackupMessage('');
+    try {
+      await axios.post(`${API_BASE}/backup/list`, { event: parsed });
+      setListBackupMessage('Backup restored. Services refreshed.');
+      setListBackupImportValue('');
+      await fetchServices();
+    } catch (err) {
+      setListBackupMessage(err.response?.data?.error || err.message);
+    } finally {
+      setListBackupImporting(false);
     }
   };
 
@@ -1980,6 +2049,47 @@ export default function App() {
                                 Importing replaces the current database and keeps a backup copy.
                               </p>
                             </div>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <p className="text-[10px] uppercase tracking-[0.4em] text-slate-500">Nostr list backup</p>
+                          <div className="space-y-2">
+                            <button
+                              onClick={handleGenerateListBackup}
+                              disabled={listBackupLoading}
+                              className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl shadow-lg shadow-slate-900/30 hover:bg-slate-800 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {listBackupLoading ? 'Generating…' : 'Generate list backup'}
+                            </button>
+                            <textarea
+                              readOnly
+                              rows={4}
+                              value={listBackupEvent}
+                              placeholder="The generated NCC Sidecar backup event will appear here."
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-[10px] font-mono resize-none outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <p className="text-[10px] text-slate-400 italic">
+                              This Generic List event captures sanitized services, recipients, and app settings. Share it securely.
+                            </p>
+                          </div>
+                          <div className="space-y-2">
+                            <textarea
+                              rows={4}
+                              value={listBackupImportValue}
+                              onChange={(e) => setListBackupImportValue(e.target.value)}
+                              placeholder="Paste a previously exported NCC Sidecar list event here."
+                              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3 text-[10px] font-mono resize-none outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                            <button
+                              onClick={handleImportListBackup}
+                              disabled={listBackupImporting}
+                              className="w-full bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold text-[10px] uppercase tracking-[0.3em] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {listBackupImporting ? 'Restoring…' : 'Restore from list backup'}
+                            </button>
+                            {listBackupMessage && (
+                              <p className="text-[10px] text-slate-400 italic">{listBackupMessage}</p>
+                            )}
                           </div>
                         </div>
                         <div className="space-y-2">

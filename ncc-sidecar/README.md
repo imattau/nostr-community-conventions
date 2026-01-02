@@ -48,6 +48,11 @@ NCC-06 Sidecar keeps your services (relays, APIs, media, etc.) discoverable on N
   - System logs now expand with rich metadata: event IDs (NCC-02/NCC-05/kind-0), locator payloads, TLS fingerprints, and per-relay publish results.
   - Log entries become actionable when you click them, showing details like `reason`, `publicationRelays`, and `privateRecipients`.
 
+- **Nostr list backups**
+  - Use the “Nostr list backup” controls on the database card to export a signed Generic List (kind `30001`) event that captures sanitized services, recipients, and app settings without leaking secrets.
+  - Paste the event back into the same UI or POST it to `/api/backup/list` to restore matching services (by `service_id`) and app settings; the endpoint validates the signature before applying the update so only the authorized sidecar identity can perform restores.
+  - The backup event is published automatically whenever the sidecar detects configuration changes, and the UI pulls the most recent list as soon as you log in, with built-in throttling so relay traffic stays reasonable.
+
 - **Remote signer & notifications**
   - The remote signer (Amber, Nex, Bunker) handshake shows a QR code, relay health, and logs; the relay list is configurable and can fall back to any working `wss://` endpoints.
   - Admin alerts (e.g., onion rotations) are delivered as direct NIP-44 messages, so clients that only speak “Legacy Standard” still decrypt the updates.

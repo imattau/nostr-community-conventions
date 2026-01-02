@@ -10,6 +10,7 @@ import { checkTor } from './tor-check.js';
 import { provisionOnion } from './onion-service.js';
 import { NCC05Publisher } from 'ncc-05-js';
 import { sendInviteDM } from './dm.js';
+import { maybePublishListBackup } from './list-sync.js';
 
 const locatorPublisher = new NCC05Publisher({ timeout: 5000 });
 const onionNotificationCache = new Map();
@@ -233,6 +234,13 @@ export async function runPublishCycle(service, options = {}) {
   const lastNotified = storedNotified || cachedNotified || null;
   const secretKey = fromNsec(service_nsec);
   const publicKey = getPublicKey(secretKey);
+  if (type === 'sidecar') {
+    try {
+      await maybePublishListBackup({ service, secretKey });
+    } catch (err) {
+      console.warn(`[App] List backup publish failed for ${name}: ${err.message}`);
+    }
+  }
   
   console.log(`[App] Starting publish cycle for service: ${name} (${id})`);
   
