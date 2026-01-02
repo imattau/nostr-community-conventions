@@ -21,7 +21,7 @@ export function parseLocatorPayload(content) {
   }
   try {
     return JSON.parse(content);
-  } catch (err) {
+  } catch {
     return null;
   }
 }

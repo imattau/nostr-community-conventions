@@ -3,6 +3,7 @@ import os from 'os';
 const IPV4_PRIORITY = 10;
 const IPV6_PRIORITY = 20;
 const ONION_PRIORITY = 30;
+const SECURE_PROTOCOLS = new Set(['wss', 'https', 'tls', 'tcps']);
 
 /**
  * Build a list of external endpoints that the operator wants to publish.
@@ -43,22 +44,24 @@ export async function buildExternalEndpoints({
   if (ipv6?.enabled) {
     const address = detectGlobalIPv6();
     if (address) {
-      const protocol = ipv6.protocol || 'ws';
-      const port = ipv6.port || (protocol === 'wss' ? wssPort : wsPort);
+      const protocol = (ipv6.protocol || 'ws').toLowerCase();
+      const secure = isSecureProtocol(protocol);
+      const port = ipv6.port || (secure ? wssPort : wsPort);
       const url = `${protocol}://[${address}]:${port}`;
       addEndpoint({
         url,
         priority: IPV6_PRIORITY,
         family: 'ipv6',
         protocol,
-        k: protocol === 'wss' ? ncc02ExpectedKey : undefined
+        k: secure ? ncc02ExpectedKey : undefined
       });
     }
   }
 
   if (ipv4?.enabled) {
-    const protocol = ipv4.protocol || 'wss';
-    const port = ipv4.port || (protocol === 'wss' ? wssPort : wsPort);
+    const protocol = (ipv4.protocol || 'wss').toLowerCase();
+    const secure = isSecureProtocol(protocol);
+    const port = ipv4.port || (secure ? wssPort : wsPort);
     const address = ipv4.address || (await getPublicIPv4({ sources: ipv4.publicSources ?? publicIpv4Sources }));
     if (address) {
       addEndpoint({
@@ -66,7 +69,7 @@ export async function buildExternalEndpoints({
         priority: IPV4_PRIORITY,
         family: 'ipv4',
         protocol,
-        k: protocol === 'wss' ? ncc02ExpectedKey : undefined
+        k: secure ? ncc02ExpectedKey : undefined
       });
     }
   }
@@ -126,11 +129,17 @@ export async function getPublicIPv4({ sources = ['https://api.ipify.org?format=j
       if (match) {
         return match[0];
       }
-    } catch (err) {
+    } catch {
       continue;
     }
   }
   return null;
+}
+
+function isSecureProtocol(protocol) {
+  if (!protocol) return false;
+  const normalized = protocol.toLowerCase();
+  return SECURE_PROTOCOLS.has(normalized) || (normalized.endsWith('s') && normalized !== 'ws');
 }
 
 export function normalizeRelayUrl(url) {
@@ -152,5 +161,3 @@ export function normalizeRelays(relays) {
     .map(normalizeRelayUrl);
   return [...new Set(normalized)];
 }
-
-

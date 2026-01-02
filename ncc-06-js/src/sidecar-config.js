@@ -1,17 +1,4 @@
-import { DEFAULT_TTL_SECONDS } from './ncc05.js';
-import { getExpectedK } from './k.js';
-
-const DEFAULT_TOR_CONTROL = {
-  enabled: false,
-  host: '127.0.0.1',
-  port: 9051,
-  password: '',
-  servicePort: 80,
-  serviceFile: './onion-service.json',
-  timeout: 5000
-};
-
-import { normalizeRelayUrl, normalizeRelays } from './external-endpoints.js';
+import { normalizeRelayUrl } from './external-endpoints.js';
 
 const RELAY_MODE_PUBLIC = 'public';
 const RELAY_MODE_PRIVATE = 'private';

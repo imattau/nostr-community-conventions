@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { AnimatePresence, motion as Motion } from 'framer-motion';
 import { 
@@ -47,6 +47,18 @@ const SERVICE_TYPES = [
   { id: 'custom', label: 'Custom API', icon: <Terminal className="w-4 h-4" />, defaultId: 'service' }
 ];
 
+const PROTOCOL_OPTIONS = [
+  { value: 'auto', label: 'Auto (ws/wss detection)', display: 'Auto' },
+  { value: 'ws', label: 'ws:// (Websocket)', display: 'ws' },
+  { value: 'wss', label: 'wss:// (Secure Websocket)', display: 'wss' },
+  { value: 'http', label: 'http:// (Web endpoint)', display: 'http' },
+  { value: 'https', label: 'https:// (Secure Web endpoint)', display: 'https' },
+  { value: 'ftp', label: 'ftp:// (FTP server)', display: 'ftp' },
+  { value: 'ipfs', label: 'ipfs:// (IPFS gateway)', display: 'ipfs' }
+];
+
+const getProtocolDisplay = (value) => PROTOCOL_OPTIONS.find(option => option.value === value)?.display || PROTOCOL_OPTIONS[0].display;
+
 const createDefaultServiceConfig = () => ({
   refresh_interval_minutes: 360,
   ncc02_expiry_days: 14,
@@ -54,6 +66,7 @@ const createDefaultServiceConfig = () => ({
   service_mode: 'public',
   protocols: { ipv4: true, ipv6: true, tor: true },
   primary_protocol: 'ipv4',
+  preferred_protocol: 'auto',
   profile: {
     name: '',
     display_name: '',
@@ -175,6 +188,7 @@ export default function App() {
       return changed ? next : prev;
     });
   }, [services, pendingOnionRefresh]);
+
   const onionEndpoint = newService.state?.last_inventory?.find(ep => ep.family === 'onion');
   const onionAddressValue = onionEndpoint?.url || '';
   const tlsEndpoint = newService.state?.last_inventory?.find(ep => ep.tlsFingerprint || ep.k);
@@ -489,12 +503,12 @@ export default function App() {
     
     const pool = new SimplePool();
     const relays = [
-      'wss://relay.nsec.app',
-      'wss://offchain.pub',
-      'wss://nos.lol',
-      'wss://relay.damus.io',
-      'wss://relay.primal.net',
-      'wss://relay.nostr.band'
+      'wss://nostr-pub.wellorder.net',
+      'wss://relay.fiatjaf.com',
+      'wss://nostr.bitcoiner.social',
+      'wss://nostr-01.brightid.org',
+      'wss://nostr-relay.wlvs.space',
+      'wss://nos.lol'
     ];
     
     setRelayStatus(Object.fromEntries(relays.map(r => [r, 'connecting'])));
@@ -615,6 +629,7 @@ export default function App() {
     setEditServiceId(service.id);
     const normalizedConfig = {
       ...service.config,
+      preferred_protocol: service.config?.preferred_protocol || 'auto',
       ncc05_recipients: Array.isArray(service.config?.ncc05_recipients) ? service.config.ncc05_recipients : []
     };
     setNewService({
@@ -630,20 +645,29 @@ export default function App() {
     setShowServiceNsec(false);
   };
 
-  const handleRotateOnion = () => {
-    if (!confirm('Rotate Onion Address? This will happen on next save.')) return;
-    if (editServiceId) {
+  const handleRotateOnion = async () => {
+    if (!confirm('Rotate Onion Address? This will queue a fresh onion and regenerate the key.')) return;
+    if (!editServiceId) return;
+    setIsRotatingOnion(true);
+    try {
       const currentService = services.find((s) => String(s.id) === String(editServiceId));
       const currentOnionUrl = currentService?.state?.last_inventory?.find((ep) => ep.family === 'onion')?.url || null;
-      setPendingOnionRefresh(prev => ({
-        ...prev,
-        [editServiceId]: { previousOnion: currentOnionUrl }
-      }));
+      if (currentOnionUrl) {
+        setPendingOnionRefresh(prev => ({
+          ...prev,
+          [editServiceId]: { previousOnion: currentOnionUrl }
+        }));
+      }
+      const res = await axios.post(`${API_BASE}/service/${editServiceId}/rotate-onion`);
+      const pendingAddress = res.data?.pending?.address || 'new onion';
+      alert(`New onion ${pendingAddress} generated. Save to publish.`);
+      fetchServices();
+    } catch (err) {
+      const errorMessage = err.response?.data?.error || err.message;
+      alert('Onion rotation failed: ' + errorMessage);
+    } finally {
+      setIsRotatingOnion(false);
     }
-    setNewService(d => ({
-      ...d,
-      config: { ...d.config, onion_private_key: undefined }
-    }));
   };
 
   const handleDeleteService = async (id) => {
@@ -1380,13 +1404,37 @@ export default function App() {
                                             !isAvailable ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed' :
                                             newService.config.protocols[p] ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
                                         }`}
-                                    >
-                                        <div className={`w-2 h-2 rounded-full ${!isAvailable ? 'bg-slate-300' : newService.config.protocols[p] ? 'bg-blue-500' : 'bg-slate-200'}`} />
-                                        <span className="text-xs font-bold uppercase">{p}</span>
-                                    </button>
-                                );
-                            })}
+                                        >
+                                            <div className={`w-2 h-2 rounded-full ${!isAvailable ? 'bg-slate-300' : newService.config.protocols[p] ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                                            <span className="text-xs font-bold uppercase">{p}</span>
+                                        </button>
+                                    );
+                                })}
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preferred Protocol</label>
+                        <span className="text-[9px] text-slate-400 italic">Overrides the advertised scheme in NCC records.</span>
+                      </div>
+                      <div className="relative">
+                        <select
+                          value={newService.config.preferred_protocol || PROTOCOL_OPTIONS[0].value}
+                          onChange={(e) => setNewService(d => ({ ...d, config: { ...d.config, preferred_protocol: e.target.value } }))}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-bold outline-none focus:border-blue-500/50 transition-colors appearance-none"
+                        >
+                          {PROTOCOL_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
+                          ▼
+                        </div>
+                      </div>
+                      <p className="text-[9px] text-slate-400 italic">
+                        Selecting a specific protocol helps the Sidecar emit endpoints with the correct URI scheme (e.g. http, https, ws, wss) when publishing NCC-05 locators.
+                      </p>
                     </div>
 
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
@@ -2529,15 +2577,18 @@ function ServiceCardContent({
         </div>
       </div>
 
-        <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={onEdit}>
-          <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{service.name}</h3>
-          {displayProfileName && (
-            <p className="text-xs text-slate-500 font-semibold tracking-tight leading-snug break-words max-w-full">
-              {displayProfileName}
-            </p>
-          )}
-          <p className="text-xs font-mono text-slate-400 break-words">{service.service_id}</p>
-        </div>
+      <div className="mb-8 relative z-10 cursor-pointer hover:opacity-70 transition-opacity" onClick={onEdit}>
+        <h3 className="text-xl font-black text-slate-900 leading-tight mb-1">{service.name}</h3>
+        {displayProfileName && (
+          <p className="text-xs text-slate-500 font-semibold tracking-tight leading-snug break-words max-w-full">
+            {displayProfileName}
+          </p>
+        )}
+        <p className="text-[9px] uppercase tracking-[0.4em] text-slate-400 mb-1">
+          Preferred Protocol: {getProtocolDisplay(service.config?.preferred_protocol)}
+        </p>
+        <p className="text-xs font-mono text-slate-400 break-words">{service.service_id}</p>
+      </div>
 
       <div className="space-y-4 relative z-10">
         <div className="space-y-2">

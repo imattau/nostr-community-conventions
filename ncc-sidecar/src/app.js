@@ -47,7 +47,7 @@ function formatEventLink(relayUrl, eventId) {
     parsed.pathname = eventId;
     parsed.search = '';
     return parsed.toString();
-  } catch (_err) {
+  } catch {
     return `${relayUrl.replace(/\/+$/, '')}/${eventId}`;
   }
 }
@@ -316,14 +316,21 @@ export async function runPublishCycle(service, options = {}) {
   const ipv6 = detectGlobalIPv6();
   const torStatus = await checkTor();
   
+  const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
+  let onionVerification = state.last_onion_verification || null;
+  if (onionChanged) {
+    onionVerification = null;
+  }
+
   const inventory = await buildInventory({ ...config, type, torAddress, ncc02ExpectedKey: expectedKey }, { ipv4, ipv6 }, torStatus);
   const normalizedRecipients = normalizeRecipientPubkeys(config.ncc05_recipients);
   const { publicationRelays, canPublish } = resolvePublicationContext(config, normalizedRecipients);
-  const onionChanged = torAddress && torAddress !== (state.last_onion_address || null);
   if (config.service_mode === 'private' && normalizedRecipients.length === 0) {
     console.log(`[App] Service ${name} is Private but has no NCC-05 recipients configured; NCC-05 locator publication disabled.`);
   }
+
   const effectivePublicationRelays = publicationRelays;
+
   const enabledProtocols = config.protocols || {};
   const familyMap = {
     ipv4: 'ipv4',
@@ -370,7 +377,7 @@ export async function runPublishCycle(service, options = {}) {
     .digest('hex');
 
   // 2. Build Records
-  const { ncc02Event, ncc05EventTemplate: baselineNcc05Event, locatorPayload } = buildRecords({
+  const { ncc02Event, ncc05EventTemplate: baselineNcc05Event, locatorPayload } = await buildRecords({
     ...config,
     ncc02ExpiryDays: config.ncc02_expiry_days || 14,
     ncc05TtlHours: config.ncc05_ttl_hours || 1,
@@ -378,7 +385,9 @@ export async function runPublishCycle(service, options = {}) {
     publicKey,
     serviceId: service_id,
     locatorId: service_id + '-locator'
-  }, filteredInventory);
+  }, filteredInventory, {
+    privateRecipients: normalizedRecipients
+  });
 
   let ncc05EventTemplate = baselineNcc05Event;
   if (config.service_mode === 'private') {
@@ -485,7 +494,7 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   const publishResults = await publishToRelays(effectivePublicationRelays, eventsToPublish, secretKey);
-  const shouldNotifyAdmins = onionChanged && torResponse && willPublishNcc05 && torAddress !== lastNotified;
+  const shouldNotifyAdmins = onionChanged && torResponse && willPublishNcc05 && torAddress !== lastNotified && onionVerification?.success !== false;
   let notificationSent = false;
   if (shouldNotifyAdmins) {
     await notifyAdminsOnionUpdate({
@@ -503,7 +512,6 @@ export async function runPublishCycle(service, options = {}) {
   }
 
 
-  // 5. Update State in DB
   const newState = {
     ...state,
     is_probing: false,
@@ -513,12 +521,14 @@ export async function runPublishCycle(service, options = {}) {
     last_published_ncc05_id: willPublishNcc05 ? ncc05EventTemplate?.id : state.last_published_ncc05_id,
     last_published_kind0_id: kind0Event && shouldPublishKind0 ? kind0Event.id : state.last_published_kind0_id,
     last_profile_hash: profileHash || state.last_profile_hash,
+    
     last_inventory: filteredInventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: now,
     tor_status: torStatus,
     last_onion_address: torAddress || state.last_onion_address,
     last_onion_notified: notificationSent ? torAddress : state.last_onion_notified,
+    last_onion_verification: onionVerification,
     last_publication_warning_reason: null
   };
 

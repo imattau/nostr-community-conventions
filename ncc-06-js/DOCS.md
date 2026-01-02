@@ -7,10 +7,10 @@
 These functions help build, parse, and verify NCC-02 service records (kind `30059`).
 
 ### `buildNcc02ServiceRecord(options)`
-- **Purpose**: create a signed service record containing `d`, `u`, `k`, and `exp`.
+- **Purpose**: asynchronously create a signed service record containing `d`, `u`, `k`, `exp`, and optional privacy metadata.
 - **Example**:
   ```js
-  const event = buildNcc02ServiceRecord({
+  const event = await buildNcc02ServiceRecord({
     secretKey,
     serviceId: 'relay',
     endpoint: 'wss://127.0.0.1:7447',

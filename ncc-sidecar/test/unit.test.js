@@ -31,7 +31,20 @@ test('inventory sorting logic', async () => {
   assert.ok(inventory.find(e => e.family === 'onion'));
 });
 
-test('builder produces deterministic events', () => {
+test('inventory respects preferred protocol override', async () => {
+  const config = {
+    protocols: { ipv4: true },
+    preferred_protocol: 'https',
+    port: 8443
+  };
+  const inventory = await buildInventory(config, { ipv4: '203.0.113.5' }, {});
+  const ipv4Endpoint = inventory.find(ep => ep.family === 'ipv4');
+  assert.ok(ipv4Endpoint, 'Expected an IPv4 endpoint');
+  assert.strictEqual(ipv4Endpoint.protocol, 'https');
+  assert.strictEqual(ipv4Endpoint.url, 'https://203.0.113.5:8443');
+});
+
+test('builder produces deterministic events', async () => {
   const { secretKey, publicKey } = generateKeypair();
   const config = {
     secretKey,
@@ -45,7 +58,7 @@ test('builder produces deterministic events', () => {
     { url: 'wss://test', family: 'ipv4', priority: 1, k: 'key' }
   ];
 
-  const { ncc02Event, ncc05EventTemplate } = buildRecords(config, inventory);
+  const { ncc02Event, ncc05EventTemplate } = await buildRecords(config, inventory);
 
   assert.strictEqual(ncc02Event.kind, 30059);
   assert.strictEqual(ncc02Event.pubkey, publicKey);

@@ -12,7 +12,7 @@ export function parseNostrMessage(messageString) {
       return null;
     }
     return payload;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

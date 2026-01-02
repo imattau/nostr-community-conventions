@@ -1,39 +1,37 @@
-import { finalizeEvent, getPublicKey, validateEvent, verifyEvent } from 'nostr-tools/pure';
+import { NCC02Builder, verifyNCC02Event } from 'ncc-02-js';
 
-const DEFAULT_KIND = 30059;
+const DEFAULT_EXPIRY_SECONDS = 14 * 24 * 60 * 60;
 
-/**
- * Build an NCC-02 service record event.
- */
-export function buildNcc02ServiceRecord({
+function ensureSecretKey(key) {
+  if (!key) {
+    throw new Error('secretKey is required');
+  }
+  return key;
+}
+
+export async function buildNcc02ServiceRecord({
   secretKey,
   serviceId,
   endpoint,
   fingerprint,
-  expirySeconds = 14 * 24 * 60 * 60,
-  createdAt,
-  kind = DEFAULT_KIND
+  expirySeconds = DEFAULT_EXPIRY_SECONDS,
+  isPrivate = false,
+  privateRecipients
 }) {
-  if (!secretKey) {
-    throw new Error('secretKey is required');
+  ensureSecretKey(secretKey);
+  if (!serviceId) {
+    throw new Error('serviceId is required');
   }
-  const timestamp = createdAt ?? Math.floor(Date.now() / 1000);
-  const expiresAt = timestamp + Number(expirySeconds);
-  const tags = [
-    ['d', serviceId],
-    ['exp', expiresAt.toString()]
-  ];
-  if (endpoint) tags.push(['u', endpoint]);
-  if (fingerprint) tags.push(['k', fingerprint]);
-
-  const event = {
-    kind,
-    pubkey: getPublicKey(secretKey),
-    created_at: timestamp,
-    tags,
-    content: ''
-  };
-  return finalizeEvent(event, secretKey);
+  const builder = new NCC02Builder(secretKey);
+  const expiryDays = Number(expirySeconds) / (24 * 60 * 60);
+  return builder.createServiceRecord({
+    serviceId,
+    endpoint,
+    fingerprint,
+    expiryDays,
+    isPrivate,
+    privateRecipients
+  });
 }
 
 export function parseNcc02Tags(event) {
@@ -44,10 +42,10 @@ export function parseNcc02Tags(event) {
 }
 
 export function validateNcc02(event, { expectedAuthor, expectedD, now, allowExpired = false } = {}) {
-  if (!event || event.kind !== DEFAULT_KIND) {
+  if (!event || event.kind !== 30059) {
     return false;
   }
-  if (!validateEvent(event) || !verifyEvent(event)) {
+  if (!verifyNCC02Event(event)) {
     return false;
   }
   const tags = parseNcc02Tags(event);

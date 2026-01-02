@@ -14,6 +14,7 @@ import { checkTor } from './tor-check.js';
 import { generateKeypair, toNpub, fromNpub, fromNsec, getPublicKey, detectGlobalIPv6, getPublicIPv4, ensureSelfSignedCert } from 'ncc-06-js';
 import { sendInviteDM } from './dm.js';
 import { runPublishCycle } from './app.js';
+import { provisionOnion } from './onion-service.js';
 import { isLocalHostname, isLocalAddress, shouldAllowRemoteAccess } from './security.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -128,6 +129,7 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
       generate_self_signed: true,
       protocols: { ipv4: true, ipv6: true, tor: true },
       primary_protocol: 'ipv4',
+      preferred_protocol: 'auto',
       allow_remote: false,
       ...userConfig
     };
@@ -162,8 +164,54 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
   });
 
   server.put('/api/service/:id', async (request) => {
-    updateService(request.params.id, request.body);
+    const services = getServices();
+    const service = services.find(s => String(s.id) === String(request.params.id));
+    const updates = { ...request.body };
+    if (service?.state?.pending_onion) {
+      const pending = service.state.pending_onion;
+      updates.config = {
+        ...updates.config,
+        onion_private_key: pending.privateKey
+      };
+      updates.state = {
+        ...service.state,
+        pending_onion: null
+      };
+    }
+    updateService(request.params.id, updates);
     return { success: true };
+  });
+
+  server.post('/api/service/:id/rotate-onion', async (request, reply) => {
+    const services = getServices();
+    const service = services.find(s => String(s.id) === String(request.params.id));
+    if (!service) {
+      return reply.code(404).send({ error: 'Service not found' });
+    }
+    const localPort = service.config?.local_port || service.config?.port || 3000;
+    try {
+      const torRes = await provisionOnion({
+        serviceId: service.id,
+        torControl: service.config?.tor_control,
+        privateKey: null,
+        localPort
+      });
+      const pending = {
+        address: torRes.address,
+        privateKey: torRes.privateKey,
+        verification: { success: true }
+      };
+      updateService(service.id, {
+        state: {
+          ...service.state,
+          pending_onion: pending
+        }
+      });
+      return { success: true, pending };
+    } catch (err) {
+      console.error(`[Web] Onion rotation failed for ${service.name}: ${err.message}`);
+      return reply.code(500).send({ error: err.message });
+    }
   });
 
   server.delete('/api/service/:id', async (request) => {

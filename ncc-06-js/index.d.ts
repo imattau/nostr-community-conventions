@@ -17,9 +17,11 @@ declare module 'ncc-06-js' {
     expirySeconds?: number;
     kind?: number;
     createdAt?: number;
+    isPrivate?: boolean;
+    privateRecipients?: string[];
   }
 
-  export function buildNcc02ServiceRecord(options: BuildNcc02Options): NostrEvent;
+  export function buildNcc02ServiceRecord(options: BuildNcc02Options): Promise<NostrEvent>;
   export function parseNcc02Tags(event: NostrEvent): Record<string, string | undefined>;
   export interface ValidateNcc02Options {
     expectedAuthor?: string;

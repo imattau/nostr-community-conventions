@@ -1,4 +1,3 @@
-import WebSocket from 'ws';
 import { SimplePool } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05-js';
 import { validateNcc02, parseNcc02Tags } from './ncc02.js';
@@ -194,4 +193,3 @@ async function defaultResolveLocator({
     }
   }
 }
-
