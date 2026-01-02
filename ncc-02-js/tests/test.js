@@ -1,5 +1,6 @@
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure';
-import { NCC02Builder, NCC02Resolver, MockRelay } from '../dist/index.mjs';
+import { nip19 } from 'nostr-tools';
+import { NCC02Builder, NCC02Resolver, MockRelay, isExpired, encryptPrivateRecipients, isPrivateRecipientAuthorized, decryptPrivateRecipient } from '../dist/index.mjs';
 
 async function runTests() {
   console.log('--- NCC-02 JS Comprehensive Test Suite ---');
@@ -32,13 +33,13 @@ async function runTests() {
 
   // --- 1. Service Records & Replacement ---
   console.log('Test: Latest record selection...');
-  const oldEvent = builder.createServiceRecord({
+  const oldEvent = await builder.createServiceRecord({
     serviceId: 'api',
     endpoint: 'https://old.io',
     fingerprint: 'fp_old'
   });
   oldEvent.created_at -= 100; 
-  const newEvent = builder.createServiceRecord({
+  const newEvent = await builder.createServiceRecord({
     serviceId: 'api',
     endpoint: 'https://new.io',
     fingerprint: 'fp_new'
@@ -53,13 +54,13 @@ async function runTests() {
 
   // --- 2. Cross-Validation: Service ID ---
   console.log('Test: Mismatched service ID in attestation...');
-  const vaultEvent = builder.createServiceRecord({
+  const vaultEvent = await builder.createServiceRecord({
     serviceId: 'vault',
     endpoint: 'https://v.io',
     fingerprint: 'fp_v'
   });
   await relay.publish(vaultEvent);
-  const badSrvAtt = caBuilder.createAttestation({
+  const badSrvAtt = await caBuilder.createAttestation({
     subjectPubkey: ownerPk,
     serviceId: 'other-service',
     serviceEventId: vaultEvent.id
@@ -76,7 +77,7 @@ async function runTests() {
 
   // --- 3. Time Validation: Not Before (NBF) ---
   console.log('Test: Future NBF (Not Before) validation...');
-  const futureAtt = caBuilder.createAttestation({
+  const futureAtt = await caBuilder.createAttestation({
     subjectPubkey: ownerPk,
     serviceId: 'vault',
     serviceEventId: vaultEvent.id
@@ -101,7 +102,7 @@ async function runTests() {
 
   // --- 5. Signature Failures ---
   console.log('Test: Invalid signature detection...');
-  const corruptEvent = builder.createServiceRecord({
+  const corruptEvent = await builder.createServiceRecord({
     serviceId: 'secure',
     endpoint: 'https://s.io',
     fingerprint: 'fp_s'
@@ -127,7 +128,7 @@ async function runTests() {
 
   // --- 7. Robustness: Malformed Data ---
   console.log('Test: Malformed record (missing exp tag)...');
-  const brokenEvent = builder.createServiceRecord({
+  const brokenEvent = await builder.createServiceRecord({
     serviceId: 'broken',
     endpoint: 'https://b.io',
     fingerprint: 'fp'
@@ -143,7 +144,7 @@ async function runTests() {
   }
 
   console.log('Test: Malformed record (https with missing k)...');
-  const brokenEvent2 = builder.createServiceRecord({
+  const brokenEvent2 = await builder.createServiceRecord({
     serviceId: 'broken2',
     endpoint: 'https://b.io'
   });
@@ -158,7 +159,7 @@ async function runTests() {
   }
 
   console.log('Test: Malformed expiry (non-numeric)...');
-  const badExpEvent = builder.createServiceRecord({
+  const badExpEvent = await builder.createServiceRecord({
     serviceId: 'bad-exp',
     endpoint: 'https://e.io',
     fingerprint: 'fp'
@@ -189,13 +190,13 @@ async function runTests() {
   // --- 9. Security: Spoofed Revocation ---
   console.log('Test: Spoofed revocation (DoS protection)...');
   const secureId = 'secure-rev-bypass';
-  const secureEvent = builder.createServiceRecord({
+  const secureEvent = await builder.createServiceRecord({
     serviceId: secureId,
     endpoint: 'https://s.io',
     fingerprint: 'fp_s'
   });
   await relay.publish(secureEvent);
-  const secureAtt = caBuilder.createAttestation({
+  const secureAtt = await caBuilder.createAttestation({
     subjectPubkey: ownerPk,
     serviceId: secureId,
     serviceEventId: secureEvent.id
@@ -223,7 +224,7 @@ async function runTests() {
 
   // --- 10. Security: Valid Revocation ---
   console.log('Test: Valid revocation...');
-  const revEvent = caBuilder.createRevocation({ attestationId: secureAtt.id, reason: 'Key compromised' });
+  const revEvent = await caBuilder.createRevocation({ attestationId: secureAtt.id, reason: 'Key compromised' });
   await relay.publish(revEvent);
   
   try {
@@ -242,7 +243,7 @@ async function runTests() {
 
   // --- 11. Private / Invite-Only Services (No `u` tag)
   console.log('Test: Private service (no `u` tag)...');
-  const privateEvent = builder.createServiceRecord({
+  const privateEvent = await builder.createServiceRecord({
     serviceId: 'private-api',
     fingerprint: 'fp_private'
   });
@@ -254,6 +255,37 @@ async function runTests() {
   } else {
     throw new Error('Failed to resolve private service record correctly.');
   }
+
+  console.log('Test: Private recipient metadata & helpers...');
+  const inviteeSk = generateSecretKey();
+  const inviteePk = getPublicKey(inviteeSk);
+  const ciphertexts = await encryptPrivateRecipients(ownerSk, [inviteePk]);
+  const inviteEvent = await builder.createServiceRecord({
+    serviceId: 'invite-only',
+    isPrivate: true,
+    fingerprint: 'fp_invite',
+    privateRecipients: ciphertexts
+  });
+  await relay.publish(inviteEvent);
+
+  const resInvite = await resolver.resolve(ownerPk, 'invite-only');
+  if (!resInvite.isPrivate || resInvite.privateRecipients.length !== ciphertexts.length) {
+    throw new Error('Resolver failed to surface private recipient metadata');
+  }
+  const expectedNpub = nip19.npubEncode(inviteePk);
+  const swappedCiphertext = resInvite.privateRecipients[0];
+  const decrypted = await decryptPrivateRecipient(swappedCiphertext, ownerPk, inviteeSk);
+  if (decrypted !== expectedNpub) {
+    throw new Error('Authorized recipient should decrypt their own entry');
+  }
+  if (!(await isPrivateRecipientAuthorized(resInvite.privateRecipients, ownerPk, inviteeSk))) {
+    throw new Error('Authorized recipient should be accepted');
+  }
+  const outsiderSk = generateSecretKey();
+  if (await isPrivateRecipientAuthorized(resInvite.privateRecipients, ownerPk, outsiderSk)) {
+    throw new Error('Unauthorized recipient should not decrypt the list');
+  }
+  console.log('✅ Passed (Recipient helpers)');
 
   // --- 12. Resource Management: close() ---
   console.log('Test: Resolver.close() functionality...');
@@ -277,8 +309,8 @@ async function runTests() {
       throw new Error('Resolver.close() threw error: ' + e.message);
   }
 
-  // --- 13. Optimization: Lazy Loading ---
-  console.log('Test: Optimization (Lazy Loading)...');
+  // --- 13. Optimization: Trust metadata ---
+  console.log('Test: Trust metadata is fetched automatically...');
   let queryCount = 0;
   const spyPool = {
     subscribeMany: (relays, filters, callbacks) => {
@@ -287,25 +319,32 @@ async function runTests() {
     },
     close: () => {}
   };
-  const lazyResolver = new NCC02Resolver(['ws://lazy'], { pool: spyPool });
+  const lazyResolver = new NCC02Resolver(['ws://lazy'], { pool: spyPool, trustedCAPubkeys: [caPk] });
   
   // Publish a simple service record
-  const lazyEvent = builder.createServiceRecord({ serviceId: 'lazy', endpoint: 'https://l.io', fingerprint: 'fp_lazy' });
+  const lazyEvent = await builder.createServiceRecord({ serviceId: 'lazy', endpoint: 'https://l.io', fingerprint: 'fp_lazy' });
   await relay.publish(lazyEvent);
   
   queryCount = 0;
-  await lazyResolver.resolve(ownerPk, 'lazy'); // Default options
-  
-  if (queryCount !== 1) throw new Error(`Expected 1 query (Service Record), got ${queryCount}`);
-  console.log('✅ Passed (Skipped attestation fetch)');
-  
+  const resNoAtt = await lazyResolver.resolve(ownerPk, 'lazy');
+  if (queryCount !== 2) throw new Error(`Expected 2 queries (Service Record + Attestation), got ${queryCount}`);
+  if (resNoAtt.attestationCount !== 0 || resNoAtt.isRevoked) {
+    throw new Error('Resolver should return clean trust metadata when no attestations exist');
+  }
+  console.log('✅ Passed (Trust metadata fetched by default)');
+
+  const lazyAtt = await caBuilder.createAttestation({
+    subjectPubkey: ownerPk,
+    serviceId: 'lazy',
+    serviceEventId: lazyEvent.id
+  });
+  await relay.publish(lazyAtt);
+
   queryCount = 0;
-  try {
-      await lazyResolver.resolve(ownerPk, 'lazy', { requireAttestation: true });
-  } catch (e) { /* expected failure due to no attestations */ }
-  
+  const resWithAtt = await lazyResolver.resolve(ownerPk, 'lazy', { requireAttestation: true });
   if (queryCount !== 3) throw new Error(`Expected 3 queries (Service + Att + Rev), got ${queryCount}`);
-  console.log('✅ Passed (Fetched attestations when required)');
+  if (resWithAtt.attestationCount !== 1 || resWithAtt.isRevoked) throw new Error('Resolver should accept valid attestations');
+  console.log('✅ Passed (Attestations fetched when available)');
 
   console.log('\n--- All comprehensive tests passed! ---');
 }

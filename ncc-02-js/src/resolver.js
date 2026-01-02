@@ -1,5 +1,6 @@
 import { SimplePool, verifyEvent } from 'nostr-tools';
 import { KINDS } from './models.js';
+import { collectPrivateRecipients, parsePrivateFlag } from './privacy.js';
 
 /**
  * Custom error class for NCC-02 specific failures.
@@ -18,15 +19,19 @@ export class NCC02Error extends Error {
 }
 
 /**
- * @typedef {Object} ResolvedService
+ * @typedef {Object} ServiceStatus
  * @property {string|undefined} endpoint
  * @property {string|undefined} fingerprint
  * @property {number} expiry
- * @property {any[]} attestations
+ * @property {boolean} isRevoked
+ * @property {number} attestationCount
+ * @property {Array<{eventId:string, level:string, pubkey:string}>} attestations
  * @property {string} eventId
  * @property {string} pubkey
+ * @property {any} serviceEvent
+ * @property {boolean} isPrivate
+ * @property {string[]} privateRecipients
  */
-
 /**
  * Resolver for NCC-02 Service Records.
  * Implements the client-side resolution and trust verification algorithm.
@@ -79,6 +84,29 @@ export class NCC02Resolver {
   }
 
   /**
+   * Returns the first event sorted by freshness (newest created_at, tie broken by id).
+   * @param {import('nostr-tools').Event[]} events
+   * @returns {import('nostr-tools').Event|null}
+   */
+  _freshestEvent(events) {
+    if (!events || !events.length) return null;
+    return events.sort((a, b) => {
+      if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+      return a.id.localeCompare(b.id);
+    })[0];
+  }
+
+  /**
+   * Query helper that returns only the freshest event matching the filter.
+   * @param {import('nostr-tools').Filter} filter
+   * @returns {Promise<import('nostr-tools').Event | null>}
+   */
+  async _queryFreshest(filter) {
+    const events = await this._query(filter);
+    return this._freshestEvent(events);
+  }
+
+  /**
    * Resolves a service for a given pubkey and service identifier.
    * 
    * @param {string} pubkey - The pubkey of the service owner.
@@ -87,8 +115,8 @@ export class NCC02Resolver {
    * @param {boolean} [options.requireAttestation=false] - If true, fails if no trusted attestation is found.
    * @param {string} [options.minLevel=null] - Minimum trust level ('self', 'verified', 'hardened').
    * @param {string} [options.standard='nostr-service-trust-v0.1'] - Expected trust standard.
-   * @throws {NCC02Error} If verification or policy checks fail.
-   * @returns {Promise<ResolvedService>} The verified service details.
+  * @throws {NCC02Error} If verification or policy checks fail.
+  * @returns {Promise<ServiceStatus>} The service status including trust metadata.
    */
   async resolve(pubkey, serviceId, options = {}) {
     const { 
@@ -97,9 +125,9 @@ export class NCC02Resolver {
       standard = 'nostr-service-trust-v0.1'
     } = options;
 
-    let serviceEvents;
+    let serviceEvent;
     try {
-      serviceEvents = await this._query({
+      serviceEvent = await this._queryFreshest({
         kinds: [KINDS.SERVICE_RECORD],
         authors: [pubkey],
         '#d': [serviceId]
@@ -108,15 +136,9 @@ export class NCC02Resolver {
       throw new NCC02Error('RELAY_ERROR', `Failed to query relay for ${serviceId}`, err);
     }
 
-    if (!serviceEvents || !serviceEvents.length) {
+    if (!serviceEvent) {
       throw new NCC02Error('NOT_FOUND', `No service record found for ${serviceId}`);
     }
-
-    // Stable tie-breaking: Sort by created_at DESC, then ID ASC
-    const serviceEvent = serviceEvents.sort((/** @type {any} */ a, /** @type {any} */ b) => {
-      if (b.created_at !== a.created_at) return b.created_at - a.created_at;
-      return a.id.localeCompare(b.id);
-    })[0];
 
     if (!verifyEvent(serviceEvent)) {
       throw new NCC02Error('INVALID_SIGNATURE', 'Service record signature verification failed');
@@ -124,6 +146,10 @@ export class NCC02Resolver {
 
     const serviceTags = Object.fromEntries(serviceEvent.tags);
     const now = Math.floor(Date.now() / 1000);
+    const privateFlag = parsePrivateFlag(serviceEvent.tags);
+    if (privateFlag === null) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record is missing required tag (private)');
+    }
 
     // Security Fix: exp is REQUIRED by NCC-02 spec
     if (!serviceTags.exp) {
@@ -143,56 +169,141 @@ export class NCC02Resolver {
       throw new NCC02Error('EXPIRED', 'Service record has expired');
     }
 
-    const validAttestations = [];
+    let trustData;
+    try {
+      trustData = await this._buildTrustData(serviceEvent, { pubkey, serviceId, standard, minLevel });
+    } catch (err) {
+      throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
+    }
 
-    // Optimization: Only fetch attestations if policy requires it
-    if (requireAttestation || minLevel === 'verified' || minLevel === 'hardened') {
-      let attestations;
-      let revocations;
-      try {
-        [attestations, revocations] = await Promise.all([
-          this._query({ kinds: [KINDS.ATTESTATION], '#e': [serviceEvent.id] }),
-          this._query({ kinds: [KINDS.REVOCATION] })
-        ]);
-      } catch (err) {
-        throw new NCC02Error('RELAY_ERROR', 'Failed to query relay for attestations/revocations', err);
-      }
-
-      for (const att of attestations) {
-        if (this.trustedCAPubkeys.has(att.pubkey)) {
-          const attTags = Object.fromEntries(att.tags);
-          
-          // Cross-validate subject, service ID, and standard
-          if (attTags.subj !== pubkey) continue;
-          if (attTags.srv !== serviceId) continue;
-          if (standard && attTags.std !== standard) continue;
-          
-          // Trust Level Filtering
-          if (minLevel && !this._isLevelSufficient(attTags.lvl, minLevel)) continue;
-
-          if (this._isAttestationValid(att, attTags, revocations)) {
-            validAttestations.push({
-              pubkey: att.pubkey,
-              level: attTags.lvl,
-              eventId: att.id
-            });
-          }
-        }
-      }
-
-      if (requireAttestation && validAttestations.length === 0) {
-        throw new NCC02Error('POLICY_FAILURE', `No trusted attestations meet the required policy for ${serviceId}`);
-      }
+    if (requireAttestation && trustData.validAttestations.length === 0) {
+      throw new NCC02Error('POLICY_FAILURE', `No trusted attestations meet the required policy for ${serviceId}`);
     }
 
     return {
       endpoint: serviceTags.u,
       fingerprint: serviceTags.k,
       expiry: exp,
-      attestations: validAttestations,
+      attestations: trustData.validAttestations,
+      attestationCount: trustData.validAttestations.length,
+      isRevoked: trustData.isRevoked,
+      isPrivate: privateFlag,
+      privateRecipients: collectPrivateRecipients(serviceEvent.tags),
       eventId: serviceEvent.id,
-      pubkey: serviceEvent.pubkey
+      pubkey: serviceEvent.pubkey,
+      serviceEvent
     };
+  }
+
+  /**
+   * @param {any} serviceEvent
+   * @param {Object} options
+   * @param {string} options.pubkey
+   * @param {string} options.serviceId
+   * @param {string|null} options.standard
+   * @param {string|null} options.minLevel
+   */
+  async _buildTrustData(serviceEvent, options) {
+    const attestations = await this._query({
+      kinds: [KINDS.ATTESTATION],
+      '#e': [serviceEvent.id]
+    });
+
+    const attestationIds = attestations.map(att => att.id);
+    /** @type {any[]} */
+    let revocations = [];
+    if (attestationIds.length) {
+      revocations = await this._query({
+        kinds: [KINDS.REVOCATION],
+        '#e': attestationIds
+      });
+    }
+
+    /** @type {Record<string, any[]>} */
+    const revocationIndex = this._groupValidRevocations(revocations);
+    const validAttestations = [];
+    let isRevoked = false;
+
+    for (const att of attestations) {
+      if (!this.trustedCAPubkeys.has(att.pubkey)) continue;
+      const attTags = Object.fromEntries(att.tags);
+      if (attTags.subj !== options.pubkey) continue;
+      if (attTags.srv !== options.serviceId) continue;
+      if (options.standard && attTags.std !== options.standard) continue;
+
+      const { valid, revoked } = this._evaluateAttestation(att, attTags, revocationIndex[att.id]);
+      if (revoked) {
+        isRevoked = true;
+        continue;
+      }
+      if (!valid) continue;
+
+      if (options.minLevel && !this._isLevelSufficient(attTags.lvl, options.minLevel)) continue;
+
+      validAttestations.push({
+        pubkey: att.pubkey,
+        level: attTags.lvl,
+        eventId: att.id
+      });
+    }
+
+    return { validAttestations, isRevoked };
+  }
+
+  /**
+   * @param {any[]} revocations
+   * @returns {Record<string, any[]>}
+   */
+  /**
+   * @param {any[]} revocations
+   * @returns {Record<string, any[]>}
+   */
+  _groupValidRevocations(revocations) {
+    /** @type {Record<string, any[]>} */
+    const indexed = {};
+    for (const rev of revocations) {
+      if (!verifyEvent(rev)) continue;
+      const tags = Object.fromEntries(rev.tags);
+      const targetId = tags.e;
+      if (!targetId) continue;
+      if (!indexed[targetId]) indexed[targetId] = [];
+      indexed[targetId].push(rev);
+    }
+    return indexed;
+  }
+
+  /**
+   * @param {any} att
+   * @param {Record<string, string>} tags
+   * @param {any[]} revocations
+   */
+  /**
+   * @param {any} att
+   * @param {Record<string, string>} tags
+   * @param {any[]} [revocations]
+   */
+  _evaluateAttestation(att, tags, revocations = []) {
+    for (const rev of revocations) {
+      if (rev.pubkey === att.pubkey) {
+        return { valid: false, revoked: true };
+      }
+    }
+
+    if (!verifyEvent(att)) return { valid: false, revoked: false };
+
+    const now = Math.floor(Date.now() / 1000);
+
+    if (tags.nbf) {
+      const nbf = parseInt(tags.nbf, 10);
+      if (isNaN(nbf) || nbf > now) return { valid: false, revoked: false };
+    }
+
+    if (tags.exp) {
+      const exp = parseInt(tags.exp, 10);
+      if (isNaN(exp) || exp < now) return { valid: false, revoked: false };
+    }
+
+    return { valid: true, revoked: false };
   }
 
   /**
@@ -208,47 +319,10 @@ export class NCC02Resolver {
   }
 
   /**
-   * @param {any} att 
-   * @param {any} tags 
-   * @param {any[]} revocations 
-   */
-  _isAttestationValid(att, tags, revocations) {
-    // 1. Verify Attestation signature
-    if (!verifyEvent(att)) return false;
-
-    const now = Math.floor(Date.now() / 1000);
-    
-    // 2. NBF validation
-    if (tags.nbf) {
-      const nbf = parseInt(tags.nbf);
-      if (isNaN(nbf) || nbf > now) return false;
-    }
-
-    // 3. EXP validation
-    if (tags.exp) {
-      const exp = parseInt(tags.exp);
-      if (isNaN(exp) || exp < now) return false;
-    }
-
-    // 4. Revocation validation
-    // A revocation is valid only if it matches the attestation ID, is from the same CA, AND has a valid signature.
-    for (const rev of revocations) {
-      const revTags = Object.fromEntries(rev.tags);
-      if (revTags.e === att.id && rev.pubkey === att.pubkey) {
-        if (verifyEvent(rev)) {
-          return false; // Valid revocation found
-        }
-      }
-    }
-
-    return true; // No valid revocation found
-  }
-
-  /**
    * Verifies that the actual fingerprint found during transport-level connection
    * matches the one declared in the signed service record.
    * 
-   * @param {ResolvedService} resolved - The object returned by resolve().
+   * @param {ServiceStatus} resolved - The object returned by resolve().
    * @param {string} actualFingerprint - The fingerprint obtained from the service.
    * @returns {boolean}
    */

@@ -2,6 +2,13 @@ import { finalizeEvent, verifyEvent, getPublicKey } from 'nostr-tools/pure';
 import { hexToBytes } from 'nostr-tools/utils';
 
 /**
+ * @typedef {Object} NostrSigner
+ * @property {() => Promise<string>} getPublicKey
+ * @property {(event: any) => Promise<any>} signEvent
+ * @property {(event: any) => Promise<any>} [decryptEvent]
+ */
+
+/**
  * NCC-02 Nostr Event Kinds
  */
 export const KINDS = {
@@ -15,12 +22,78 @@ export const KINDS = {
  */
 export class NCC02Builder {
   /**
-   * @param {string | Uint8Array} privateKey - The private key to sign events with.
+   * @param {string | Uint8Array | NostrSigner} signer - Raw private key or asynchronous signer.
    */
-  constructor(privateKey) {
-    if (!privateKey) throw new Error('Private key is required');
-    this.sk = typeof privateKey === 'string' ? hexToBytes(privateKey) : privateKey;
-    this.pk = getPublicKey(this.sk);
+  constructor(signer) {
+    if (!signer) throw new Error('Signer or private key is required');
+    this.signer = this._normalizeSigner(signer);
+    this._pubkeyPromise = this.signer.getPublicKey();
+    this._pubkey = undefined;
+  }
+
+  async _getPublicKey() {
+    if (!this._pubkey) {
+      this._pubkey = await this._pubkeyPromise;
+    }
+    return this._pubkey;
+  }
+
+  /**
+   * @param {any} event
+   */
+  async _finalizeEvent(event) {
+    const pubkey = await this._getPublicKey();
+    const eventWithPubkey = { ...event, pubkey };
+    const signed = await this.signer.signEvent(eventWithPubkey);
+    if (!signed || typeof signed.id !== 'string' || typeof signed.sig !== 'string') {
+      throw new Error('Signer must return a signed event with id and sig');
+    }
+    return signed;
+  }
+
+  /**
+   * @param {any} signer
+   * @returns {NostrSigner}
+   */
+  _normalizeSigner(signer) {
+    if (typeof signer === 'string' || signer instanceof Uint8Array) {
+      const privateKey = typeof signer === 'string' ? hexToBytes(signer) : signer;
+      const pubkey = getPublicKey(privateKey);
+      return {
+        getPublicKey: async () => pubkey,
+        /** @param {any} event */
+        signEvent: async (event) => {
+          const clonedEvent = {
+            ...event,
+            tags: Array.isArray(event.tags) ? event.tags.map((/** @type {any[]} */ tag) => [...tag]) : []
+          };
+          return finalizeEvent(clonedEvent, privateKey);
+        }
+      };
+    }
+
+    if (typeof signer === 'object' && signer !== null) {
+      if (typeof signer.getPublicKey === 'function' && typeof signer.signEvent === 'function') {
+        return {
+          getPublicKey: async () => {
+            const pubkey = await signer.getPublicKey();
+            if (typeof pubkey !== 'string') throw new Error('Signer.getPublicKey must return a hex string');
+            return pubkey;
+          },
+          /** @param {any} event */
+          signEvent: async (event) => {
+            const signed = await signer.signEvent(event);
+            if (!signed || typeof signed.id !== 'string' || typeof signed.sig !== 'string') {
+              throw new Error('Signer.signEvent must return a signed event');
+            }
+            return signed;
+          },
+          decryptEvent: typeof signer.decryptEvent === 'function' ? signer.decryptEvent.bind(signer) : undefined
+        };
+      }
+    }
+
+    throw new Error('Unsupported signer provided to NCC02Builder');
   }
 
   /**
@@ -30,27 +103,37 @@ export class NCC02Builder {
    * @param {string} [options.endpoint] - The 'u' tag URI.
    * @param {string} [options.fingerprint] - The 'k' tag fingerprint.
    * @param {number} [options.expiryDays=14] - Expiry in days.
+   * @param {boolean} [options.isPrivate=false] - Whether the service is private (adds required `private` tag).
+   * @param {string[]} [options.privateRecipients] - Optional encrypted ciphertexts for authorized recipients.
    */
-  createServiceRecord(options) {
-    const { serviceId, endpoint, fingerprint, expiryDays = 14 } = options;
+  async createServiceRecord(options) {
+    const { serviceId, endpoint, fingerprint, expiryDays = 14, isPrivate = false, privateRecipients } = options;
     if (!serviceId) throw new Error('serviceId (d tag) is required');
+    if (typeof isPrivate !== 'boolean') throw new Error('isPrivate must be a boolean value');
 
     const expiry = Math.floor(Date.now() / 1000) + (expiryDays * 24 * 60 * 60);
     const tags = [
       ['d', serviceId],
       ['exp', expiry.toString()]
     ];
-    if(endpoint) tags.push(['u', endpoint]);
-    if(fingerprint) tags.push(['k', fingerprint]);
+    tags.push(['private', isPrivate ? 'true' : 'false']);
+    if (endpoint) tags.push(['u', endpoint]);
+    if (fingerprint) tags.push(['k', fingerprint]);
+    if (privateRecipients) {
+      if (!Array.isArray(privateRecipients)) throw new Error('privateRecipients must be an array');
+      privateRecipients.forEach((cipher) => {
+        if (typeof cipher !== 'string') throw new Error('privateRecipients entries must be strings');
+        tags.push(['privateRecipients', cipher]);
+      });
+    }
 
     const event = {
       kind: KINDS.SERVICE_RECORD,
       created_at: Math.floor(Date.now() / 1000),
-      tags: tags,
-      content: `NCC-02 Service Record for ${serviceId}`,
-      pubkey: this.pk
+      tags,
+      content: `NCC-02 Service Record for ${serviceId}`
     };
-    return finalizeEvent(event, this.sk);
+    return this._finalizeEvent(event);
   }
 
   /**
@@ -62,7 +145,7 @@ export class NCC02Builder {
    * @param {string} [options.level='verified'] - The 'lvl' tag level.
    * @param {number} [options.validDays=30] - Validity in days.
    */
-  createAttestation(options) {
+  async createAttestation(options) {
     const { subjectPubkey, serviceId, serviceEventId, level = 'verified', validDays = 30 } = options;
     if (!subjectPubkey) throw new Error('subjectPubkey is required');
     if (!serviceId) throw new Error('serviceId is required');
@@ -82,10 +165,9 @@ export class NCC02Builder {
         ['nbf', now.toString()],
         ['exp', expiry.toString()]
       ],
-      content: 'NCC-02 Attestation',
-      pubkey: this.pk
+      content: 'NCC-02 Attestation'
     };
-    return finalizeEvent(event, this.sk);
+    return this._finalizeEvent(event);
   }
 
   /**
@@ -94,7 +176,7 @@ export class NCC02Builder {
    * @param {string} options.attestationId - The 'e' tag referencing the attestation.
    * @param {string} [options.reason=''] - Optional reason.
    */
-  createRevocation(options) {
+  async createRevocation(options) {
     const { attestationId, reason = '' } = options;
     if (!attestationId) throw new Error('attestationId (e tag) is required');
 
@@ -104,11 +186,10 @@ export class NCC02Builder {
     const event = {
       kind: KINDS.REVOCATION,
       created_at: Math.floor(Date.now() / 1000),
-      tags: tags,
-      content: 'NCC-02 Revocation',
-      pubkey: this.pk
+      tags,
+      content: 'NCC-02 Revocation'
     };
-    return finalizeEvent(event, this.sk);
+    return this._finalizeEvent(event);
   }
 }
 
@@ -118,4 +199,18 @@ export class NCC02Builder {
  */
 export function verifyNCC02Event(event) {
   return verifyEvent(event);
+}
+
+/**
+ * Checks whether an NCC event has expired based on its 'exp' tag.
+ * @param {any} event
+ * @returns {boolean}
+ */
+export function isExpired(event) {
+  if (!event || !Array.isArray(event.tags)) return false;
+  const expTag = event.tags.find((/** @type {any[]} */ tag) => tag[0] === 'exp');
+  if (!expTag) return false;
+  const expiry = parseInt(expTag[1], 10);
+  if (Number.isNaN(expiry)) return false;
+  return expiry <= Math.floor(Date.now() / 1000);
 }

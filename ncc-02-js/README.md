@@ -10,6 +10,7 @@ This library provides tools for service owners to publish records and for client
 - **Verification**: Built-in signature and expiry validation.
 - **Trust Policy**: Support for third-party attestations (Kind 30060) and revocations (Kind 30061).
 - **Security**: Cross-validation of subject and service identifiers to prevent impersonation.
+- **Privacy Controls**: Required `private` tags and optional encrypted `privateRecipients` listings let you declare visibility and invite-only recipients.
 - **Fail-Closed**: Explicit error reporting for policy or verification failures.
 
 ## Installation
@@ -77,6 +78,9 @@ await builder.createRevocation({
 ```
 
 The builder helpers emit the expected NCC-02 event kinds: Kind 30059 for service records, 30060 for attestations, and 30061 for revocations. `createServiceRecord` always includes the `d` and `exp` tags while optionally populating `u` and `k`. Attestations include `subj`, `srv`, `e`, `std`, `lvl`, `nbf`, and `exp`. Revocations only need the `e` tag and an optional reason. You can supply either a raw private key (hex string or `Uint8Array`) or a signer implementing `getPublicKey`/`signEvent`.
+
+#### Private Service Metadata
+Service records now require a boolean `private` tag (set via `isPrivate` when calling `createServiceRecord`). When private services should only be used by a curated set of users, you can provide pre-encrypted `privateRecipients` values that contain authorized `npub` identifiers. The helper utilities derive NIP-44 conversation keys: `await encryptPrivateRecipients(ownerPrivateKey, recipients)` when publishing so each recipient gets a ciphertext they can decrypt, and `await isPrivateRecipientAuthorized(privateRecipients, ownerPubkey, recipientPrivateKey)` on the client-side to verify if the signed-in key is on the allowlist (or `await decryptPrivateRecipient(...)` if you need the raw `npub`). The helpers accept either raw private keys or NIP-07/NIP-46 style signer objects (they will call `nip44Encrypt/nip44Decrypt` or fall back to legacy `nip04` if present). The resolver surfaces `isPrivate` and `privateRecipients` on the returned `ServiceStatus`.
 
 ### 3. Trust Model & Security
 
