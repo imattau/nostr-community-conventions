@@ -74,6 +74,17 @@ try {
 resolver.close();
 ```
 
+### 3. Resolving the Freshest Record
+
+When a single identity publishes multiple `Kind 30058` records with different `d` tags, `resolveLatest` treats the pubkey as a DNS name and automatically returns the freshest valid locator across all of them. It scans every published record, decrypts the ones you are allowed to read, and prefers the entry with the most recent `updated_at`.
+
+```typescript
+const latest = await resolver.resolveLatest(targetPubkey);
+if (latest) {
+    console.log('Freshest endpoints:', latest.endpoints);
+}
+```
+
 ---
 
 ## Detailed Usage
@@ -108,6 +119,43 @@ const resolver = new NCC05Resolver({
     bootstrapRelays: ['wss://relay.custom.com'], 
     // Timeout for resolution in milliseconds (Default: 10000)
     timeout: 5000 
+});
+```
+
+#### Asynchronous Signers
+
+`NCC05Publisher` and `NCC05Resolver` accept `SignerInput`, which can be a raw secret (hex/Uint8Array) or a `NostrSigner` bridge (NIP-07, NIP-46, etc.). A signer must expose the identity's pubkey, sign events, and derive conversation keys for encrypted payloads.
+
+```typescript
+const extensionBridge = window.nostr;
+
+const signer: NostrSigner = {
+    getPublicKey: async () => await extensionBridge.getPublicKey(),
+    signEvent: async (event) => await extensionBridge.signEvent(event),
+    getConversationKey: async (peer) => await extensionBridge.getSharedSecret(peer)
+};
+
+await publisher.publish(relays, signer, payload);
+```
+
+This keeps private keys inside the signer implementation while still allowing NCC-05 to encrypt, decrypt, and sign on-demand.
+
+#### Transport-aware Resolution
+
+`NCC05Resolver` accepts an optional `urlTransformer` hook that adjusts each endpoint before it is returned to you. This is ideal for automatically wrapping `.onion` targets in a locally configured bridge URL so browser-based clients are transport-aware.
+
+```typescript
+const resolver = new NCC05Resolver({
+    bootstrapRelays: ['wss://relay.damus.io'],
+    urlTransformer: endpoint => {
+        if (endpoint.family === 'onion' || endpoint.url.includes('.onion')) {
+            return { 
+                ...endpoint, 
+                url: `https://local-tor-proxy/?target=${encodeURIComponent(endpoint.url)}` 
+            };
+        }
+        return endpoint;
+    }
 });
 ```
 
@@ -177,7 +225,9 @@ const payload = await resolver.resolve(
 );
 ```
 
-**Note on Keys:** All methods accept keys as either **Hex Strings** or **Uint8Array**.
+Note that `resolve` now only returns a payload when the identity's latest event still advertises the requested `d` tag; otherwise it returns `null`, enforcing the identity's newest action as the single source of truth. If you only care about the freshest record regardless of metadata, call `resolveLatest`.
+
+**Note on Keys:** All methods accept `SignerInput`, meaning a **hex string**, **Uint8Array**, or an asynchronous `NostrSigner` implementation.
 
 ## API Reference
 

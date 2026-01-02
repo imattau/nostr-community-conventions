@@ -1,5 +1,5 @@
-import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group, isPrivateLocator } from './index.js';
-import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
+import { NCC05Publisher, NCC05Resolver, NCC05Payload, NCC05Group, isPrivateLocator, NostrSigner } from './index.js';
+import { generateSecretKey, getPublicKey, nip19, nip44, finalizeEvent, UnsignedEvent } from 'nostr-tools';
 import { MockRelay } from './mock-relay.js';
 
 async function test() {
@@ -217,6 +217,85 @@ async function test() {
     } else {
          console.error('FAILED: Legacy publishWrapped signature failed.');
          process.exit(1);
+    }
+
+    console.log('Testing resolveLatest freshness across identifier variants...');
+    const olderLocator: NCC05Payload = {
+        v: 1,
+        ttl: 120,
+        updated_at: Math.floor(Date.now() / 1000) - 120,
+        endpoints: [{ type: 'tcp', url: 'old-service:1111', priority: 1, family: 'ipv4' }]
+    };
+    await publisher.publish(relays, sk, olderLocator, { identifier: 'legacy-relay' });
+
+    const newerLocator: NCC05Payload = {
+        v: 1,
+        ttl: 120,
+        updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', url: 'new-service:2222', priority: 1, family: 'ipv4' }]
+    };
+    await publisher.publish(relays, sk, newerLocator, { identifier: 'current-relay' });
+
+    const latestLocator = await resolver.resolveLatest(pk, sk);
+    if (!latestLocator || latestLocator.endpoints[0].url !== 'new-service:2222') {
+        console.error('FAILED: resolveLatest did not pick the freshest payload.');
+        process.exit(1);
+    }
+    console.log('resolveLatest freshness selection succeeded.');
+
+    console.log('Testing urlTransformer hook for onion endpoints...');
+    const bridgePrefix = 'https://local-bridge.example.com/?target=';
+    const onionResolver = new NCC05Resolver({
+        bootstrapRelays: relays,
+        urlTransformer: (endpoint) => {
+            if (endpoint.family === 'onion' || endpoint.url.includes('.onion')) {
+                return { ...endpoint, url: `${bridgePrefix}${endpoint.url}` };
+            }
+            return endpoint;
+        }
+    });
+
+    const onionPayload: NCC05Payload = {
+        v: 1,
+        ttl: 60,
+        updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', url: 'hidden-serviceexample.onion:1234', priority: 1, family: 'onion' }]
+    };
+    await publisher.publish(relays, sk, onionPayload, { identifier: 'onion-test', public: true });
+
+    const bridged = await onionResolver.resolve(pk, sk, 'onion-test');
+    if (!bridged || !bridged.endpoints[0].url.startsWith(bridgePrefix)) {
+        console.error('FAILED: urlTransformer did not wrap the onion endpoint.');
+        process.exit(1);
+    }
+    console.log('urlTransformer successfully applied to resolved onion endpoint.');
+
+    onionResolver.close();
+
+    console.log('Testing async signer/decrypter compatibility...');
+    const hexToBytes = (hex: string) => new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const secretBytes = sk instanceof Uint8Array ? sk : hexToBytes(sk);
+    const asyncSigner: NostrSigner = {
+        getPublicKey: async () => pk,
+        signEvent: async (event: UnsignedEvent) => finalizeEvent(event, secretBytes),
+        getConversationKey: async (peer) => nip44.getConversationKey(secretBytes, peer)
+    };
+
+    const asyncPayload: NCC05Payload = {
+        v: 1,
+        ttl: 60,
+        updated_at: Math.floor(Date.now() / 1000),
+        endpoints: [{ type: 'tcp', url: 'async-signer:3333', priority: 1, family: 'ipv4' }]
+    };
+
+    await publisher.publish(relays, asyncSigner, asyncPayload, { identifier: 'async-signer', public: true });
+    const asyncResolved = await resolver.resolve(pk, asyncSigner, 'async-signer');
+
+    if (asyncResolved && asyncResolved.endpoints[0].url === 'async-signer:3333') {
+        console.log('Async signer compatibility check passed.');
+    } else {
+        console.error('FAILED: Async signer compatibility check.');
+        process.exit(1);
     }
 
     publisher.close(relays);

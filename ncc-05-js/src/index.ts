@@ -14,6 +14,7 @@ import {
     finalizeEvent, 
     verifyEvent, 
     Event, 
+    UnsignedEvent,
     getPublicKey,
     generateSecretKey
 } from 'nostr-tools';
@@ -23,6 +24,14 @@ export const TAG_PRIVATE = 'private';
 export function isPrivateLocator(event: Event): boolean {
     return event.tags.some(t => t[0] === TAG_PRIVATE && t[1] === 'true');
 }
+
+export interface NostrSigner {
+    getPublicKey(): Promise<string>;
+    signEvent(event: UnsignedEvent): Promise<Event>;
+    getConversationKey(peerPubkey: string): Promise<Uint8Array>;
+}
+
+export type SignerInput = string | Uint8Array | NostrSigner;
 
 // --- Error Classes ---
 
@@ -73,6 +82,36 @@ function ensureUint8Array(key: string | Uint8Array): Uint8Array {
         throw new NCC05ArgumentError("Invalid hex key provided");
     }
     throw new NCC05ArgumentError("Key must be a hex string or Uint8Array");
+}
+
+class LocalSigner implements NostrSigner {
+    private readonly pubkey: string;
+
+    constructor(private readonly secretKey: Uint8Array) {
+        this.pubkey = getPublicKey(secretKey);
+    }
+
+    async getPublicKey(): Promise<string> {
+        return this.pubkey;
+    }
+
+    async signEvent(event: UnsignedEvent): Promise<Event> {
+        const template: UnsignedEvent = { ...event, pubkey: this.pubkey };
+        return finalizeEvent(template, this.secretKey);
+    }
+
+    async getConversationKey(peerPubkey: string): Promise<Uint8Array> {
+        return nip44.getConversationKey(this.secretKey, peerPubkey);
+    }
+}
+
+function toSigner(input?: SignerInput): NostrSigner | undefined {
+    if (!input) return undefined;
+    if (typeof input === 'string' || input instanceof Uint8Array) {
+        const sk = ensureUint8Array(input);
+        return new LocalSigner(sk);
+    }
+    return input;
 }
 
 /**
@@ -143,6 +182,15 @@ export interface ResolverOptions {
     timeout?: number;
     /** Existing SimplePool instance to share connections */
     pool?: SimplePool;
+    /** Optional global endpoint transformer for transport-aware resolution */
+    urlTransformer?: (endpoint: NCC05Endpoint) => NCC05Endpoint;
+}
+
+interface PayloadRecord {
+    event: Event;
+    payload: NCC05Payload;
+    expiry: number;
+    freshness: number;
 }
 
 /**
@@ -199,7 +247,7 @@ export class NCC05Group {
     static async resolveAsGroup(
         resolver: NCC05Resolver,
         groupPubkey: string,
-        groupSecretKey: string | Uint8Array,
+        groupSecretKey: SignerInput,
         identifier: string = 'addr'
     ): Promise<NCC05Payload | null> {
         return resolver.resolve(groupPubkey, groupSecretKey, identifier);
@@ -214,6 +262,7 @@ export class NCC05Resolver {
     private _ownPool: boolean;
     private bootstrapRelays: string[];
     private timeout: number;
+    private urlTransformer?: (endpoint: NCC05Endpoint) => NCC05Endpoint;
     private cache: Map<string, { payload: NCC05Payload, expires: number }> = new Map();
 
     /**
@@ -224,6 +273,156 @@ export class NCC05Resolver {
         this.pool = options.pool || new SimplePool();
         this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://npub1...'];
         this.timeout = options.timeout || 10000;
+        this.urlTransformer = options.urlTransformer;
+    }
+
+    private applyUrlTransformer(payload: NCC05Payload): NCC05Payload {
+        if (!this.urlTransformer) return payload;
+        return {
+            ...payload,
+            endpoints: payload.endpoints.map(endpoint => this.urlTransformer!(endpoint))
+        };
+    }
+
+    private async decryptEventContent(event: Event, hexPubkey: string, signer?: NostrSigner): Promise<string | null> {
+        let content = event.content;
+        const isWrapped = content.includes('"wraps"') && 
+                          content.includes('"ciphertext"') && 
+                          content.startsWith('{');
+
+        if (isWrapped) {
+            if (!signer) return null;
+
+            try {
+                const wrapped = JSON.parse(content) as WrappedContent;
+                const myPk = await signer.getPublicKey();
+                const myWrap = wrapped.wraps[myPk];
+
+                if (!myWrap) return null;
+
+                const conversationKey = await signer.getConversationKey(hexPubkey);
+                const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
+
+                const symmetricKey = new Uint8Array(
+                    symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+                );
+
+                const sessionConversationKey = nip44.getConversationKey(
+                    symmetricKey, getPublicKey(symmetricKey)
+                );
+
+                content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
+            } catch (_e) {
+                throw new NCC05DecryptionError("Failed to decrypt wrapped content");
+            }
+        } else if (signer && !content.startsWith('{')) {
+            try {
+                const conversationKey = await signer.getConversationKey(hexPubkey);
+                content = nip44.decrypt(content, conversationKey);
+            } catch (_e) {
+                throw new NCC05DecryptionError("Failed to decrypt content");
+            }
+        }
+
+        return content;
+    }
+
+    private async buildPayloadRecord(event: Event, hexPubkey: string, signer?: NostrSigner): Promise<PayloadRecord | null> {
+        const content = await this.decryptEventContent(event, hexPubkey, signer);
+        if (!content) return null;
+
+        let payload: NCC05Payload;
+        try {
+            payload = JSON.parse(content) as NCC05Payload;
+        } catch (_e) {
+            return null;
+        }
+
+        if (!payload || !Array.isArray(payload.endpoints)) {
+            return null;
+        }
+
+        if (typeof payload.updated_at !== 'number' || typeof payload.ttl !== 'number') {
+            return null;
+        }
+
+        const expirationTag = event.tags.find(t => t[0] === 'expiration');
+        const explicitExpiry = expirationTag ? parseInt(expirationTag[1], 10) : Infinity;
+        const normalizedExpiry = Number.isFinite(explicitExpiry) ? explicitExpiry : Infinity;
+        const calculatedExpiry = payload.updated_at + payload.ttl;
+        const expiry = Math.min(normalizedExpiry, calculatedExpiry);
+
+        const freshness = payload.updated_at || event.created_at;
+
+        return {
+            event,
+            payload,
+            expiry,
+            freshness
+        };
+    }
+
+    private async discoverRelays(hexPubkey: string, gossip?: boolean): Promise<string[]> {
+        let queryRelays = [...this.bootstrapRelays];
+        if (!gossip) return queryRelays;
+
+        try {
+            const relayListEvent = await this.pool.get(this.bootstrapRelays, {
+                authors: [hexPubkey],
+                kinds: [10002]
+            });
+
+            if (relayListEvent && verifyEvent(relayListEvent) && relayListEvent.pubkey === hexPubkey) {
+                const discoveredRelays = relayListEvent.tags
+                    .filter(t => t[0] === 'r')
+                    .map(t => t[1]);
+
+                if (discoveredRelays.length > 0) {
+                    queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
+                }
+            }
+        } catch (e: any) {
+            console.warn(`[NCC-05] Gossip discovery failed: ${e.message}`);
+        }
+
+        return queryRelays;
+    }
+
+    private async fetchFreshestRecord(
+        hexPubkey: string,
+        signer?: NostrSigner,
+        gossip?: boolean
+    ): Promise<PayloadRecord | null> {
+        const queryRelays = await this.discoverRelays(hexPubkey, gossip);
+        const filter = {
+            authors: [hexPubkey],
+            kinds: [30058],
+            limit: 50
+        };
+
+        try {
+            const queryPromise = this.pool.querySync(queryRelays, filter);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new NCC05TimeoutError("Resolution timed out")), this.timeout)
+            );
+
+            const result = await Promise.race([queryPromise, timeoutPromise]);
+            if (!result || (Array.isArray(result) && result.length === 0)) return null;
+
+            const validEvents = (result as Event[])
+                .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
+                .sort((a, b) => {
+                    if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+                    return a.id.localeCompare(b.id);
+                });
+
+            if (validEvents.length === 0) return null;
+
+            return this.buildPayloadRecord(validEvents[0], hexPubkey, signer);
+        } catch (e) {
+            if (e instanceof NCC05Error) throw e;
+            throw new NCC05RelayError(`Relay query failed: ${(e as Error).message}`);
+        }
     }
 
     /**
@@ -242,7 +441,7 @@ export class NCC05Resolver {
      */
     async resolve(
         targetPubkey: string, 
-        secretKey?: string | Uint8Array, 
+        signerInput?: SignerInput, 
         identifier: string = 'addr',
         options: { strict?: boolean, gossip?: boolean } = {}
     ): Promise<NCC05Payload | null> {
@@ -254,147 +453,71 @@ export class NCC05Resolver {
 
         const now = Math.floor(Date.now() / 1000);
         const cacheKey = `${hexPubkey}:${identifier}`;
-        
-        // Check cache
         const cached = this.cache.get(cacheKey);
+        if (cached && cached.expires > now) {
+            return cached.payload;
+        }
+        if (cached) this.cache.delete(cacheKey);
+
+        const signer = signerInput ? toSigner(signerInput) : undefined;
+        const record = await this.fetchFreshestRecord(hexPubkey, signer, options.gossip);
+        if (!record) return null;
+
+        const tagIdentifier = record.event.tags.find(t => t[0] === 'd')?.[1];
+        if (tagIdentifier !== identifier) return null;
+
+        const transformedPayload = this.applyUrlTransformer(record.payload);
+        if (now > record.expiry) {
+            if (options.strict) return null;
+            console.warn('NCC-05 record expired');
+            return transformedPayload;
+        }
+
+        this.cache.set(cacheKey, { payload: transformedPayload, expires: record.expiry });
+        return transformedPayload;
+    }
+
+    /**
+     * Resolves the most recent locator record for an identity regardless of d-tag.
+     *
+     * @param targetPubkey - The pubkey (hex or npub) of the service owner.
+     * @param secretKey - Your secret key (required if the record is encrypted).
+     * @param options - Resolution options (strict mode, gossip discovery).
+     */
+    async resolveLatest(
+        targetPubkey: string,
+        signerInput?: SignerInput,
+        options: { strict?: boolean, gossip?: boolean } = {}
+    ): Promise<NCC05Payload | null> {
+        let hexPubkey = targetPubkey;
+        if (targetPubkey.startsWith('npub1')) {
+            const decoded = nip19.decode(targetPubkey);
+            hexPubkey = decoded.data as string;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const cacheKey = `${hexPubkey}:latest`;
+        const cached = this.cache.get(cacheKey);
+        if (cached && cached.expires > now) {
+            return cached.payload;
+        }
         if (cached) {
-            if (cached.expires > now) {
-                return cached.payload;
-            } else {
-                this.cache.delete(cacheKey);
-            }
+            this.cache.delete(cacheKey);
         }
 
-        let queryRelays = [...this.bootstrapRelays];
+        const signer = signerInput ? toSigner(signerInput) : undefined;
+        const record = await this.fetchFreshestRecord(hexPubkey, signer, options.gossip);
+        if (!record) return null;
 
-        // 1. NIP-65 Gossip Discovery
-        if (options.gossip) {
-            try {
-                const relayListEvent = await this.pool.get(this.bootstrapRelays, {
-                    authors: [hexPubkey],
-                    kinds: [10002]
-                });
-                // Security: Verify NIP-65 event signature and author
-                if (relayListEvent && verifyEvent(relayListEvent) && relayListEvent.pubkey === hexPubkey) {
-                    const discoveredRelays = relayListEvent.tags
-                        .filter(t => t[0] === 'r')
-                        .map(t => t[1]);
-                    if (discoveredRelays.length > 0) {
-                        queryRelays = [...new Set([...queryRelays, ...discoveredRelays])];
-                    }
-                }
-            } catch (e: any) {
-                console.warn(`[NCC-05] Gossip discovery failed: ${e.message}`);
-                // Proceed with bootstrap relays
-            }
+        const transformedPayload = this.applyUrlTransformer(record.payload);
+        if (now > record.expiry) {
+            if (options.strict) return null;
+            console.warn('NCC-05 record expired');
+            return transformedPayload;
         }
 
-        const filter = {
-            authors: [hexPubkey],
-            kinds: [30058],
-            '#d': [identifier],
-            limit: 10
-        };
-
-        const sk = secretKey ? ensureUint8Array(secretKey) : undefined;
-
-        try {
-            const queryPromise = this.pool.querySync(queryRelays, filter);
-            const timeoutPromise = new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new NCC05TimeoutError("Resolution timed out")), this.timeout)
-            );
-            
-            const result = await Promise.race([queryPromise, timeoutPromise]);
-            
-            if (!result || (Array.isArray(result) && result.length === 0)) return null;
-            
-            // 2. Filter for valid signatures, correct author, and sort by created_at desc, then id asc
-            const validEvents = (result as Event[])
-                .filter(e => e.pubkey === hexPubkey && verifyEvent(e))
-                .sort((a, b) => {
-                    if (b.created_at !== a.created_at) return b.created_at - a.created_at;
-                    return a.id.localeCompare(b.id);
-                });
-
-            if (validEvents.length === 0) return null;
-            const latestEvent = validEvents[0];
-
-            let content = latestEvent.content;
-            
-            // Security: Robust multi-recipient detection
-            const isWrapped = content.includes('"wraps"') && 
-                             content.includes('"ciphertext"') && 
-                             content.startsWith('{');
-
-            if (isWrapped && sk) {
-                try {
-                    const wrapped = JSON.parse(content) as WrappedContent;
-                    const myPk = getPublicKey(sk);
-                    const myWrap = wrapped.wraps[myPk];
-                    
-                    if (myWrap) {
-                        const conversationKey = nip44.getConversationKey(sk, hexPubkey);
-                        const symmetricKeyHex = nip44.decrypt(myWrap, conversationKey);
-                        
-                        // Convert hex symmetric key back to Uint8Array for NIP-44 decryption
-                        const symmetricKey = new Uint8Array(
-                            symmetricKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-                        );
-                        
-                        const sessionConversationKey = nip44.getConversationKey(
-                            symmetricKey, getPublicKey(symmetricKey)
-                        );
-                        content = nip44.decrypt(wrapped.ciphertext, sessionConversationKey);
-                    } else {
-                        return null; // Not intended for us
-                    }
-                } catch (_e) {
-                    throw new NCC05DecryptionError("Failed to decrypt wrapped content");
-                }
-            } else if (sk && !content.startsWith('{')) {
-                // Standard NIP-44 (likely encrypted if not starting with {)
-                try {
-                    const conversationKey = nip44.getConversationKey(sk, hexPubkey);
-                    content = nip44.decrypt(latestEvent.content, conversationKey);
-                } catch (_e) {
-                     throw new NCC05DecryptionError("Failed to decrypt content");
-                }
-            }
-
-            // Security: Safe JSON parsing
-            let payload: NCC05Payload;
-            try {
-                payload = JSON.parse(content) as NCC05Payload;
-            } catch (_e) {
-                return null; // Invalid JSON
-            }
-
-            if (!payload || !payload.endpoints || !Array.isArray(payload.endpoints)) {
-                return null;
-            }
-
-            // Freshness validation
-            // const now = Math.floor(Date.now() / 1000); // Already defined above
-            
-            // Check for expiration tag
-            const expirationTag = latestEvent.tags.find(t => t[0] === 'expiration');
-            const explicitExpiry = expirationTag ? parseInt(expirationTag[1], 10) : Infinity;
-            const calculatedExpiry = payload.updated_at + payload.ttl;
-            const expiry = Math.min(explicitExpiry, calculatedExpiry);
-
-            if (now > expiry) {
-                if (options.strict) return null;
-                console.warn('NCC-05 record expired');
-            } else {
-                 // Update cache if valid
-                 this.cache.set(cacheKey, { payload, expires: expiry });
-            }
-
-            return payload;
-        } catch (e) {
-            if (e instanceof NCC05Error) throw e;
-            throw new NCC05RelayError(`Relay query failed: ${(e as Error).message}`);
-        }
+        this.cache.set(cacheKey, { payload: transformedPayload, expires: record.expiry });
+        return transformedPayload;
     }
 
     /**
@@ -470,7 +593,7 @@ export class NCC05Publisher {
      */
     async publishWrapped(
         relays: string[],
-        secretKey: string | Uint8Array,
+        signerInput: SignerInput,
         recipients: string[],
         payload: NCC05Payload,
         optionsOrIdentifier: { identifier?: string, privateLocator?: boolean } | string = 'addr'
@@ -485,7 +608,10 @@ export class NCC05Publisher {
             privateLocator = !!optionsOrIdentifier.privateLocator;
         }
 
-        const sk = ensureUint8Array(secretKey);
+        const signer = toSigner(signerInput);
+        if (!signer) throw new NCC05ArgumentError("Signer must be provided.");
+
+        const myPubkey = await signer.getPublicKey();
         const sessionKey = generateSecretKey();
         const sessionKeyHex = Array.from(sessionKey).map(b => b.toString(16).padStart(2, '0')).join('');
         
@@ -494,7 +620,7 @@ export class NCC05Publisher {
 
         const wraps: Record<string, string> = {};
         for (const rPk of recipients) {
-            const conversationKey = nip44.getConversationKey(sk, rPk);
+            const conversationKey = await signer.getConversationKey(rPk);
             wraps[rPk] = nip44.encrypt(sessionKeyHex, conversationKey);
         }
 
@@ -505,14 +631,15 @@ export class NCC05Publisher {
             tags.push([TAG_PRIVATE, 'true']);
         }
 
-        const eventTemplate = {
+        const eventTemplate: UnsignedEvent = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
+            pubkey: myPubkey,
             tags: tags,
             content: JSON.stringify(wrappedContent),
         };
 
-        const signedEvent = finalizeEvent(eventTemplate, sk);
+        const signedEvent = await signer.signEvent(eventTemplate);
         await this._publishToRelays(relays, signedEvent);
         return signedEvent;
     }
@@ -528,18 +655,20 @@ export class NCC05Publisher {
      */
     async publish(
         relays: string[],
-        secretKey: string | Uint8Array,
+        signerInput: SignerInput,
         payload: NCC05Payload,
         options: { identifier?: string, recipientPubkey?: string, public?: boolean, privateLocator?: boolean } = {}
     ): Promise<Event> {
-        const sk = ensureUint8Array(secretKey);
-        const myPubkey = getPublicKey(sk);
+        const signer = toSigner(signerInput);
+        if (!signer) throw new NCC05ArgumentError("Signer must be provided.");
+
+        const myPubkey = await signer.getPublicKey();
         const identifier = options.identifier || 'addr';
         let content = JSON.stringify(payload);
 
         if (!options.public) {
             const encryptionTarget = options.recipientPubkey || myPubkey;
-            const conversationKey = nip44.getConversationKey(sk, encryptionTarget);
+            const conversationKey = await signer.getConversationKey(encryptionTarget);
             content = nip44.encrypt(content, conversationKey);
         }
 
@@ -548,7 +677,7 @@ export class NCC05Publisher {
             tags.push([TAG_PRIVATE, 'true']);
         }
 
-        const eventTemplate = {
+        const eventTemplate: UnsignedEvent = {
             kind: 30058,
             created_at: Math.floor(Date.now() / 1000),
             pubkey: myPubkey,
@@ -556,7 +685,7 @@ export class NCC05Publisher {
             content: content,
         };
 
-        const signedEvent = finalizeEvent(eventTemplate, sk);
+        const signedEvent = await signer.signEvent(eventTemplate);
         await this._publishToRelays(relays, signedEvent);
         return signedEvent;
     }
