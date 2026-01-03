@@ -179,15 +179,17 @@ export async function runPublishCycle(service, options = {}) {
   if (willPublishNcc02) eventsToPublish.push(ncc02Event);
   if (willPublishNcc05) eventsToPublish.push(ncc05EventTemplate);
 
+  let kind0Event = null;
   if (config.profile && canPublish && (willPublishNcc02 || willPublishNcc05 || changeState.profileChanged)) {
-    eventsToPublish.push({
+    kind0Event = {
       kind: 0, created_at: Math.floor(Date.now() / 1000), tags: [],
       content: JSON.stringify({
         name: (config.profile.name || name).toLowerCase().replace(/\s+/g, '_'),
         display_name: config.profile.display_name || config.profile.name || name,
         about: config.profile.about, picture: config.profile.picture, nip05: config.profile.nip05
       })
-    });
+    };
+    eventsToPublish.push(kind0Event);
   }
 
   if (!eventsToPublish.length) {
@@ -217,6 +219,7 @@ export async function runPublishCycle(service, options = {}) {
     last_endpoints_hash: willPublishNcc05 ? locatorHash : state.last_endpoints_hash,
     last_published_ncc05_id: willPublishNcc05 ? ncc05EventTemplate?.id : state.last_published_ncc05_id,
     last_profile_hash: profileHash || state.last_profile_hash,
+    last_published_kind0_id: kind0Event?.id || state.last_published_kind0_id, // Store kind0 ID
     last_inventory: filteredInventory,
     last_success_per_relay: { ...state.last_success_per_relay, ...publishResults },
     last_full_publish_timestamp: Date.now(),
@@ -226,7 +229,13 @@ export async function runPublishCycle(service, options = {}) {
   };
 
   updateService(id, { state: newState });
-  addLog('info', `Published updates for ${name} (${changeState.reason})`, { serviceId: id, results: publishResults });
+
+  const logMetadata = { serviceId: id, results: publishResults };
+  if (willPublishNcc02 && ncc02Event?.id) logMetadata.ncc02 = ncc02Event.id;
+  if (willPublishNcc05 && ncc05EventTemplate?.id) logMetadata.ncc05 = ncc05EventTemplate.id;
+  if (kind0Event?.id) logMetadata.kind0 = kind0Event.id;
+
+  addLog('info', `Published updates for ${name} (${changeState.reason})`, logMetadata);
   
   return newState;
 }
