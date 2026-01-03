@@ -24,24 +24,33 @@ function getBackupRelays(service) {
   return fallback.filter(Boolean);
 }
 
-function buildPayloadSnapshot() {
+function buildPayloadSnapshot(timestamp) {
   return buildBackupPayload({
     services: getServices(),
     admins: getAdmins(),
-    appConfig: getConfig('app_config') || {}
+    appConfig: getConfig('app_config') || {},
+    timestamp
   });
 }
 
 export async function maybePublishListBackup({ service, secretKey }) {
   const relays = getBackupRelays(service);
   if (!relays.length) return null;
-  const payload = buildPayloadSnapshot();
-  const hash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  
+  // Use timestamp 0 for stable hashing to detect actual content changes
+  const stablePayload = buildPayloadSnapshot(0);
+  const hash = crypto.createHash('sha256').update(JSON.stringify(stablePayload)).digest('hex');
+  
   if (getConfig(BACKUP_HASH_KEY) === hash) {
     return null;
   }
-  const event = createBackupEvent({ secretKey, payload });
+  
+  // Content changed, generate fresh payload with current timestamp
+  const livePayload = buildPayloadSnapshot();
+  const event = createBackupEvent({ secretKey, payload: livePayload });
+  
   await publishToRelays(relays, [event], secretKey);
+  
   setConfig(BACKUP_HASH_KEY, hash);
   setConfig(BACKUP_EVENT_ID_KEY, event.id);
   setConfig(BACKUP_LAST_SYNC_KEY, Date.now());
@@ -49,7 +58,7 @@ export async function maybePublishListBackup({ service, secretKey }) {
     eventId: event.id,
     publicationRelays: relays
   });
-  return { event, payload, relays };
+  return { event, payload: livePayload, relays };
 }
 
 export function restoreBackupPayload(payload, { message = null, log = true } = {}) {
@@ -85,33 +94,25 @@ export function restoreBackupPayload(payload, { message = null, log = true } = {
   return { restoredServices, restoredAdmins };
 }
 
-function queryLatestBackupEvent(relays, author) {
+async function queryLatestBackupEvent(relays, author) {
   if (!relays.length || !author) return null;
   const pool = new SimplePool();
-  return new Promise((resolve) => {
-    const events = [];
-    const filters = [{
+  try {
+    const filter = {
       kinds: [Genericlists],
       authors: [author],
       '#d': ['ncc-sidecar-backup'],
       limit: 1
-    }];
-    const sub = pool.sub(relays, filters);
-    const timeout = setTimeout(() => {
-      sub.unsub();
-      pool.close(relays);
-      resolve(events[0] || null);
-    }, 5000);
-    sub.on('event', (event) => {
-      events.push(event);
-    });
-    sub.on('eose', () => {
-      clearTimeout(timeout);
-      sub.unsub();
-      pool.close(relays);
-      resolve(events[0] || null);
-    });
-  });
+    };
+    // pool.get resolves with the event or null/undefined
+    const event = await pool.get(relays, filter);
+    return event || null;
+  } catch (err) {
+    console.warn('[Backup] Failed to query latest backup:', err.message);
+    return null;
+  } finally {
+    pool.close(relays);
+  }
 }
 
 export async function fetchRemoteBackup({ force = false } = {}) {
@@ -127,6 +128,7 @@ export async function fetchRemoteBackup({ force = false } = {}) {
   const services = getServices();
   const sidecar = services.find(s => s.type === 'sidecar');
   if (!sidecar) {
+    addLog('error', 'Backup sync failed: Sidecar service missing');
     return { error: 'Sidecar service missing' };
   }
   const secretKey = fromNsec(sidecar.service_nsec);
@@ -134,6 +136,7 @@ export async function fetchRemoteBackup({ force = false } = {}) {
   const event = await queryLatestBackupEvent(relays, author);
   setConfig(BACKUP_LAST_SYNC_KEY, now);
   if (!event) {
+    addLog('warn', 'Backup sync: No remote backup event found', { author });
     return { message: 'No backup event found' };
   }
   if (!force && event.id === getConfig(BACKUP_EVENT_ID_KEY)) {

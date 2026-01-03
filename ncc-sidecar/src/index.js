@@ -1,7 +1,8 @@
 import WebSocket from 'ws';
 globalThis.WebSocket = WebSocket;
 
-import { initDb, isInitialized, getServices, wipeDb } from './db.js';
+import { initDb, wipeDb } from './db/index.js';
+import { isInitialized, getServices } from './db.js';
 import { startWebServer } from './web.js';
 import { startManager } from './app.js';
 

@@ -25,10 +25,10 @@ function sanitizeServiceEntry(service = {}) {
   };
 }
 
-export function buildBackupPayload({ services = [], admins = [], appConfig = {} } = {}) {
+export function buildBackupPayload({ services = [], admins = [], appConfig = {}, timestamp } = {}) {
   return {
     version: BACKUP_VERSION,
-    timestamp: Math.floor(Date.now() / 1000),
+    timestamp: timestamp !== undefined ? timestamp : Math.floor(Date.now() / 1000),
     appConfig: deepClone(appConfig),
     admins: admins
       .filter(admin => admin?.pubkey)

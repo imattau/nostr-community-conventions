@@ -5,17 +5,34 @@ import { buildExternalEndpoints } from 'ncc-06-js';
  * Builds a multimodal list of endpoints using detection and user preferences.
  */
 export async function buildInventory(config = {}, networkProbe = {}, _torStatus = {}) {
-  const { protocols = {}, primary_protocol = 'ipv4' } = config;
+  const {
+    protocols = {},
+    primary_protocol = 'ipv4',
+    preferred_protocol = 'auto'
+  } = config;
+  const overrideProtocol = preferred_protocol && preferred_protocol !== 'auto' ? preferred_protocol : null;
+  const overridePort = Number.isFinite(config.port) && config.port > 0 ? config.port : null;
   
   // If we have manual endpoints in config, we use them. 
   // Otherwise we use detected ones.
   const manualEndpoints = config.endpoints || [];
   
   // Use ncc-06-js helper for high-level detection
+  const ipv4Config = { enabled: !!protocols.ipv4, address: networkProbe.ipv4 };
+  const ipv6Config = { enabled: !!protocols.ipv6, address: networkProbe.ipv6 };
+  if (overrideProtocol) {
+    ipv4Config.protocol = overrideProtocol;
+    ipv6Config.protocol = overrideProtocol;
+  }
+  if (overridePort) {
+    ipv4Config.port = overridePort;
+    ipv6Config.port = overridePort;
+  }
+
   const detectedEndpoints = await buildExternalEndpoints({
     tor: { enabled: !!protocols.tor },
-    ipv4: { enabled: !!protocols.ipv4, address: networkProbe.ipv4 },
-    ipv6: { enabled: !!protocols.ipv6, address: networkProbe.ipv6 },
+    ipv4: ipv4Config,
+    ipv6: ipv6Config,
     wsPort: config.port || 80,
     wssPort: config.port || 443,
     ncc02ExpectedKey: config.ncc02ExpectedKey || null,
