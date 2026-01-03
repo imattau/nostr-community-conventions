@@ -48,7 +48,7 @@ const ServiceCard = ({
     <Motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200 hover:shadow-2xl hover:border-slate-300 transition-all group relative overflow-hidden"
+      className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-2xl hover:border-slate-300 dark:hover:border-slate-700 transition-all group relative overflow-hidden"
       onClick={onEdit}
     >
       <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -64,20 +64,20 @@ const ServiceCard = ({
         <div className="flex items-start justify-between">
           <div className="flex items-center space-x-3">
             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
-              config?.service_mode === 'private' ? 'bg-slate-900 text-white' : 'bg-blue-50 text-blue-600'
+              config?.service_mode === 'private' ? 'bg-slate-900 text-white dark:bg-slate-800' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
             }`}>
               {SERVICE_ICONS[config?.type || 'relay'] || SERVICE_ICONS['relay']}
             </div>
             <div>
-              <h3 className="text-lg font-black tracking-tight text-slate-900 leading-none">{name}</h3>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+              <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-white leading-none">{name}</h3>
+              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">
                 {config?.service_mode || 'public'} service
               </p>
             </div>
           </div>
           {showTorBadge && (
             <div className={`px-2 py-1 rounded-md border text-[9px] font-bold uppercase flex items-center gap-1.5 ${
-              torRunning ? 'bg-purple-50 text-purple-600 border-purple-100' : 'bg-orange-50 text-orange-600 border-orange-100'
+              torRunning ? 'bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-900/30' : 'bg-orange-50 text-orange-600 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30'
             }`}>
               <Globe className="w-3 h-3" />
               {torRunning ? 'Tor Active' : 'Tor Starting'}
@@ -87,11 +87,11 @@ const ServiceCard = ({
 
         <div className="space-y-2">
           {inventory.slice(0, 3).map((ep, idx) => (
-            <div key={idx} className="flex items-center justify-between text-xs font-mono text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 group/item">
+            <div key={idx} className="flex items-center justify-between text-xs font-mono text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-800 group/item">
               <span className="truncate max-w-[180px]">{formatEndpointLabel(ep.url)}</span>
               <div className="flex items-center gap-2">
                 <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
-                  ep.family === 'onion' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'
+                  ep.family === 'onion' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
                 }`}>
                   {ep.family === 'onion' ? 'TOR' : ep.family.toUpperCase()}
                 </span>
@@ -105,16 +105,16 @@ const ServiceCard = ({
             </div>
           ))}
           {!inventory.length && (
-            <div className="text-center py-4 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
-              <p className="text-[10px] text-slate-400 font-medium italic">
+            <div className="text-center py-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 border-dashed">
+              <p className="text-[10px] text-slate-400 dark:text-slate-600 font-medium italic">
                 {isProbing ? 'Probing endpoints...' : 'No active endpoints'}
               </p>
             </div>
           )}
         </div>
 
-        <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-          <div className="flex items-center space-x-2 text-slate-400">
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-slate-400 dark:text-slate-600">
             <Key className="w-3.5 h-3.5" />
             <span className="text-[10px] font-mono">
               {tlsFingerprint !== 'N/A' ? `${tlsFingerprint.slice(0, 16)}...` : 'No TLS'}
@@ -123,7 +123,7 @@ const ServiceCard = ({
           {serviceNpub && (
             <button 
               onClick={(e) => { e.stopPropagation(); copyToClipboard(serviceNpub, `npub-${id}`); }}
-              className="text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest flex items-center gap-1.5"
+              className="text-[10px] font-black text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 uppercase tracking-widest flex items-center gap-1.5"
             >
               {copiedMap[`npub-${id}`] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
               COPY NPUB

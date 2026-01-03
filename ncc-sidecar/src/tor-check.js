@@ -1,16 +1,30 @@
 import net from 'net';
+import fs from 'fs';
 
 export async function checkTor() {
   const ports = [9050, 9150, 9051]; // Common SOCKS and Control ports
-  const results = await Promise.all(ports.map(port => probePort(port)));
+  const sockets = ['/var/run/tor/control'];
+  
+  const portProbes = ports.map(port => probePort(port));
+  const socketProbes = sockets.map(path => probeSocket(path));
+  
+  const results = await Promise.all([...portProbes, ...socketProbes]);
   
   const isRunning = results.some(r => r.open);
   
   return {
     running: isRunning,
     details: results,
-    recommendation: isRunning ? null : "Tor doesn't seem to be reachable on common ports (9050, 9051, 9150). If you want to offer onion services, please ensure Tor is installed and running."
+    recommendation: isRunning ? null : "Tor doesn't seem to be reachable on common ports or sockets. Ensure Tor is installed and running."
   };
+}
+
+function probeSocket(path) {
+  return new Promise((resolve) => {
+    fs.access(path, fs.constants.F_OK | fs.constants.R_OK, (err) => {
+        resolve({ path, open: !err });
+    });
+  });
 }
 
 function probePort(port, host = '127.0.0.1') {

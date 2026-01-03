@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, Check, Copy, Eye, EyeOff, RefreshCw, 
-  Globe, Radio, Box, Smartphone, Terminal 
+import {
+  Plus, Check, Copy, Eye, EyeOff, RefreshCw,
+  Globe, Radio, Box, Smartphone, Terminal
 } from 'lucide-react';
 import { sidecarApi } from '../../api';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
+import Input from '../common/Input';
 
 const SERVICE_TYPES = [
   { id: 'relay', label: 'Nostr Relay', icon: <Radio className="w-4 h-4" />, defaultId: 'relay' },
@@ -110,13 +111,13 @@ const NewServiceModal = ({
       <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
         {service.type !== 'sidecar' && (
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Type</label>
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Type</label>
             <div className="grid grid-cols-2 gap-3">
               {SERVICE_TYPES.map(t => (
                 <button 
                   key={t.id}
                   onClick={() => setService(d => ({ ...d, type: t.id, service_id: t.defaultId }))}
-                  className={`p-4 rounded-2xl border transition-all flex items-center space-x-3 ${service.type === t.id ? 'bg-blue-600/10 border-blue-500 text-blue-600' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                  className={`p-4 rounded-2xl border transition-all flex items-center space-x-3 ${service.type === t.id ? 'bg-blue-600/10 border-blue-500 text-blue-600 dark:text-blue-400' : 'bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-400 hover:border-slate-200'}`}
                 >
                   {t.icon}
                   <span className="text-[10px] font-black uppercase tracking-widest">{t.label}</span>
@@ -128,13 +129,13 @@ const NewServiceModal = ({
 
         {service.type !== 'sidecar' && (
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visibility</label>
-            <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-100">
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Visibility</label>
+            <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-2xl border border-slate-100 dark:border-slate-700">
               {['public', 'private'].map(m => (
                 <button 
                   key={m} 
                   onClick={() => setService(d => ({ ...d, config: { ...d.config, service_mode: m } }))} 
-                  className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${service.config.service_mode === m ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                  className={`flex-1 py-3 rounded-xl text-xs font-bold uppercase transition-all ${service.config.service_mode === m ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                 >
                   {m}
                 </button>
@@ -145,7 +146,7 @@ const NewServiceModal = ({
 
         {service.type !== 'sidecar' && service.config.service_mode === 'private' && (
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Locator Recipients</label>
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Locator Recipients</label>
             <textarea
               rows={4}
               value={service.config.ncc05_recipients?.join('\n') || ''}
@@ -154,47 +155,47 @@ const NewServiceModal = ({
                 setService(d => ({ ...d, config: { ...d.config, ncc05_recipients: recipients } }));
               }}
               placeholder="npub1..."
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors text-slate-900 dark:text-white"
             />
             <p className="text-[9px] text-slate-400 italic">One NPUB per line or comma-separated. Only these identities can decrypt the private NCC-05 locator.</p>
           </div>
         )}
 
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service Identity</label>
-          <input 
-            type="text" placeholder="Service Name (e.g. My Relay)" 
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors mb-2"
+          <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Service Identity</label>
+          <Input 
+            placeholder="Service Name (e.g. My Relay)" 
+            className="mb-2 text-sm font-bold p-5"
             value={service.name}
             onChange={(e) => setService(d => ({ ...d, name: e.target.value }))}
           />
-          <input 
-            type="text" placeholder="About / Bio (Optional)" 
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors mb-2"
+          <Input 
+            placeholder="About / Bio (Optional)" 
+            className="mb-2"
             value={service.config.profile?.about || ''}
             onChange={(e) => setService(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, about: e.target.value } } }))}
           />
-          <input 
-            type="text" placeholder="Picture URL (Optional)" 
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors"
+          <Input 
+            placeholder="Picture URL (Optional)"
             value={service.config.profile?.picture || ''}
             onChange={(e) => setService(d => ({ ...d, config: { ...d.config, profile: { ...d.config.profile, picture: e.target.value } } }))}
           />
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Secret Key (NSEC)</label>
+          <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Secret Key (NSEC)</label>
           <div className="flex space-x-2">
-            <input 
-              type={showNsec ? 'text' : 'password'} placeholder="nsec1..." 
-              className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl p-5 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors"
+            <Input 
+              type={showNsec ? 'text' : 'password'} 
+              placeholder="nsec1..." 
+              className="flex-1 font-mono p-5"
               value={service.service_nsec}
               onChange={(e) => setService(d => ({ ...d, service_nsec: e.target.value }))}
             />
-            <button type="button" onClick={handleGenerateKey} className="bg-slate-900 text-white p-5 rounded-2xl hover:bg-slate-800 transition-all">
+            <button type="button" onClick={handleGenerateKey} className="bg-slate-900 text-white p-5 rounded-2xl hover:bg-slate-800 transition-all dark:bg-slate-700 dark:hover:bg-slate-600">
               <RefreshCw className="w-4 h-4" />
             </button>
-            <button type="button" onClick={() => setShowNsec(!showNsec)} className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all">
+            <button type="button" onClick={() => setShowNsec(!showNsec)} className="bg-slate-100 text-slate-600 p-5 rounded-2xl hover:bg-slate-200 transition-all dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700">
               {showNsec ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
@@ -202,10 +203,11 @@ const NewServiceModal = ({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Service Port</label>
-            <input 
-              type="number" placeholder="e.g. 80" 
-              className={`w-full bg-slate-50 border rounded-2xl p-5 text-sm font-bold outline-none transition-colors ${portIsValid ? 'border-slate-100 focus:border-blue-500/50' : 'border-rose-200 ring-1 ring-rose-200 focus:border-rose-400'}`}
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Service Port</label>
+            <Input 
+              type="number" 
+              placeholder="e.g. 80" 
+              className={`p-5 text-sm font-bold ${!portIsValid ? 'border-rose-200 ring-1 ring-rose-200 focus:border-rose-400' : ''}`}
               value={service.config.port ?? ''}
               onChange={(e) => {
                 const val = parseInt(e.target.value);
@@ -214,10 +216,11 @@ const NewServiceModal = ({
             />
           </div>
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Priority</label>
-            <input 
-              type="number" placeholder="1" 
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-5 text-sm font-bold outline-none focus:border-blue-500/50 transition-colors"
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Priority</label>
+            <Input 
+              type="number" 
+              placeholder="1" 
+              className="p-5 text-sm font-bold"
               value={service.config.priority || 1}
               onChange={(e) => setService(d => ({ ...d, config: { ...d.config, priority: parseInt(e.target.value) } }))}
             />
@@ -225,21 +228,31 @@ const NewServiceModal = ({
         </div>
 
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Network Protocols</label>
+          <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Network Protocols</label>
           <div className="flex space-x-2">
             {['ipv4', 'ipv6', 'tor'].map(p => {
               const isAvailable = networkAvailability[p];
+              const isActive = service.config.protocols[p];
               return (
                 <button
                   key={p}
                   disabled={!isAvailable}
-                  onClick={() => setService(d => ({ ...d, config: { ...d.config, protocols: { ...d.config.protocols, [p]: !d.config.protocols[p] } } }))}
-                  className={`flex-1 py-3 rounded-xl border flex items-center justify-center space-x-2 transition-all ${
-                    !isAvailable ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed' :
-                    service.config.protocols[p] ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  onClick={() => setService(d => ({ ...d, config: { ...d.config, protocols: { ...d.config.protocols, [p]: !isActive } } }))}
+                  className={`flex-1 py-3 rounded-xl border flex items-center justify-center space-x-2 transition-all ${ 
+                    !isAvailable 
+                      ? 'bg-slate-100 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-600 opacity-50 cursor-not-allowed' 
+                      : isActive 
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500/50 dark:text-blue-300 shadow-sm' 
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
                   }`}
                 >
-                  <div className={`w-2 h-2 rounded-full ${!isAvailable ? 'bg-slate-300' : service.config.protocols[p] ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                  <div className={`w-2 h-2 rounded-full ${
+                    !isAvailable 
+                      ? 'bg-slate-300 dark:bg-slate-700' 
+                      : isActive 
+                        ? 'bg-blue-500 dark:bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]' 
+                        : 'bg-slate-200 dark:bg-slate-600'
+                  }`} />
                   <span className="text-xs font-bold uppercase">{p}</span>
                 </button>
               );
@@ -249,14 +262,14 @@ const NewServiceModal = ({
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preferred Protocol</label>
+            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Preferred Protocol</label>
             <span className="text-[9px] text-slate-400 italic">Overrides the advertised scheme in NCC records.</span>
           </div>
           <div className="relative">
             <select
               value={service.config.preferred_protocol || PROTOCOL_OPTIONS[0].value}
               onChange={(e) => setService(d => ({ ...d, config: { ...d.config, preferred_protocol: e.target.value } }))}
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-bold outline-none focus:border-blue-500/50 transition-colors appearance-none"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-bold outline-none focus:border-blue-500/50 transition-colors appearance-none text-slate-900 dark:text-white"
             >
               {PROTOCOL_OPTIONS.map(option => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -268,15 +281,15 @@ const NewServiceModal = ({
           </div>
         </div>
 
-        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
+        <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Environment Check</span>
+            <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Environment Check</span>
             <button onClick={checkProxy} className="text-[10px] font-bold text-blue-500 hover:text-blue-600 flex items-center">
                {loadingProxy && <RefreshCw className="w-3 h-3 mr-1 animate-spin" />} Detect Reverse Proxy
             </button>
           </div>
           {proxyCheck && (
-            <div className="text-[10px] font-mono p-2 bg-white rounded-xl border border-slate-100">
+            <div className="text-[10px] font-mono p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-700">
                 {proxyCheck.detected ? (
                     <div className="text-green-600 flex items-center">
                         <Check className="w-3 h-3 mr-1.5" />

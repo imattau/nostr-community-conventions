@@ -81,7 +81,7 @@ const SystemLogs = ({
         </div>
       </div>
       
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden font-mono text-[10px]">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden font-mono text-[10px]">
         <div className="max-h-60 overflow-y-auto p-6 space-y-2">
           {logs.length > 0 ? (
             logs.map((log, i) => {
@@ -92,11 +92,11 @@ const SystemLogs = ({
                   role="button"
                   tabIndex={0}
                   onClick={() => onSelectLog(isActive ? null : log)}
-                  className={`flex space-x-4 border-b border-slate-50 pb-2 last:border-0 cursor-pointer ${isActive ? 'bg-slate-50' : 'hover:bg-slate-50'}`}
+                  className={`flex space-x-4 border-b border-slate-50 dark:border-slate-800 pb-2 last:border-0 cursor-pointer transition-colors ${isActive ? 'bg-slate-50 dark:bg-slate-800' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
                 >
-                  <span className="text-slate-400 shrink-0">{formatTimeWithZone(log.timestamp)}</span>
-                  <span className={`font-bold shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500'}`}>{log.level.toUpperCase()}</span>
-                  <span className="text-slate-600">{log.message}</span>
+                  <span className="text-slate-400 dark:text-slate-500 shrink-0">{formatTimeWithZone(log.timestamp)}</span>
+                  <span className={`font-bold shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500 dark:text-blue-400'}`}>{log.level.toUpperCase()}</span>
+                  <span className="text-slate-600 dark:text-slate-300">{log.message}</span>
                 </div>
               );
             })
@@ -106,31 +106,31 @@ const SystemLogs = ({
         </div>
 
         {selectedLog && (
-          <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-[11px] space-y-3">
+          <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/20 px-6 py-4 text-[11px] space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-[9px] uppercase tracking-[0.4em] text-slate-500">Log Details</p>
-                <p className="text-slate-800 text-sm font-semibold">{selectedLog.message}</p>
+                <p className="text-slate-800 dark:text-slate-200 text-sm font-semibold">{selectedLog.message}</p>
               </div>
               <button
                 onClick={() => onSelectLog(null)}
-                className="text-[10px] uppercase tracking-[0.5em] text-slate-400 hover:text-slate-600"
+                className="text-[10px] uppercase tracking-[0.5em] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
               >
                 Close
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-4 text-[10px] text-slate-500">
+            <div className="grid grid-cols-3 gap-4 text-[10px] text-slate-500 dark:text-slate-400">
               <div>
-                <p className="font-bold text-slate-900 text-xs">{selectedLog.level.toUpperCase()}</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200 text-xs">{selectedLog.level.toUpperCase()}</p>
                 <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Level</p>
               </div>
               <div>
-                <p className="font-bold text-slate-900 text-xs">{formatDateTimeWithZone(selectedLog.timestamp)}</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200 text-xs">{formatDateTimeWithZone(selectedLog.timestamp)}</p>
                 <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Timestamp</p>
               </div>
               {selectedLogMetadata?.serviceId && (
                 <div>
-                  <p className="font-bold text-slate-900 text-xs">{selectedLogMetadata.serviceId}</p>
+                  <p className="font-bold text-slate-900 dark:text-slate-200 text-xs">{selectedLogMetadata.serviceId}</p>
                   <p className="text-[9px] uppercase tracking-[0.3em] text-slate-500">Service</p>
                 </div>
               )}
@@ -144,7 +144,7 @@ const SystemLogs = ({
                     <button
                       key={key}
                       onClick={() => copyToClipboard(value, `log-${key}-${selectedLog.id}`)}
-                      className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[10px] text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center gap-2"
+                      className="px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full text-[10px] text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center gap-2"
                     >
                       <span>{key.toUpperCase()}: {formatLogId(value)}</span>
                       {copiedMap[`log-${key}-${selectedLog.id}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
@@ -153,8 +153,8 @@ const SystemLogs = ({
                 })}
               </div>
             )}
-            <div className="bg-white border border-slate-200 rounded-2xl p-3 overflow-x-auto">
-              <pre className="text-[10px] whitespace-pre-wrap break-words">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 overflow-x-auto">
+              <pre className="text-[10px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap break-words">
                 {selectedLogMetadata ? JSON.stringify(selectedLogMetadata, null, 2) : 'No metadata.'}
               </pre>
             </div>

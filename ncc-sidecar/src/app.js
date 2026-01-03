@@ -231,11 +231,22 @@ export async function runPublishCycle(service, options = {}) {
   updateService(id, { state: newState });
 
   const logMetadata = { serviceId: id, results: publishResults };
-  if (willPublishNcc02 && ncc02Event?.id) logMetadata.ncc02 = ncc02Event.id;
-  if (willPublishNcc05 && ncc05EventTemplate?.id) logMetadata.ncc05 = ncc05EventTemplate.id;
-  if (kind0Event?.id) logMetadata.kind0 = kind0Event.id;
+  const publishedTypes = [];
+  if (willPublishNcc02 && ncc02Event?.id) {
+    logMetadata.ncc02 = ncc02Event.id;
+    publishedTypes.push('NCC-02');
+  }
+  if (willPublishNcc05 && ncc05EventTemplate?.id) {
+    logMetadata.ncc05 = ncc05EventTemplate.id;
+    publishedTypes.push('NCC-05');
+  }
+  if (kind0Event?.id) {
+    logMetadata.kind0 = kind0Event.id;
+    publishedTypes.push('Kind 0');
+  }
 
-  addLog('info', `Published updates for ${name} (${changeState.reason})`, logMetadata);
+  const typeSummary = publishedTypes.length ? ` [${publishedTypes.join(' | ')}]` : '';
+  addLog('info', `Published updates for ${name} (${changeState.reason})${typeSummary}`, logMetadata);
   
   return newState;
 }

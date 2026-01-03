@@ -311,21 +311,26 @@ const NodeSettingsModal = ({
           </div>
           {activeSection === 'protocols' && (
             <div className="mt-4 grid grid-cols-3 gap-3">
-              {['ipv4', 'ipv6', 'tor'].map(p => (
-                <button
-                  key={p}
-                  onClick={() => handleToggleProtocol(p)}
-                  disabled={protocolLoading === p}
-                  className={`py-3 rounded-xl border font-bold text-xs uppercase transition-colors flex items-center justify-center gap-2 ${
-                    appConfig.protocols?.[p] !== false 
-                      ? 'bg-blue-50 border-blue-200 text-blue-600' 
-                      : 'bg-white border-slate-200 text-slate-400'
-                  }`}
-                >
-                  {protocolLoading === p && <RefreshCw className="w-3 h-3 animate-spin" />}
-                  {p}
-                </button>
-              ))}
+              {['ipv4', 'ipv6', 'tor'].map(p => {
+                const isActive = appConfig.protocols?.[p] !== false;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => handleToggleProtocol(p)}
+                    disabled={protocolLoading === p}
+                    className={`py-3 rounded-xl border font-bold text-xs uppercase transition-colors flex items-center justify-center gap-2 ${
+                      isActive 
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/20 dark:border-blue-500/50 dark:text-blue-300' 
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500'
+                    }`}
+                  >
+                    {protocolLoading === p ? <RefreshCw className="w-3 h-3 animate-spin" /> : 
+                     <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-500 dark:bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                    }
+                    {p}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

@@ -18,17 +18,24 @@ export const useSidecar = () => {
 
   const checkNetwork = useCallback(async () => {
     try {
-      const [net, tor] = await Promise.all([
+      const [netResult, torResult] = await Promise.allSettled([
         sidecarApi.probeNetwork(),
         sidecarApi.getTorStatus()
       ]);
+
+      const net = netResult.status === 'fulfilled' ? netResult.value : { ipv4: false, ipv6: false };
+      const tor = torResult.status === 'fulfilled' ? torResult.value : { running: false };
+
+      if (netResult.status === 'rejected') console.warn('Network probe failed:', netResult.reason);
+      if (torResult.status === 'rejected') console.warn('Tor probe failed:', torResult.reason);
+
       setNetworkAvailability({
         ipv4: !!net.ipv4,
         ipv6: !!net.ipv6,
         tor: !!tor.running
       });
     } catch (err) {
-      console.warn("Network check failed:", err);
+      console.warn("Network check critical error:", err);
     }
   }, []);
 

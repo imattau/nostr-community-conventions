@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  Shield, Menu, LogOut, RefreshCw, Cloud, CloudOff, Plus
+import {
+  Shield, Menu, LogOut, RefreshCw, Cloud, CloudOff, Copy, Check, Plus, Sun, Moon
 } from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { nip19 } from 'nostr-tools';
@@ -18,9 +18,9 @@ import SidecarProfileModal from './components/dashboard/SidecarProfileModal';
 
 // Hooks & API
 import { useSidecar } from './hooks/useSidecar';
+import { useTheme } from './hooks/useTheme';
 import { useAdminNodeList } from './hooks/useAdminNodeList';
 import { sidecarApi } from './api';
-
 const formatTimeWithZone = (value) => {
   if (!value) return '—';
   return new Intl.DateTimeFormat(undefined, {
@@ -47,6 +47,8 @@ export default function App() {
     fetchAdmins,
     syncBackup
   } = useSidecar();
+
+  const { theme, toggleTheme } = useTheme();
 
   const [step, setStep] = useState(1);
   const [adminPubkey, setAdminPubkey] = useState(localStorage.getItem('ncc_admin_pk') || '');
@@ -183,16 +185,16 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans selection:bg-blue-100 pb-20">
-      <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50">
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 text-slate-900 dark:text-white font-sans selection:bg-blue-100 dark:selection:bg-blue-900 pb-20 transition-colors duration-300">
+      <nav className="border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300">
         <div className="max-w-6xl mx-auto px-6 h-20 flex justify-between items-center">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center shadow-lg">
               <Shield className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="text-lg font-black tracking-tighter uppercase block leading-none">NCC-06</span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sidecar Manager</span>
+              <span className="text-lg font-black tracking-tighter uppercase block leading-none dark:text-slate-200">NCC-06</span>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Sidecar Manager</span>
             </div>
           </div>
           
@@ -203,36 +205,48 @@ export default function App() {
               title={backupSyncError ? `Error: ${backupSyncError}` : `Last sync: ${formatTimeWithZone(lastBackupSyncTime)}`}
             >
               <div className="flex items-center gap-1.5">
-                <span className={`text-[9px] font-black uppercase tracking-widest ${backupSyncStatus === 'synced' ? 'text-blue-500' : 'text-slate-400'}`}>
+                <span className={`text-[9px] font-black uppercase tracking-widest ${backupSyncStatus === 'synced' ? 'text-blue-500 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'}`}>
                   {backupSyncStatus === 'synced' ? 'Backup OK' : backupSyncStatus}
                 </span>
-                {backupSyncStatus === 'syncing' ? <RefreshCw className="w-4 h-4 animate-spin" /> : 
-                 backupSyncStatus === 'error' ? <CloudOff className="w-4 h-4 text-red-500" /> : <Cloud className="w-4 h-4 text-blue-500" />}
+                {backupSyncStatus === 'syncing' ? <RefreshCw className="w-4 h-4 animate-spin dark:text-blue-400" /> : 
+                 backupSyncStatus === 'error' ? <CloudOff className="w-4 h-4 text-red-500 dark:text-red-400" /> : <Cloud className="w-4 h-4 text-blue-500 dark:text-blue-400" />}
               </div>
             </button>
 
+            <button 
+              onClick={toggleTheme} 
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+
             <div className="relative">
-              <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-slate-400 hover:text-blue-500">
+              <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-slate-400 hover:text-blue-500 transition-colors">
                 <Menu className="w-5 h-5" />
               </button>
               <AnimatePresence>
                 {showMenu && (
-                  <Motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
-                    <button onClick={() => { setShowMenu(false); toggleModal('nodeSettings', true); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50">Node Settings</button>
-                    <button onClick={() => { setShowMenu(false); toggleModal('sidecarProfile', true); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50">Sidecar Profile</button>
-                    <button onClick={() => { setShowMenu(false); toggleModal('admins', true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 border-t border-slate-50">Administrators</button>
+                  <Motion.div 
+                    initial={{ opacity: 0, y: 10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    exit={{ opacity: 0, y: 10 }} 
+                    className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-100 dark:border-slate-800 overflow-hidden z-50"
+                  >
+                    <button onClick={() => { setShowMenu(false); toggleModal('nodeSettings', true); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Node Settings</button>
+                    <button onClick={() => { setShowMenu(false); toggleModal('sidecarProfile', true); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Sidecar Profile</button>
+                    <button onClick={() => { setShowMenu(false); toggleModal('admins', true); fetchAdmins(); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 border-t border-slate-50 dark:border-slate-800 transition-colors">Administrators</button>
                   </Motion.div>
                 )}
               </AnimatePresence>
             </div>
-            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500"><LogOut className="w-5 h-5" /></button>
+            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 transition-colors"><LogOut className="w-5 h-5" /></button>
           </div>
         </div>
       </nav>
 
       <main className="max-w-6xl mx-auto px-6 py-12">
         {sidecarNode && (
-          <section onClick={() => toggleModal('nodeSettings', true)} className="mb-16 bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl relative overflow-hidden cursor-pointer border-2 border-blue-500/20">
+          <section onClick={() => toggleModal('nodeSettings', true)} className="mb-16 bg-slate-900 dark:bg-slate-800 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl relative overflow-hidden cursor-pointer border-2 border-blue-500/20 hover:border-blue-500/40 transition-colors">
             <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none"><Shield className="w-64 h-64" /></div>
             <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
               <div className="space-y-4">
@@ -266,8 +280,8 @@ export default function App() {
 
         <header className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6">
           <div>
-            <h2 className="text-3xl font-black tracking-tight text-slate-900">Managed Services</h2>
-            <p className="text-slate-500 font-medium mt-1">Active discovery profiles for hosted applications.</p>
+            <h2 className="text-3xl font-black tracking-tight text-slate-900 dark:text-slate-200">Managed Services</h2>
+            <p className="text-slate-500 dark:text-slate-400 font-medium mt-1">Active discovery profiles for hosted applications.</p>
           </div>
           <Button onClick={() => toggleModal('newService', true)} className="px-8 py-4">
             <Plus className="w-5 h-5 mr-2" /> NEW SERVICE PROFILE

@@ -14,7 +14,7 @@ export const sidecarApi = {
   
   // Network
   probeNetwork: () => client.get('/network/probe').then(res => res.data),
-  getTorStatus: () => client.get('/api/tor/status').then(res => res.data), // Fix: web.js had /api/tor/status
+  getTorStatus: () => client.get('/tor/status').then(res => res.data),
   detectProxy: () => client.get('/network/detect-proxy').then(res => res.data),
   
   // Services

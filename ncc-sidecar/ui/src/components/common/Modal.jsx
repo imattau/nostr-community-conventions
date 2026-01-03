@@ -25,7 +25,7 @@ const Modal = ({
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className={`relative bg-white rounded-[3rem] shadow-2xl w-full ${maxWidth} overflow-hidden border border-slate-200`}
+            className={`relative bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl w-full ${maxWidth} overflow-hidden border border-slate-200 dark:border-slate-800`}
           >
             <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
               <h2 className="text-2xl font-black tracking-tight">{title}</h2>
@@ -36,7 +36,7 @@ const Modal = ({
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
             </div>
-            <div className="p-8">
+            <div className="p-8 text-slate-900 dark:text-white">
               {children}
             </div>
           </Motion.div>
