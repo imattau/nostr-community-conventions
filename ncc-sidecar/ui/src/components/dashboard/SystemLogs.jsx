@@ -92,7 +92,7 @@ const SystemLogs = ({
                   role="button"
                   tabIndex={0}
                   onClick={() => onSelectLog(isActive ? null : log)}
-                  className={`flex space-x-4 border-b border-slate-50 dark:border-slate-800 pb-2 last:border-0 cursor-pointer transition-colors ${isActive ? 'bg-slate-50 dark:bg-slate-800' : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                  className={`flex space-x-4 border-b border-slate-50 dark:border-slate-800 pb-2 last:border-0 cursor-pointer transition-colors ${isActive ? 'bg-slate-50 dark:bg-slate-800/50' : 'hover:bg-slate-50 dark:hover:bg-slate-800/30'}`}
                 >
                   <span className="text-slate-400 dark:text-slate-500 shrink-0">{formatTimeWithZone(log.timestamp)}</span>
                   <span className={`font-bold shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500 dark:text-blue-400'}`}>{log.level.toUpperCase()}</span>
@@ -144,7 +144,7 @@ const SystemLogs = ({
                     <button
                       key={key}
                       onClick={() => copyToClipboard(value, `log-${key}-${selectedLog.id}`)}
-                      className="px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full text-[10px] text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center gap-2"
+                      className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-[10px] text-slate-600 dark:text-slate-300 hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center gap-2"
                     >
                       <span>{key.toUpperCase()}: {formatLogId(value)}</span>
                       {copiedMap[`log-${key}-${selectedLog.id}`] ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
@@ -153,7 +153,7 @@ const SystemLogs = ({
                 })}
               </div>
             )}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 overflow-x-auto">
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 overflow-x-auto">
               <pre className="text-[10px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap break-words">
                 {selectedLogMetadata ? JSON.stringify(selectedLogMetadata, null, 2) : 'No metadata.'}
               </pre>

@@ -381,7 +381,7 @@ const NodeSettingsModal = ({
                 rows={4}
                 value={relayInput}
                 onChange={e => setRelayInput(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-mono outline-none resize-none text-slate-900 dark:text-white"
+                className="ncc-input font-mono resize-none"
                 placeholder="wss://relay.damus.io&#10;wss://nos.lol"
               />
               <Button onClick={handleSaveRelays} loading={savingRelays} className="w-full">
@@ -446,9 +446,9 @@ const NodeSettingsModal = ({
               </div>
 
               {/* Import/Export */}
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500">Export</p>
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Export</p>
                   <input 
                     type="password" 
                     id="db_epw_field"
@@ -457,12 +457,12 @@ const NodeSettingsModal = ({
                     placeholder="Export Password" 
                     value={dbExportPassword} 
                     onChange={e => setDbExportPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
+                    className="ncc-input" 
                   />
                   <Button onClick={handleExportDb} loading={dbLoading === 'export'} className="w-full">Export .DB</Button>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest text-slate-500">Import</p>
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Import</p>
                   <input 
                     type="password" 
                     id="db_ipw_field"
@@ -471,7 +471,7 @@ const NodeSettingsModal = ({
                     placeholder="Import Password" 
                     value={dbImportPassword} 
                     onChange={e => setDbImportPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
+                    className="ncc-input" 
                   />
                   <Button onClick={handleImportDb} loading={dbLoading === 'import'} variant="success" className="w-full">Import .DB</Button>
                 </div>
@@ -553,7 +553,7 @@ const NodeSettingsModal = ({
            {activeSection === 'identity' && (
              <div className="mt-4 space-y-4">
                <div className="space-y-2">
-                 <p className="text-[10px] uppercase tracking-widest text-slate-500">Management Key (NSEC)</p>
+                 <p className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Management Key (NSEC)</p>
                  <div className="flex gap-2">
                     <input 
                       type={showNodeNsec ? 'text' : 'password'} 
@@ -562,24 +562,24 @@ const NodeSettingsModal = ({
                       autoComplete="current-password"
                       readOnly 
                       value={sidecarService?.service_nsec || ''} 
-                      className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" 
+                      className="ncc-input font-mono flex-1" 
                     />
                     <button onClick={() => setShowNodeNsec(!showNodeNsec)} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Eye className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
                     <button onClick={handleNodeGenerateIdentity} className="p-3 bg-slate-900 dark:bg-blue-600 text-white rounded-xl"><RefreshCw className="w-4 h-4" /></button>
                  </div>
                </div>
                <div className="space-y-2">
-                 <p className="text-[10px] uppercase tracking-widest text-slate-500">Onion Address</p>
+                 <p className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">Onion Address</p>
                  <div className="flex gap-2">
-                    <input type="text" readOnly value={nodeOnion} className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" />
+                    <input type="text" readOnly value={nodeOnion} className="ncc-input font-mono flex-1" />
                     <button onClick={() => copyToClipboard(nodeOnion, 'onion')} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
                     <button onClick={handleNodeRotateOnion} disabled={rotatingOnion} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><RefreshCw className={`w-4 h-4 text-slate-600 dark:text-slate-400 ${rotatingOnion ? 'animate-spin' : ''}`} /></button>
                  </div>
                </div>
                 <div className="space-y-2">
-                 <p className="text-[10px] uppercase tracking-widest text-slate-500">TLS Fingerprint</p>
+                 <p className="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">TLS Fingerprint</p>
                  <div className="flex gap-2">
-                    <input type="text" readOnly value={nodeTlsValue} className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" />
+                    <input type="text" readOnly value={nodeTlsValue} className="ncc-input font-mono flex-1" />
                     <button onClick={() => copyToClipboard(nodeTlsValue, 'tls')} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
                     <button onClick={handleNodeRegenerateTls} disabled={regeneratingTls} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><RefreshCw className={`w-4 h-4 text-slate-600 dark:text-slate-400 ${regeneratingTls ? 'animate-spin' : ''}`} /></button>
                  </div>

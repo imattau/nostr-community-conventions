@@ -42,7 +42,7 @@ const AdminsModal = ({ isOpen, onClose, admins, onRefresh, copyToClipboard, copi
           <div className="flex space-x-2">
             <input 
               type="text" placeholder="Paste npub..." 
-              className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-mono outline-none focus:border-blue-500/50 transition-colors text-slate-900 dark:text-white"
+              className="ncc-input flex-1 font-mono"
               value={inviteNpub}
               onChange={(e) => setInviteNpub(e.target.value)}
             />
@@ -54,7 +54,7 @@ const AdminsModal = ({ isOpen, onClose, admins, onRefresh, copyToClipboard, copi
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Admins</label>
           <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2">
             {admins.map((admin, idx) => (
-              <div key={admin.pubkey} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 group">
+              <div key={admin.pubkey} className="flex items-center justify-between ncc-input p-4 group">
                 <div className="space-y-1">
                   <p className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">
                     {nip19.npubEncode(admin.pubkey).slice(0, 16)}...{nip19.npubEncode(admin.pubkey).slice(-8)}

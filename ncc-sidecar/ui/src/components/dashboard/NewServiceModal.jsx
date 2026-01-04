@@ -155,7 +155,7 @@ const NewServiceModal = ({
                 setService(d => ({ ...d, config: { ...d.config, ncc05_recipients: recipients } }));
               }}
               placeholder="npub1..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-medium outline-none focus:border-blue-500/50 transition-colors text-slate-900 dark:text-white"
+              className="ncc-input font-mono resize-none"
             />
             <p className="text-[9px] text-slate-400 italic">One NPUB per line or comma-separated. Only these identities can decrypt the private NCC-05 locator.</p>
           </div>
@@ -289,19 +289,19 @@ const NewServiceModal = ({
             </button>
           </div>
           {proxyCheck && (
-            <div className="text-[10px] font-mono p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-700">
+            <div className="text-[10px] font-mono p-2 bg-white dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700">
                 {proxyCheck.detected ? (
-                    <div className="text-green-600 flex items-center">
+                    <div className="text-green-600 dark:text-green-400 flex items-center">
                         <Check className="w-3 h-3 mr-1.5" />
                         <span>Proxy Detected ({proxyCheck.details?.['x-forwarded-proto'] || 'HTTP'})</span>
                     </div>
                 ) : (
-                    <div className="text-slate-500 flex items-center">
+                    <div className="text-slate-500 dark:text-slate-400 flex items-center">
                         <Globe className="w-3 h-3 mr-1.5" />
                         <span>Direct Connection (Public IP)</span>
                     </div>
                 )}
-                <div className="mt-1 text-slate-400 text-[9px] break-all">
+                <div className="mt-1 text-slate-400 dark:text-slate-500 text-[9px] break-all">
                     Host: {proxyCheck.details?.host}
                 </div>
             </div>

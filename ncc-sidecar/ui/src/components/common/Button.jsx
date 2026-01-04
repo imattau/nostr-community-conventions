@@ -2,11 +2,11 @@ import React from 'react';
 
 const VARIANTS = {
   primary: 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20',
-  secondary: 'bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/30',
+  secondary: 'bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-700 shadow-slate-900/30 dark:shadow-blue-600/20',
   success: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20',
   danger: 'bg-rose-500 text-white hover:bg-rose-600 shadow-rose-500/30',
-  outline: 'bg-transparent border border-slate-200 text-slate-600 hover:border-slate-300',
-  ghost: 'bg-transparent text-slate-400 hover:text-blue-500',
+  outline: 'bg-transparent border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600',
+  ghost: 'bg-transparent text-slate-400 dark:text-slate-500 hover:text-blue-500 dark:hover:text-blue-400',
 };
 
 const Button = ({ 

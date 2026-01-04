@@ -48,7 +48,7 @@ const ServiceCard = ({
     <Motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-200 dark:border-slate-800 hover:shadow-2xl hover:border-slate-300 dark:hover:border-slate-700 transition-all group relative overflow-hidden"
+      className="ncc-card p-8 hover:shadow-2xl hover:border-slate-300 dark:hover:border-slate-700 transition-all group relative overflow-hidden"
       onClick={onEdit}
     >
       <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
