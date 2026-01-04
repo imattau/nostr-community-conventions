@@ -97,6 +97,7 @@ declare module 'ncc-06-js' {
     locatorId: string;
     expectedK?: string;
     torPreferred?: boolean;
+    allowedProtocols?: string[];
     locatorSecretKey?: string;
     ncc05TimeoutMs?: number;
     publicationRelayTimeoutMs?: number;

@@ -1,5 +1,6 @@
 import { SimplePool } from 'nostr-tools';
 import { NCC05Resolver } from 'ncc-05-js';
+import { parsePrivateFlag } from 'ncc-02-js';
 import { validateNcc02, parseNcc02Tags } from './ncc02.js';
 import { validateLocatorFreshness, normalizeLocatorEndpoints } from './ncc05.js';
 import { choosePreferredEndpoint } from './selector.js';
@@ -17,6 +18,7 @@ export async function resolveServiceEndpoint(options = {}) {
     locatorId,
     expectedK,
     torPreferred = false,
+    allowedProtocols,
     locatorSecretKey,
     ncc05TimeoutMs = 5000,
     publicationRelayTimeoutMs = DEFAULT_RELAY_TIMEOUT_MS,
@@ -45,37 +47,49 @@ export async function resolveServiceEndpoint(options = {}) {
 
   let serviceRecord;
   if (ncc02Resolver) {
-    serviceRecord = await ncc02Resolver.resolve(servicePubkey, serviceId, {});
+    try {
+        serviceRecord = await ncc02Resolver.resolve(servicePubkey, serviceId, {});
+    } catch (e) {
+        serviceRecord = await ncc02Resolver.resolveLatest(servicePubkey, {});
+    }
   } else {
     const poolToUse = pool || new SimplePool();
     try {
-      const filters = [{
+      const filter = {
         kinds: [30059],
-        authors: [servicePubkey],
-        '#d': [serviceId]
-      }];
-      const events = await new Promise((resolve) => {
-        const results = [];
-        const sub = poolToUse.subscribeMany(bootstrapRelays, filters, {
-          onevent(e) { results.push(e); },
-          oneose() { sub.close(); resolve(results); }
-        });
-        setTimeout(() => { sub.close(); resolve(results); }, publicationRelayTimeoutMs);
-      });
-
-      // Sort and validate
-      const validEvents = events
-        .filter(e => validateNcc02(e, { expectedAuthor: servicePubkey, expectedD: serviceId, now: timestamp }))
+        authors: [servicePubkey]
+      };
+      
+      console.log(`[NCC-Resolver] Querying relays for author ${servicePubkey}...`);
+      const events = await poolToUse.querySync(bootstrapRelays, filter);
+      
+      let validEvents = (events || [])
+        .filter(e => {
+            const tags = parseNcc02Tags(e);
+            return tags.d === serviceId && validateNcc02(e, { expectedAuthor: servicePubkey, expectedD: serviceId, now: timestamp });
+        })
         .sort((a, b) => b.created_at - a.created_at);
+      
+      if (validEvents.length === 0) {
+          console.log(`[NCC-Resolver] No specific record for "${serviceId}", falling back to latest...`);
+          validEvents = (events || [])
+            .filter(e => validateNcc02(e, { expectedAuthor: servicePubkey, now: timestamp }))
+            .sort((a, b) => b.created_at - a.created_at);
+      }
+
+      console.log(`[NCC-Resolver] Found ${validEvents.length} candidate events.`);
       
       if (validEvents[0]) {
         const tags = parseNcc02Tags(validEvents[0]);
+        console.log(`[NCC-Resolver] Selected NCC-02 record: ${validEvents[0].id} (d=${tags.d})`);
+        console.log(`[NCC-Resolver] Raw tags:`, JSON.stringify(validEvents[0].tags));
         serviceRecord = {
           endpoint: tags.u,
           fingerprint: tags.k,
           expiry: Number(tags.exp),
           eventId: validEvents[0].id,
-          pubkey: validEvents[0].pubkey
+          pubkey: validEvents[0].pubkey,
+          isPrivate: parsePrivateFlag(validEvents[0].tags) === true
         };
       }
     } finally {
@@ -84,7 +98,7 @@ export async function resolveServiceEndpoint(options = {}) {
   }
   
   if (!serviceRecord) {
-    throw new Error(`No valid NCC-02 record found for ${serviceId}`);
+    throw new Error(`No valid NCC-02 record found for ${servicePubkey}`);
   }
   
   // 2. Resolve NCC-05 Locator
@@ -102,6 +116,7 @@ export async function resolveServiceEndpoint(options = {}) {
     locatorPayload,
     expectedK,
     torPreferred,
+    allowedProtocols,
     now: timestamp
   });
 
@@ -114,14 +129,9 @@ export async function resolveServiceEndpoint(options = {}) {
   };
 }
 
-function determineEndpoint({ serviceRecord, locatorPayload, expectedK, torPreferred, now }) {
-  // serviceRecord is { endpoint, fingerprint, expiry, attestations, ... }
-  // It is already validated (signature, expiry).
-  
+function determineEndpoint({ serviceRecord, locatorPayload, expectedK, torPreferred, allowedProtocols, now }) {
   const ncc02Url = serviceRecord.endpoint;
   const k = serviceRecord.fingerprint;
-  // expiry check was done by resolver, but we check if we need to?
-  // NCC02Resolver throws if expired. So we can assume it's fresh.
   
   const result = {
     endpoint: null,
@@ -134,7 +144,8 @@ function determineEndpoint({ serviceRecord, locatorPayload, expectedK, torPrefer
     const normalized = normalizeLocatorEndpoints(locatorPayload.endpoints || []);
     const selection = choosePreferredEndpoint(normalized, {
       torPreferred,
-      expectedK
+      expectedK,
+      allowedProtocols
     });
     if (selection.endpoint) {
       return {
@@ -168,6 +179,10 @@ function determineEndpoint({ serviceRecord, locatorPayload, expectedK, torPrefer
   }
 
   result.reason = result.reason || 'no-endpoint';
+  if (serviceRecord.isPrivate && !locatorPayload) {
+      result.reason = 'private-no-decryption';
+  }
+  
   return result;
 }
 
@@ -183,7 +198,7 @@ async function defaultResolveLocator({
     timeout
   });
   try {
-    return await resolver.resolve(servicePubkey, locatorSecretKey, locatorId, {
+    return await resolver.resolveLatest(servicePubkey, locatorSecretKey, {
       strict: false,
       gossip: false
     });
