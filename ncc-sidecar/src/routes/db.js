@@ -67,9 +67,14 @@ export default async function dbRoutes(server) {
   });
 
   server.post('/api/db/password', async (request, reply) => {
-    const { currentPassword, newPassword } = request.body;
+    const { currentPassword = '', newPassword = '' } = request.body || {};
+    console.log(`[DB-Password] isProtected: ${isDbPasswordProtected()}, hasCurrent: ${!!currentPassword}`);
     if (isDbPasswordProtected() && !verifyDbPassword(currentPassword)) {
-      return reply.code(403).send({ error: 'Invalid current password' });
+      console.warn(`[DB-Password] 403: Invalid current password provided`);
+      return reply.code(403).send({ 
+        error: 'Invalid current password',
+        details: 'The provided current password does not match the one stored in the database.'
+      });
     }
     setDbPassword(newPassword);
     const status = isDbPasswordProtected();

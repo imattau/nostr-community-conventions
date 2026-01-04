@@ -2,12 +2,16 @@ import crypto from 'crypto';
 import { SimplePool } from 'nostr-tools';
 import { Genericlists } from 'nostr-tools/kinds';
 import { getPublicKey } from 'nostr-tools/pure';
-import { buildBackupPayload, createBackupEvent, parseBackupEvent } from './list-backup.js';
+import { 
+  buildBackupPayload, createBackupEvent, parseBackupEvent,
+  buildAdminRecoveryPayload, createAdminRecoveryEvent
+} from './list-backup.js';
 import { publishToRelays } from './publisher.js';
 import { getConfig, setConfig, getServices, getAdmins, updateService, addAdmin, addLog } from './db.js';
 import { fromNsec } from 'ncc-06-js';
 
 const BACKUP_HASH_KEY = 'list_backup_hash';
+const RECOVERY_HASH_KEY = 'admin_recovery_hash';
 const BACKUP_EVENT_ID_KEY = 'list_backup_event_id';
 const BACKUP_LAST_SYNC_KEY = 'list_backup_last_sync';
 const BACKUP_SYNC_TTL_MS = 5 * 60 * 1000;
@@ -59,6 +63,46 @@ export async function maybePublishListBackup({ service, secretKey }) {
     publicationRelays: relays
   });
   return { event, payload: livePayload, relays };
+}
+
+export async function maybePublishAdminRecovery({ service, secretKey }) {
+  const admins = getAdmins();
+  if (!admins.length) return null;
+  const relays = getBackupRelays(service);
+  if (!relays.length) return null;
+
+  const payload = buildAdminRecoveryPayload(service);
+  // Create a stable hash of the payload (excluding timestamp) and the current admin list
+  const stablePayload = { ...payload, timestamp: 0, admins: admins.map(a => a.pubkey).sort() };
+  const hash = crypto.createHash('sha256').update(JSON.stringify(stablePayload)).digest('hex');
+
+  if (getConfig(RECOVERY_HASH_KEY) === hash) {
+    return null;
+  }
+
+  const events = [];
+  for (const admin of admins) {
+    try {
+      const event = createAdminRecoveryEvent({ 
+        secretKey, 
+        adminPubkey: admin.pubkey, 
+        payload 
+      });
+      events.push(event);
+    } catch (err) {
+      console.warn(`[Backup] Failed to create recovery event for admin ${admin.pubkey}:`, err.message);
+    }
+  }
+
+  if (events.length > 0) {
+    await publishToRelays(relays, events, secretKey);
+    setConfig(RECOVERY_HASH_KEY, hash);
+    addLog('info', `Published admin recovery events to ${relays.length} relays`, {
+      adminCount: events.length
+    });
+  }
+
+  return events;
 }
 
 export function restoreBackupPayload(payload, { message = null, log = true } = {}) {
@@ -142,7 +186,7 @@ export async function fetchRemoteBackup({ force = false } = {}) {
   if (!force && event.id === getConfig(BACKUP_EVENT_ID_KEY)) {
     return { skipped: true, reason: 'already synced', eventId: event.id };
   }
-  const payload = parseBackupEvent(event);
+  const payload = parseBackupEvent(event, secretKey);
   const restored = restoreBackupPayload(payload);
   setConfig(BACKUP_EVENT_ID_KEY, event.id);
   return { success: true, eventId: event.id, restored };

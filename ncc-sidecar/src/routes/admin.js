@@ -14,13 +14,26 @@ export default async function adminRoutes(server, onInitialized) {
     if (isInitialized()) {
       return reply.code(400).send({ error: 'Already initialized' });
     }
-    const { adminPubkey, config: userConfig } = request.body;
+    const { adminPubkey, config: userConfig, isRecovery, recoveryPayload } = request.body;
     
     if (!adminPubkey) {
       return reply.code(400).send({ error: 'Admin Pubkey is required' });
     }
 
-    const sidecarKeys = generateKeypair();
+    let sidecarNsec;
+    let onionPrivateKey;
+
+    if (isRecovery && recoveryPayload) {
+      sidecarNsec = recoveryPayload.sidecar_nsec;
+      onionPrivateKey = recoveryPayload.onion_private_key;
+      if (!sidecarNsec) {
+        return reply.code(400).send({ error: 'Invalid recovery payload: missing sidecar_nsec' });
+      }
+    } else {
+      const keys = generateKeypair();
+      sidecarNsec = keys.nsec;
+    }
+
     const defaultConfig = {
       refresh_interval_minutes: 360,
       ncc02_expiry_days: 14,
@@ -31,7 +44,8 @@ export default async function adminRoutes(server, onInitialized) {
       primary_protocol: 'ipv4',
       preferred_protocol: 'auto',
       allow_remote: false,
-      ...userConfig
+      ...userConfig,
+      onion_private_key: onionPrivateKey || userConfig?.onion_private_key
     };
 
     addAdmin(adminPubkey, 'active');
@@ -40,17 +54,18 @@ export default async function adminRoutes(server, onInitialized) {
     addService({
       type: 'sidecar',
       name: 'Sidecar Node',
-      service_id: 'manager',
-      service_nsec: sidecarKeys.nsec,
+      service_id: recoveryPayload?.service_id || 'manager',
+      service_nsec: sidecarNsec,
       config: defaultConfig
     });
 
     if (onInitialized) onInitialized();
     
+    const pk = getPublicKey(fromNsec(sidecarNsec));
     return { 
       success: true, 
-      sidecar_nsec: sidecarKeys.nsec,
-      sidecar_npub: sidecarKeys.npub 
+      sidecar_nsec: sidecarNsec,
+      sidecar_npub: toNpub(pk)
     };
   });
 

@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { nip19 } from 'nostr-tools';
+import { getPublicKey } from 'nostr-tools/pure';
 
 // Components
 import Button from './components/common/Button';
@@ -68,6 +69,14 @@ export default function App() {
   const isAuthenticated = initialized && adminPubkey;
   const sidecarNode = useMemo(() => services.find(s => s.type === 'sidecar'), [services]);
   const managedServices = useMemo(() => services.filter(s => s.type !== 'sidecar'), [services]);
+
+  const sidecarNpub = useMemo(() => {
+    if (!sidecarNode?.service_nsec) return null;
+    try {
+      const decoded = nip19.decode(sidecarNode.service_nsec);
+      return nip19.npubEncode(getPublicKey(decoded.data));
+    } catch { return null; }
+  }, [sidecarNode]);
 
   // Automatic Node Bookmarking
   useAdminNodeList({ adminPubkey, sidecarNode, signer });
@@ -175,6 +184,7 @@ export default function App() {
             ) : (
               <ProvisioningWizard 
                 adminPubkey={adminPubkey} 
+                signer={signer}
                 onComplete={() => window.location.reload()} 
               />
             )}
@@ -258,9 +268,20 @@ export default function App() {
                   </div>
                 </div>
                 <h2 className="text-4xl font-black tracking-tight leading-none">Management Identity</h2>
-                <p className="text-slate-400 font-mono text-sm">
-                  {sidecarNode.service_nsec ? nip19.npubEncode(sidecarApi.generateKey.publicKeyFromNsec?.(sidecarNode.service_nsec) || '') : '...'}
-                </p>
+                <div className="flex flex-col md:flex-row md:items-center gap-4">
+                  <p className="text-slate-400 font-mono text-sm">
+                    {sidecarNpub ? `${sidecarNpub.slice(0, 16)}...${sidecarNpub.slice(-8)}` : '...'}
+                  </p>
+                  {sidecarNpub && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(sidecarNpub, 'sidecar-npub'); }}
+                      className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-2xl transition-all text-[10px] font-black uppercase tracking-[0.2em] border border-white/10 w-fit"
+                    >
+                      {copiedMap['sidecar-npub'] ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5 text-blue-400" />}
+                      {copiedMap['sidecar-npub'] ? 'Copied to Clipboard' : 'Copy NPUB'}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex gap-4">
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-4 min-w-[150px]">

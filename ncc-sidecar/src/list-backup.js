@@ -1,8 +1,10 @@
-import { finalizeEvent, verifyEvent } from 'nostr-tools/pure';
+import { finalizeEvent, verifyEvent, getPublicKey } from 'nostr-tools/pure';
+import { nip44 } from 'nostr-tools';
 import { Genericlists } from 'nostr-tools/kinds';
 
 const BACKUP_KIND = Genericlists;
 const BACKUP_IDENTIFIER = 'ncc-sidecar-backup';
+const RECOVERY_IDENTIFIER = 'ncc-sidecar-recovery';
 const BACKUP_VERSION = 1;
 
 function deepClone(value) {
@@ -42,20 +44,57 @@ export function buildBackupPayload({ services = [], admins = [], appConfig = {},
   };
 }
 
+export function buildAdminRecoveryPayload(sidecarService) {
+  return {
+    version: BACKUP_VERSION,
+    timestamp: Math.floor(Date.now() / 1000),
+    sidecar_nsec: sidecarService.service_nsec,
+    service_id: sidecarService.service_id,
+    onion_private_key: sidecarService.config?.onion_private_key
+  };
+}
+
 export function createBackupEvent({ secretKey, payload, createdAt }) {
   if (!secretKey) {
     throw new Error('secretKey is required to sign the backup event');
   }
+  const pk = getPublicKey(secretKey);
+  const conversationKey = nip44.getConversationKey(secretKey, pk);
+  const ciphertext = nip44.encrypt(JSON.stringify(payload), conversationKey);
+
   const event = {
     kind: BACKUP_KIND,
     created_at: createdAt || Math.floor(Date.now() / 1000),
-    tags: [['d', BACKUP_IDENTIFIER]],
-    content: JSON.stringify(payload)
+    tags: [
+      ['d', BACKUP_IDENTIFIER],
+      ['encryption', 'nip44']
+    ],
+    content: ciphertext
   };
   return finalizeEvent(event, secretKey);
 }
 
-export function parseBackupEvent(event) {
+export function createAdminRecoveryEvent({ secretKey, adminPubkey, payload, createdAt }) {
+  if (!secretKey || !adminPubkey) {
+    throw new Error('secretKey and adminPubkey are required');
+  }
+  const conversationKey = nip44.getConversationKey(secretKey, adminPubkey);
+  const ciphertext = nip44.encrypt(JSON.stringify(payload), conversationKey);
+
+  const event = {
+    kind: BACKUP_KIND,
+    created_at: createdAt || Math.floor(Date.now() / 1000),
+    tags: [
+      ['d', RECOVERY_IDENTIFIER],
+      ['p', adminPubkey],
+      ['encryption', 'nip44']
+    ],
+    content: ciphertext
+  };
+  return finalizeEvent(event, secretKey);
+}
+
+export function parseBackupEvent(event, secretKey, senderPubkey) {
   if (!event || event.kind !== BACKUP_KIND) {
     throw new Error('Unsupported event kind for NCC Sidecar backup');
   }
@@ -63,14 +102,26 @@ export function parseBackupEvent(event) {
     throw new Error('Backup event signature is invalid');
   }
   const dTag = event.tags.find(tag => tag[0] === 'd' && tag[1]);
-  if (!dTag || dTag[1] !== BACKUP_IDENTIFIER) {
-    throw new Error('Event is not an NCC Sidecar backup');
+  if (!dTag || dTag[1] !== BACKUP_IDENTIFIER && dTag[1] !== RECOVERY_IDENTIFIER) {
+    throw new Error('Event is not an NCC Sidecar backup or recovery');
   }
+
+  let content = event.content;
+  const encryptionTag = event.tags.find(t => t[0] === 'encryption');
+  if (encryptionTag && encryptionTag[1] === 'nip44') {
+    if (!secretKey) {
+      throw new Error('secretKey is required to decrypt this backup');
+    }
+    const targetPubkey = senderPubkey || getPublicKey(secretKey);
+    const conversationKey = nip44.getConversationKey(secretKey, targetPubkey);
+    content = nip44.decrypt(event.content, conversationKey);
+  }
+
   let payload;
   try {
-    payload = JSON.parse(event.content || '{}');
+    payload = JSON.parse(content || '{}');
   } catch {
-    throw new Error('Backup payload is not valid JSON');
+    throw new Error('Backup payload is not valid JSON or decryption failed');
   }
   if (payload.version !== BACKUP_VERSION) {
     throw new Error('Unsupported backup version');

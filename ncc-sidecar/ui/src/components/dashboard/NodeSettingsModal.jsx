@@ -46,6 +46,10 @@ const NodeSettingsModal = ({
   const [activeSection, setActiveSection] = useState(null);
   const [dbInfo, setDbInfo] = useState(null);
   
+  // Relay States
+  const [relayInput, setRelayInput] = useState('');
+  const [savingRelays, setSavingRelays] = useState(false);
+
   // DB States
   const [dbCurrentPassword, setDbCurrentPassword] = useState('');
   const [dbNewPassword, setDbNewPassword] = useState('');
@@ -66,6 +70,12 @@ const NodeSettingsModal = ({
   const [showNodeNsec, setShowNodeNsec] = useState(false);
   const [protocolLoading, setProtocolLoading] = useState(null);
   const [remoteLoading, setRemoteLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && appConfig.publication_relays) {
+      setRelayInput(appConfig.publication_relays.join('\n'));
+    }
+  }, [isOpen, appConfig.publication_relays]);
 
   useEffect(() => {
     if (isOpen && activeSection === 'database') {
@@ -110,6 +120,20 @@ const NodeSettingsModal = ({
       alert("Failed: " + err.message);
     } finally {
       setProtocolLoading(null);
+    }
+  };
+
+  const handleSaveRelays = async () => {
+    setSavingRelays(true);
+    try {
+      const relays = relayInput.split(/[\n,]+/).map(r => r.trim()).filter(Boolean);
+      await sidecarApi.updatePublicationRelays(relays);
+      onRefresh();
+      alert('Publication relays updated.');
+    } catch (err) {
+      alert("Failed: " + err.message);
+    } finally {
+      setSavingRelays(false);
     }
   };
 
@@ -161,7 +185,10 @@ const NodeSettingsModal = ({
   const handleSetDbPassword = async () => {
     setDbLoading('password');
     try {
-      await sidecarApi.updateDbPassword({ currentPassword: dbCurrentPassword, newPassword: dbNewPassword });
+      await sidecarApi.updateDbPassword({ 
+        currentPassword: dbCurrentPassword.trim(), 
+        newPassword: dbNewPassword.trim() 
+      });
       setDbCurrentPassword('');
       setDbNewPassword('');
       const info = await sidecarApi.getDbInfo();
@@ -177,7 +204,7 @@ const NodeSettingsModal = ({
   const handleExportDb = async () => {
     setDbLoading('export');
     try {
-      const response = await sidecarApi.exportDb(dbExportPassword);
+      const response = await sidecarApi.exportDb(dbExportPassword.trim());
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -205,7 +232,7 @@ const NodeSettingsModal = ({
         const base64 = evt.target.result.split(',')[1];
         setDbLoading('import');
         try {
-          await sidecarApi.importDb({ data: base64, password: dbImportPassword });
+          await sidecarApi.importDb({ data: base64, password: dbImportPassword.trim() });
           alert('Database imported successfully.');
           window.location.reload();
         } catch (_err) {
@@ -223,7 +250,7 @@ const NodeSettingsModal = ({
     if (!confirm("Are you sure you want to WIPE the database? This is irreversible.")) return;
     setDbLoading('wipe');
     try {
-      await sidecarApi.wipeDb(dbWipePassword);
+      await sidecarApi.wipeDb(dbWipePassword.trim());
       window.location.reload();
     } catch (err) {
       alert(err.message);
@@ -335,6 +362,35 @@ const NodeSettingsModal = ({
           )}
         </div>
 
+        {/* --- Publication Relays --- */}
+        <div className="rounded-2xl border border-slate-100 p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Publication Relays</p>
+              <p className="text-[11px] text-slate-400 max-w-sm">
+                Nostr relays where the Sidecar publishes discovery records.
+              </p>
+            </div>
+            <button onClick={() => toggleSection('relays')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+              <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'relays' ? 'rotate-90' : ''}`} />
+            </button>
+          </div>
+          {activeSection === 'relays' && (
+            <div className="mt-4 space-y-4">
+              <textarea
+                rows={4}
+                value={relayInput}
+                onChange={e => setRelayInput(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-mono outline-none resize-none"
+                placeholder="wss://relay.damus.io&#10;wss://nos.lol"
+              />
+              <Button onClick={handleSaveRelays} loading={savingRelays} className="w-full">
+                Save Relays
+              </Button>
+            </div>
+          )}
+        </div>
+
         {/* --- Database --- */}
         <div className="rounded-2xl border border-slate-100 p-4">
           <div className="flex items-start justify-between">
@@ -365,8 +421,26 @@ const NodeSettingsModal = ({
               <div className="space-y-2">
                 <p className="text-[10px] uppercase tracking-widest text-slate-500">Database Password</p>
                 <div className="flex gap-2">
-                  <input type="password" placeholder="Current" value={dbCurrentPassword} onChange={e => setDbCurrentPassword(e.target.value)} className="w-full p-3 rounded-xl border text-xs" />
-                  <input type="password" placeholder="New" value={dbNewPassword} onChange={e => setDbNewPassword(e.target.value)} className="w-full p-3 rounded-xl border text-xs" />
+                  <input 
+                    type="password" 
+                    id="db_cpw_field"
+                    name="db_cpw_field"
+                    autoComplete="current-password"
+                    placeholder="Current" 
+                    value={dbCurrentPassword} 
+                    onChange={e => setDbCurrentPassword(e.target.value)} 
+                    className="w-full p-3 rounded-xl border text-xs" 
+                  />
+                  <input 
+                    type="password" 
+                    id="db_npw_field"
+                    name="db_npw_field"
+                    autoComplete="new-password"
+                    placeholder="New" 
+                    value={dbNewPassword} 
+                    onChange={e => setDbNewPassword(e.target.value)} 
+                    className="w-full p-3 rounded-xl border text-xs" 
+                  />
                 </div>
                 <Button onClick={handleSetDbPassword} loading={dbLoading === 'password'} className="w-full">Update Password</Button>
               </div>
@@ -375,19 +449,46 @@ const NodeSettingsModal = ({
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
                 <div className="space-y-2">
                   <p className="text-[10px] uppercase tracking-widest text-slate-500">Export</p>
-                  <input type="password" placeholder="Export Password" value={dbExportPassword} onChange={e => setDbExportPassword(e.target.value)} className="w-full p-3 rounded-xl border text-xs" />
+                  <input 
+                    type="password" 
+                    id="db_epw_field"
+                    name="db_epw_field"
+                    autoComplete="off"
+                    placeholder="Export Password" 
+                    value={dbExportPassword} 
+                    onChange={e => setDbExportPassword(e.target.value)} 
+                    className="w-full p-3 rounded-xl border text-xs" 
+                  />
                   <Button onClick={handleExportDb} loading={dbLoading === 'export'} className="w-full">Export .DB</Button>
                 </div>
                 <div className="space-y-2">
                   <p className="text-[10px] uppercase tracking-widest text-slate-500">Import</p>
-                  <input type="password" placeholder="Import Password" value={dbImportPassword} onChange={e => setDbImportPassword(e.target.value)} className="w-full p-3 rounded-xl border text-xs" />
+                  <input 
+                    type="password" 
+                    id="db_ipw_field"
+                    name="db_ipw_field"
+                    autoComplete="off"
+                    placeholder="Import Password" 
+                    value={dbImportPassword} 
+                    onChange={e => setDbImportPassword(e.target.value)} 
+                    className="w-full p-3 rounded-xl border text-xs" 
+                  />
                   <Button onClick={handleImportDb} loading={dbLoading === 'import'} variant="success" className="w-full">Import .DB</Button>
                 </div>
               </div>
 
               {/* Wipe */}
               <div className="pt-4 border-t border-slate-100">
-                <input type="password" placeholder="Password to Wipe" value={dbWipePassword} onChange={e => setDbWipePassword(e.target.value)} className="w-full p-3 rounded-xl border text-xs mb-2" />
+                <input 
+                  type="password" 
+                  id="db_wpw_field"
+                  name="db_wpw_field"
+                  autoComplete="off"
+                  placeholder="Password to Wipe" 
+                  value={dbWipePassword} 
+                  onChange={e => setDbWipePassword(e.target.value)} 
+                  className="w-full p-3 rounded-xl border text-xs mb-2" 
+                />
                 <Button onClick={handleWipeDb} loading={dbLoading === 'wipe'} variant="danger" className="w-full">Wipe Database</Button>
               </div>
             </div>
@@ -454,7 +555,15 @@ const NodeSettingsModal = ({
                <div className="space-y-2">
                  <p className="text-[10px] uppercase tracking-widest text-slate-500">Management Key (NSEC)</p>
                  <div className="flex gap-2">
-                    <input type={showNodeNsec ? 'text' : 'password'} readOnly value={sidecarService?.service_nsec || ''} className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono" />
+                    <input 
+                      type={showNodeNsec ? 'text' : 'password'} 
+                      id="node-nsec"
+                      name="node-nsec"
+                      autoComplete="current-password"
+                      readOnly 
+                      value={sidecarService?.service_nsec || ''} 
+                      className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono" 
+                    />
                     <button onClick={() => setShowNodeNsec(!showNodeNsec)} className="p-3 bg-slate-100 rounded-xl"><Eye className="w-4 h-4 text-slate-600" /></button>
                     <button onClick={handleNodeGenerateIdentity} className="p-3 bg-slate-900 text-white rounded-xl"><RefreshCw className="w-4 h-4" /></button>
                  </div>

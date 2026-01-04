@@ -9,7 +9,7 @@ import { publishToRelays } from './publisher.js';
 import { updateService, addLog, getConfig, getServices } from './db.js';
 import { checkTor } from './tor-check.js';
 import { provisionOnion } from './onion-service.js';
-import { maybePublishListBackup } from './list-sync.js';
+import { maybePublishListBackup, maybePublishAdminRecovery } from './list-sync.js';
 
 // Services
 import { notifyAdminsOnionUpdate } from './services/notification.js';
@@ -93,8 +93,11 @@ export async function runPublishCycle(service, options = {}) {
   const publicKey = getPublicKey(secretKey);
 
   if (type === 'sidecar') {
-    try { await maybePublishListBackup({ service, secretKey }); } 
-    catch (err) { console.warn(`[App] List backup publish failed: ${err.message}`); }
+    try { 
+        await maybePublishListBackup({ service, secretKey }); 
+        await maybePublishAdminRecovery({ service, secretKey });
+    } 
+    catch (err) { console.warn(`[App] Backup publish failed: ${err.message}`); }
   }
   
   updateService(id, { state: { ...state, is_probing: true } });

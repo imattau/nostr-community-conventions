@@ -40,7 +40,7 @@ test('createBackupEvent signs and parseBackupEvent validates roundtrip', () => {
     appConfig: { publication_relays: ['wss://nos.lol'] }
   });
   const event = createBackupEvent({ secretKey, payload, createdAt: 1234567890 });
-  const parsed = parseBackupEvent(event);
+  const parsed = parseBackupEvent(event, secretKey);
   assert.strictEqual(parsed.version, 1);
   assert.deepStrictEqual(parsed.appConfig, payload.appConfig);
   assert.deepStrictEqual(parsed.services, payload.services);

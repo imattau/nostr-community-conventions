@@ -49,4 +49,6 @@ export const sidecarApi = {
   getBackupList: () => client.get('/backup/list').then(res => res.data),
   restoreBackupList: (event) => client.post('/backup/list', { event }).then(res => res.data),
   fetchRemoteBackup: (force = false) => client.get(`/backup/remote${force ? '?force=true' : ''}`).then(res => res.data),
+  getRecoveryEvents: (adminPubkey) => client.get(`/backup/recovery-events?adminPubkey=${adminPubkey}`).then(res => res.data),
+  recoverNode: (payload) => client.post('/setup/init', { ...payload, isRecovery: true }).then(res => res.data),
 };

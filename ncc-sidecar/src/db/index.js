@@ -115,7 +115,8 @@ export function verifyDbPassword(password) {
     const { salt, hash } = JSON.parse(result.value);
     const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
     return hash === verifyHash;
-  } catch {
+  } catch (err) {
+    console.error(`[DB-Security] Failed to parse db_security value: ${err.message}`);
     return false;
   }
 }
