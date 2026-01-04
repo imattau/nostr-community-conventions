@@ -309,13 +309,13 @@ const NodeSettingsModal = ({
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-lg ${appConfig.allow_remote ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+              <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-lg ${appConfig.allow_remote ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                 {appConfig.allow_remote ? 'Enabled' : 'Local Only'}
               </span>
               <button 
                 onClick={handleToggleAllowRemote} 
                 disabled={remoteLoading}
-                className={`w-12 h-6 rounded-full transition-colors relative ${appConfig.allow_remote ? 'bg-blue-600' : 'bg-slate-200'}`}
+                className={`w-12 h-6 rounded-full transition-colors relative ${appConfig.allow_remote ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}
               >
                 <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${appConfig.allow_remote ? 'translate-x-6' : ''}`} />
               </button>
@@ -324,15 +324,15 @@ const NodeSettingsModal = ({
         </div>
 
         {/* --- Endpoints --- */}
-        <div className="rounded-2xl border border-slate-100 p-4">
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Endpoint Availability</p>
-              <p className="text-[11px] text-slate-400 max-w-sm">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Endpoint Availability</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-sm">
                 Control which protocols the Sidecar creates endpoints for.
               </p>
             </div>
-            <button onClick={() => toggleSection('protocols')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+            <button onClick={() => toggleSection('protocols')} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
               <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'protocols' ? 'rotate-90' : ''}`} />
             </button>
           </div>
@@ -363,15 +363,15 @@ const NodeSettingsModal = ({
         </div>
 
         {/* --- Publication Relays --- */}
-        <div className="rounded-2xl border border-slate-100 p-4">
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Publication Relays</p>
-              <p className="text-[11px] text-slate-400 max-w-sm">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Publication Relays</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-sm">
                 Nostr relays where the Sidecar publishes discovery records.
               </p>
             </div>
-            <button onClick={() => toggleSection('relays')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+            <button onClick={() => toggleSection('relays')} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
               <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'relays' ? 'rotate-90' : ''}`} />
             </button>
           </div>
@@ -381,7 +381,7 @@ const NodeSettingsModal = ({
                 rows={4}
                 value={relayInput}
                 onChange={e => setRelayInput(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-mono outline-none resize-none"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-mono outline-none resize-none text-slate-900 dark:text-white"
                 placeholder="wss://relay.damus.io&#10;wss://nos.lol"
               />
               <Button onClick={handleSaveRelays} loading={savingRelays} className="w-full">
@@ -392,29 +392,29 @@ const NodeSettingsModal = ({
         </div>
 
         {/* --- Database --- */}
-        <div className="rounded-2xl border border-slate-100 p-4">
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Database Management</p>
-              <p className="text-[11px] text-slate-400 max-w-sm">
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Database Management</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-sm">
                 Export, import, or reset the embedded SQLite database.
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.4em] text-slate-400">
+              <span className="text-[10px] uppercase tracking-[0.4em] text-slate-400 dark:text-slate-500">
                 {dbInfo?.passwordProtected ? 'Passworded' : 'Unprotected'}
               </span>
-              <button onClick={() => toggleSection('database')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+              <button onClick={() => toggleSection('database')} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
                 <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'database' ? 'rotate-90' : ''}`} />
               </button>
             </div>
           </div>
           {activeSection === 'database' && (
             <div className="mt-4 space-y-6">
-              <div className="grid grid-cols-3 gap-3 text-[11px] text-slate-500 bg-slate-50 p-3 rounded-xl">
-                <div><p className="uppercase text-[9px] tracking-widest text-slate-400">File</p>{dbInfo?.path || '...'}</div>
-                <div><p className="uppercase text-[9px] tracking-widest text-slate-400">Size</p>{formatBytes(dbInfo?.size)}</div>
-                <div><p className="uppercase text-[9px] tracking-widest text-slate-400">Modified</p>{formatDateTimeWithZone(dbInfo?.modifiedAt)}</div>
+              <div className="grid grid-cols-3 gap-3 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
+                <div><p className="uppercase text-[9px] tracking-widest text-slate-400 dark:text-slate-500">File</p>{dbInfo?.path || '...'}</div>
+                <div><p className="uppercase text-[9px] tracking-widest text-slate-400 dark:text-slate-500">Size</p>{formatBytes(dbInfo?.size)}</div>
+                <div><p className="uppercase text-[9px] tracking-widest text-slate-400 dark:text-slate-500">Modified</p>{formatDateTimeWithZone(dbInfo?.modifiedAt)}</div>
               </div>
 
               {/* DB Password */}
@@ -429,7 +429,7 @@ const NodeSettingsModal = ({
                     placeholder="Current" 
                     value={dbCurrentPassword} 
                     onChange={e => setDbCurrentPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border text-xs" 
+                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
                   />
                   <input 
                     type="password" 
@@ -439,7 +439,7 @@ const NodeSettingsModal = ({
                     placeholder="New" 
                     value={dbNewPassword} 
                     onChange={e => setDbNewPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border text-xs" 
+                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
                   />
                 </div>
                 <Button onClick={handleSetDbPassword} loading={dbLoading === 'password'} className="w-full">Update Password</Button>
@@ -457,7 +457,7 @@ const NodeSettingsModal = ({
                     placeholder="Export Password" 
                     value={dbExportPassword} 
                     onChange={e => setDbExportPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border text-xs" 
+                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
                   />
                   <Button onClick={handleExportDb} loading={dbLoading === 'export'} className="w-full">Export .DB</Button>
                 </div>
@@ -471,14 +471,14 @@ const NodeSettingsModal = ({
                     placeholder="Import Password" 
                     value={dbImportPassword} 
                     onChange={e => setDbImportPassword(e.target.value)} 
-                    className="w-full p-3 rounded-xl border text-xs" 
+                    className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs" 
                   />
                   <Button onClick={handleImportDb} loading={dbLoading === 'import'} variant="success" className="w-full">Import .DB</Button>
                 </div>
               </div>
 
               {/* Wipe */}
-              <div className="pt-4 border-t border-slate-100">
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                 <input 
                   type="password" 
                   id="db_wpw_field"
@@ -487,7 +487,7 @@ const NodeSettingsModal = ({
                   placeholder="Password to Wipe" 
                   value={dbWipePassword} 
                   onChange={e => setDbWipePassword(e.target.value)} 
-                  className="w-full p-3 rounded-xl border text-xs mb-2" 
+                  className="w-full p-3 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs mb-2" 
                 />
                 <Button onClick={handleWipeDb} loading={dbLoading === 'wipe'} variant="danger" className="w-full">Wipe Database</Button>
               </div>
@@ -496,18 +496,18 @@ const NodeSettingsModal = ({
         </div>
 
         {/* --- Backup --- */}
-        <div className="rounded-2xl border border-slate-100 p-4">
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Nostr Backup</p>
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Nostr Backup</p>
               <div className="flex items-center gap-2 mt-1">
-                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${backupSyncStatus === 'synced' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${backupSyncStatus === 'synced' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                   {backupSyncStatus === 'synced' ? 'Synced' : backupSyncStatus}
                 </span>
-                {lastBackupSyncTime && <span className="text-[10px] text-slate-400">Last: {formatDateTimeWithZone(lastBackupSyncTime)}</span>}
+                {lastBackupSyncTime && <span className="text-[10px] text-slate-400 dark:text-slate-500">Last: {formatDateTimeWithZone(lastBackupSyncTime)}</span>}
               </div>
             </div>
-            <button onClick={() => toggleSection('backup')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+            <button onClick={() => toggleSection('backup')} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
               <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'backup' ? 'rotate-90' : ''}`} />
             </button>
           </div>
@@ -518,10 +518,10 @@ const NodeSettingsModal = ({
               </Button>
               {backupSyncError && <p className="text-[10px] text-red-500 font-mono">{backupSyncError}</p>}
               
-              <div className="pt-4 border-t border-slate-100 space-y-4">
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
                  <Button onClick={handleGenerateBackup} loading={backupLoading === 'generate'} className="w-full">Generate List Backup</Button>
                  {listBackupEvent && (
-                   <textarea readOnly value={listBackupEvent} className="w-full h-24 p-3 bg-slate-50 rounded-xl text-[10px] font-mono" />
+                   <textarea readOnly value={listBackupEvent} className="w-full h-24 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-[10px] font-mono text-slate-900 dark:text-white" />
                  )}
                  
                  <div className="space-y-2">
@@ -529,7 +529,7 @@ const NodeSettingsModal = ({
                      placeholder="Paste backup event JSON..." 
                      value={listBackupImportValue} 
                      onChange={e => setListBackupImportValue(e.target.value)}
-                     className="w-full h-24 p-3 bg-slate-50 rounded-xl text-[10px] font-mono" 
+                     className="w-full h-24 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-[10px] font-mono text-slate-900 dark:text-white" 
                    />
                    <Button onClick={handleRestoreBackup} loading={backupLoading === 'restore'} variant="success" className="w-full">Restore from List</Button>
                  </div>
@@ -540,13 +540,13 @@ const NodeSettingsModal = ({
         </div>
 
         {/* --- Identity --- */}
-        <div className="rounded-2xl border border-slate-100 p-4">
+        <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4">
            <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-black text-slate-700 uppercase tracking-tight">Identity & Keys</p>
-              <p className="text-[11px] text-slate-400 max-w-sm">Manage the Sidecar's cryptographic identity.</p>
+              <p className="text-sm font-black text-slate-700 dark:text-slate-200 uppercase tracking-tight">Identity & Keys</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-sm">Manage the Sidecar's cryptographic identity.</p>
             </div>
-            <button onClick={() => toggleSection('identity')} className="p-2 rounded-full bg-slate-100 text-slate-500">
+            <button onClick={() => toggleSection('identity')} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
               <ChevronRight className={`w-3 h-3 transition-transform ${activeSection === 'identity' ? 'rotate-90' : ''}`} />
             </button>
            </div>
@@ -562,26 +562,26 @@ const NodeSettingsModal = ({
                       autoComplete="current-password"
                       readOnly 
                       value={sidecarService?.service_nsec || ''} 
-                      className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono" 
+                      className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" 
                     />
-                    <button onClick={() => setShowNodeNsec(!showNodeNsec)} className="p-3 bg-slate-100 rounded-xl"><Eye className="w-4 h-4 text-slate-600" /></button>
-                    <button onClick={handleNodeGenerateIdentity} className="p-3 bg-slate-900 text-white rounded-xl"><RefreshCw className="w-4 h-4" /></button>
+                    <button onClick={() => setShowNodeNsec(!showNodeNsec)} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Eye className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
+                    <button onClick={handleNodeGenerateIdentity} className="p-3 bg-slate-900 dark:bg-blue-600 text-white rounded-xl"><RefreshCw className="w-4 h-4" /></button>
                  </div>
                </div>
                <div className="space-y-2">
                  <p className="text-[10px] uppercase tracking-widest text-slate-500">Onion Address</p>
                  <div className="flex gap-2">
-                    <input type="text" readOnly value={nodeOnion} className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono" />
-                    <button onClick={() => copyToClipboard(nodeOnion, 'onion')} className="p-3 bg-slate-100 rounded-xl"><Copy className="w-4 h-4 text-slate-600" /></button>
-                    <button onClick={handleNodeRotateOnion} disabled={rotatingOnion} className="p-3 bg-slate-100 rounded-xl"><RefreshCw className={`w-4 h-4 text-slate-600 ${rotatingOnion ? 'animate-spin' : ''}`} /></button>
+                    <input type="text" readOnly value={nodeOnion} className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" />
+                    <button onClick={() => copyToClipboard(nodeOnion, 'onion')} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
+                    <button onClick={handleNodeRotateOnion} disabled={rotatingOnion} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><RefreshCw className={`w-4 h-4 text-slate-600 dark:text-slate-400 ${rotatingOnion ? 'animate-spin' : ''}`} /></button>
                  </div>
                </div>
                 <div className="space-y-2">
                  <p className="text-[10px] uppercase tracking-widest text-slate-500">TLS Fingerprint</p>
                  <div className="flex gap-2">
-                    <input type="text" readOnly value={nodeTlsValue} className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono" />
-                    <button onClick={() => copyToClipboard(nodeTlsValue, 'tls')} className="p-3 bg-slate-100 rounded-xl"><Copy className="w-4 h-4 text-slate-600" /></button>
-                    <button onClick={handleNodeRegenerateTls} disabled={regeneratingTls} className="p-3 bg-slate-100 rounded-xl"><RefreshCw className={`w-4 h-4 text-slate-600 ${regeneratingTls ? 'animate-spin' : ''}`} /></button>
+                    <input type="text" readOnly value={nodeTlsValue} className="flex-1 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs font-mono" />
+                    <button onClick={() => copyToClipboard(nodeTlsValue, 'tls')} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><Copy className="w-4 h-4 text-slate-600 dark:text-slate-400" /></button>
+                    <button onClick={handleNodeRegenerateTls} disabled={regeneratingTls} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700"><RefreshCw className={`w-4 h-4 text-slate-600 dark:text-slate-400 ${regeneratingTls ? 'animate-spin' : ''}`} /></button>
                  </div>
                </div>
              </div>

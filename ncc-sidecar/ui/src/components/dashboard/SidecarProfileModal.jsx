@@ -55,7 +55,7 @@ const SidecarProfileModal = ({ isOpen, onClose, sidecarService, onRefresh }) => 
             <input
               type="text" value={draft.name}
               onChange={e => setDraft(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm font-bold outline-none"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-sm font-bold outline-none text-slate-900 dark:text-white"
               placeholder="machine-readable name"
             />
           </div>
@@ -64,7 +64,7 @@ const SidecarProfileModal = ({ isOpen, onClose, sidecarService, onRefresh }) => 
             <input
               type="text" value={draft.display_name}
               onChange={e => setDraft(prev => ({ ...prev, display_name: e.target.value }))}
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm font-bold outline-none"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-sm font-bold outline-none text-slate-900 dark:text-white"
               placeholder="Human-friendly label"
             />
           </div>
@@ -73,7 +73,7 @@ const SidecarProfileModal = ({ isOpen, onClose, sidecarService, onRefresh }) => 
             <textarea
               rows={3} value={draft.about}
               onChange={e => setDraft(prev => ({ ...prev, about: e.target.value }))}
-              className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs font-medium outline-none resize-none"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl p-4 text-xs font-medium outline-none resize-none text-slate-900 dark:text-white"
               placeholder="Purpose of this Sidecar"
             />
           </div>
