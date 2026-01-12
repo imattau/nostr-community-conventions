@@ -101,10 +101,11 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
   let port = initialPort;
   let success = false;
   const maxAttempts = 20;
+  const host = process.env.ADMIN_HOST || '127.0.0.1';
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      await server.listen({ port, host: '127.0.0.1' });
+      await server.listen({ port, host });
       success = true;
       break;
     } catch (err) {

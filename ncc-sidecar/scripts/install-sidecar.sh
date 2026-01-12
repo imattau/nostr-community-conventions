@@ -197,6 +197,11 @@ remove_service_unit() {
 }
 
 write_systemd_unit() {
+  local admin_host="127.0.0.1"
+  if [ "$ALLOW_REMOTE" = true ]; then
+    admin_host="0.0.0.0"
+  fi
+
   cat <<EOF > "$SYSTEMD_UNIT_PATH"
 [Unit]
 Description=NCC-06 Sidecar
@@ -211,6 +216,7 @@ Environment=NODE_ENV=production
 Environment=NCC_SIDECAR_DB_PATH=$DATA_DIR/sidecar.db
 Environment=NCC_SIDECAR_ALLOW_REMOTE=$ALLOW_REMOTE
 Environment=ADMIN_PORT=$SERVICE_PORT
+Environment=ADMIN_HOST=$admin_host
 ExecStart=$NODE_BIN src/index.js
 Restart=on-failure
 RestartSec=5
