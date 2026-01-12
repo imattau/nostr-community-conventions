@@ -28,12 +28,11 @@ Options:
   --service-name NAME   systemd unit name (default: $SERVICE_NAME_DEFAULT)
   --service-user USER   Linux user that runs the sidecar (default: $SERVICE_USER_DEFAULT)
   --port PORT           Port to listen on (default: $SERVICE_PORT_DEFAULT)
-  --caddy-address ADDR  Configure Caddy reverse proxy for this domain or IP
+  --caddy-address ADDR  Configure Caddy proxy (e.g. domain.com, IP, or IP:PORT)
   --repo-source URL     Git URL or path to the source repo (default: current checkout)
   --allow-remote        Enable remote admin access (sets NCC_SIDECAR_ALLOW_REMOTE=true)
   --help                Show this message
 EOF
-  exit 1
 }
 
 INSTALL_DIR="$INSTALL_DIR_DEFAULT"
@@ -239,7 +238,7 @@ setup_caddy() {
     return
   fi
 
-  if grep -q "$CADDY_ADDRESS" "$caddy_config"; then
+  if grep -Fq "$CADDY_ADDRESS {" "$caddy_config"; then
     echo "Address $CADDY_ADDRESS seems to be already configured in $caddy_config."
   else
     echo "Configuring Caddy for $CADDY_ADDRESS..."
