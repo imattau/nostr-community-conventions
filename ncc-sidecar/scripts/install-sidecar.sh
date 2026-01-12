@@ -10,6 +10,7 @@ SERVICE_NAME_DEFAULT="ncc-sidecar"
 SERVICE_USER_DEFAULT="ncc-sidecar"
 ALLOW_REMOTE=false
 NODE_VERSION="v24.12.0"
+SERVICE_PORT_DEFAULT="3000"
 
 usage() {
   cat <<EOF
@@ -26,6 +27,8 @@ Options:
   --data-dir DIR        Where to keep runtime data like sidecar.db (default: $DATA_DIR_DEFAULT)
   --service-name NAME   systemd unit name (default: $SERVICE_NAME_DEFAULT)
   --service-user USER   Linux user that runs the sidecar (default: $SERVICE_USER_DEFAULT)
+  --port PORT           Port to listen on (default: $SERVICE_PORT_DEFAULT)
+  --caddy-address ADDR  Configure Caddy reverse proxy for this domain or IP
   --repo-source URL     Git URL or path to the source repo (default: current checkout)
   --allow-remote        Enable remote admin access (sets NCC_SIDECAR_ALLOW_REMOTE=true)
   --help                Show this message
@@ -37,6 +40,8 @@ INSTALL_DIR="$INSTALL_DIR_DEFAULT"
 DATA_DIR="$DATA_DIR_DEFAULT"
 SERVICE_NAME="$SERVICE_NAME_DEFAULT"
 SERVICE_USER="$SERVICE_USER_DEFAULT"
+SERVICE_PORT="$SERVICE_PORT_DEFAULT"
+CADDY_ADDRESS=""
 ACTION="install"
 NPM_PACKAGE=""
 
@@ -50,6 +55,8 @@ while (( "$#" )); do
     --data-dir) DATA_DIR="$2"; shift 2;;
     --service-name) SERVICE_NAME="$2"; shift 2;;
     --service-user) SERVICE_USER="$2"; shift 2;;
+    --port) SERVICE_PORT="$2"; shift 2;;
+    --caddy-address) CADDY_ADDRESS="$2"; shift 2;;
     --repo-source) REPO_SOURCE="$2"; shift 2;;
     --npm-package) NPM_PACKAGE="$2"; shift 2;;
     --allow-remote) ALLOW_REMOTE=true; shift;;
@@ -204,6 +211,7 @@ WorkingDirectory=$INSTALL_DIR
 Environment=NODE_ENV=production
 Environment=NCC_SIDECAR_DB_PATH=$DATA_DIR/sidecar.db
 Environment=NCC_SIDECAR_ALLOW_REMOTE=$ALLOW_REMOTE
+Environment=ADMIN_PORT=$SERVICE_PORT
 ExecStart=$NODE_BIN src/index.js
 Restart=on-failure
 RestartSec=5
@@ -214,6 +222,40 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+setup_caddy() {
+  if [ -z "$CADDY_ADDRESS" ]; then
+    return
+  fi
+  if ! command -v caddy >/dev/null 2>&1; then
+    echo "Caddy is not installed. Skipping Caddy setup."
+    return
+  fi
+  
+  local caddy_config="/etc/caddy/Caddyfile"
+  if [ ! -f "$caddy_config" ]; then
+    echo "Caddyfile not found at $caddy_config. Skipping Caddy setup."
+    return
+  fi
+
+  if grep -q "$CADDY_ADDRESS" "$caddy_config"; then
+    echo "Address $CADDY_ADDRESS seems to be already configured in $caddy_config."
+  else
+    echo "Configuring Caddy for $CADDY_ADDRESS..."
+    cat <<EOF >> "$caddy_config"
+
+$CADDY_ADDRESS {
+    reverse_proxy 127.0.0.1:$SERVICE_PORT
+}
+EOF
+    if systemctl is-active --quiet caddy; then
+        systemctl reload caddy
+        echo "Caddy reloaded."
+    else
+        echo "Caddy service is not active. Please start/reload it manually."
+    fi
+  fi
 }
 
 deploy_sidecar() {
@@ -256,6 +298,7 @@ deploy_sidecar() {
   chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_DIR"
 
   write_systemd_unit
+  setup_caddy
 }
 
 start_service() {
@@ -291,7 +334,11 @@ case "$ACTION" in
   install)
     deploy_sidecar
     start_service
-    echo "Visit http://127.0.0.1:3000 to complete provisioning."
+    if [ -n "$CADDY_ADDRESS" ]; then
+        echo "Visit https://$CADDY_ADDRESS (or http://$CADDY_ADDRESS) to complete provisioning."
+    else
+        echo "Visit http://127.0.0.1:$SERVICE_PORT to complete provisioning."
+    fi
     ;;
   update)
     update_sidecar
@@ -300,7 +347,11 @@ case "$ACTION" in
     remove_sidecar
     deploy_sidecar
     start_service
-    echo "Visit http://127.0.0.1:3000 to complete provisioning."
+    if [ -n "$CADDY_ADDRESS" ]; then
+        echo "Visit https://$CADDY_ADDRESS (or http://$CADDY_ADDRESS) to complete provisioning."
+    else
+        echo "Visit http://127.0.0.1:$SERVICE_PORT to complete provisioning."
+    fi
     ;;
   remove)
     remove_sidecar
