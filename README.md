@@ -16,6 +16,7 @@ Each convention lives in its own subfolder with its own README, code, and histor
 - [`ncc-07/`](ncc-07/) — Service Capability Manifest
 - [`ncc-08/`](ncc-08/) — Service Identity Rotation and Handover
 - [`ncc-09/`](ncc-09/) — Scoped Operator Authority
+- [`ncc-10/`](ncc-10/) — Service Operational State
 
 `ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout NCC-00.
 
