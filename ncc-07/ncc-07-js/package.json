@@ -1,0 +1,29 @@
+{
+  "name": "ncc-07-js",
+  "version": "0.1.0",
+  "description": "Nostr Community Convention 07 - Service Capability Manifest",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/**/*.ts",
+    "test": "npm run build && node dist/test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "nostr",
+    "capability",
+    "discovery",
+    "manifest"
+  ],
+  "author": "lostcause",
+  "license": "CC0-1.0",
+  "dependencies": {
+    "nostr-tools": "^2.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "typescript": "^5.0.0"
+  }
+}

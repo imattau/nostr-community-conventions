@@ -13,6 +13,7 @@ Each convention lives in its own subfolder with its own README, code, and histor
 - [`ncc-03/`](ncc-03/) — Election and Voting Convention
 - [`ncc-05/`](ncc-05/) — Identity-Bound Service Locator Resolution
 - [`ncc-06/`](ncc-06/) — NCC-02/NCC-05 Service Profile
+- [`ncc-07/`](ncc-07/) — Service Capability Manifest
 
 `ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout NCC-00.
 
