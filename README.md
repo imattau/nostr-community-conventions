@@ -8,6 +8,19 @@ NCC-00 establishes Nostr as the primary medium for documenting and coordinating 
 
 ---
 
+## Repository Layout
+
+This repository hosts NCC-00 (this document) alongside the published conventions that build on it, each in its own subfolder with its own README, code, and history:
+
+- [`ncc-02/`](ncc-02/) — Pubkey-Owned Service Discovery and Trust
+- [`ncc-03/`](ncc-03/) — Election and Voting Convention
+- [`ncc-05/`](ncc-05/) — Identity-Bound Service Locator Resolution
+- [`ncc-06/`](ncc-06/) — NCC-02/NCC-05 Service Profile
+
+`ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout this document.
+
+---
+
 ## Purpose
 
 Nostr Community Conventions exist to document **shared usage patterns** of existing Nostr primitives where protocol-level standardisation is unnecessary or undesirable.
