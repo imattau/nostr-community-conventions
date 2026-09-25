@@ -1,0 +1,41 @@
+{
+  "serviceSk": "<hex private key>",
+  "servicePk": "<hex public key>",
+  "serviceNpub": "<npub>",
+  "relayUrl": "ws://127.0.0.1:7000",
+  "ncc02ExpectedKey": "TESTKEY:relay-local-dev-1",
+  "k": {
+    "mode": "tls_spki",
+    "certPath": "../certs/server.crt",
+    "persistPath": "./k.txt"
+  },
+  "ncc02ExpSeconds": 1209600,
+  "ncc05TtlSeconds": 3600,
+  "jitterRatio": 0.15,
+  "relayMode": "public",
+  "serviceId": "relay",
+  "locatorId": "relay-locator",
+  "torControl": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 9051,
+    "password": "",
+    "servicePort": 80,
+    "serviceFile": "./onion-service.json",
+    "timeout": 5000
+  }
+  ,
+  "externalEndpoints": {
+    "ipv4": {
+      "enabled": true,
+      "protocol": "wss",
+      "address": "127.0.0.1",
+      "port": 7447,
+      "publicSources": ["https://api.ipify.org?format=json"]
+    },
+    "ipv6": {
+      "enabled": false,
+      "protocol": "wss"
+    }
+  }
+}

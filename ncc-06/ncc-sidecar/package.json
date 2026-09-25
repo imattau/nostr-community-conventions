@@ -1,0 +1,44 @@
+{
+  "name": "ncc-sidecar",
+  "version": "1.2.2",
+  "description": "Multi-service NCC-06 discovery manager",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "lint": "eslint src test --ext .js,.mjs",
+    "typecheck": "tsc --noEmit",
+    "start": "node src/index.js",
+    "first-run": "node src/index.js --first-run",
+    "reset": "node src/index.js reset && rm -rf certs",
+    "dev": "run-p dev:backend dev:ui",
+    "dev:backend": "node --watch src/index.js",
+    "dev:ui": "cd ui && npm run dev",
+    "status": "node src/index.js status",
+    "publish": "node src/index.js publish",
+    "build": "cd ui && npm run build",
+    "setup": "npm install && cd ui && npm install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/static": "^9.0.0",
+    "better-sqlite3": "^12.5.0",
+    "fastify": "^5.6.2",
+    "ncc-02-js": "^0.5.0",
+    "ncc-05-js": "^1.2.0",
+    "ncc-06-js": "^0.6.0",
+    "nostr-tools": "^2.19.4",
+    "ws": "^8.18.3",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^25.0.3",
+    "eslint": "^9.39.2",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3"
+  }
+}

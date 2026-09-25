@@ -1,0 +1,22 @@
+{
+  "manifest_version": 2,
+  "name": "NCC Service Catalog",
+  "description": "Query Nostr relays for NCC-02 service records and keep a live catalogue of services.",
+  "version": "0.1.0",
+  "permissions": [
+    "storage"
+  ],
+  "applications": {
+    "gecko": {
+      "id": "ncc-service-catalog@ncc-project.dev",
+      "strict_min_version": "60.0"
+    }
+  },
+  "background": {
+    "page": "background.html"
+  },
+  "browser_action": {
+    "default_title": "NCC Service Catalog",
+    "default_popup": "popup.html"
+  }
+}

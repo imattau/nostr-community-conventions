@@ -1,0 +1,39 @@
+{
+  "name": "ncc06-relay",
+  "version": "1.0.0",
+  "description": "Minimal NCC-06 Relay + Sidecars + Simple Client (Node.js)",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "clean-configs": "node scripts/clean-configs.js",
+    "ensure-configs": "node scripts/ensure-configs.js",
+    "ensure-certs": "node scripts/ensure-certs.js",
+    "pretest": "npm run clean-configs && npm run ensure-configs && npm run ensure-certs",
+    "test": "node --test",
+    "relay": "node scripts/run-relay.js",
+    "relay:build": "node scripts/run-relay.js --build-only",
+    "sidecar:publish": "npm run ensure-configs && node ncc06-sidecar/index.js",
+    "client:resolve-connect": "npm run ensure-configs && node ncc06-client/index.js",
+    "start-local-env": "npm-run-all --parallel relay sidecar:publish",
+    "lint": "eslint . --ext .js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ncc-02-js": "^0.2.3",
+    "ncc-05-js": "^1.1.13",
+    "ncc-06-js": "file:../../ncc-06-js",
+    "nostr-tools": "^2.19.4",
+    "npm-run-all": "^4.1.5",
+    "selfsigned": "^5.4.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.7.2",
+    "chalk": "^5.3.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.4.2"
+  }
+}
