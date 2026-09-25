@@ -1,0 +1,133 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #5b6570;
+  --border: #e2e5e9;
+  --accent: #6a4cff;
+  --code-bg: #f4f5f7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --fg: #e7e9ec;
+    --muted: #9aa4b2;
+    --border: #2a2e35;
+    --accent: #a48bff;
+    --code-bg: #1d2025;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+}
+
+.site-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.site-title {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.layout {
+  display: flex;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  padding: 1.5rem 1rem;
+  border-right: 1px solid var(--border);
+}
+
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sidebar li {
+  margin-bottom: 0.25rem;
+}
+
+.sidebar a {
+  display: block;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.sidebar a:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.sidebar a.current {
+  background: var(--accent);
+  color: #fff;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  padding: 2rem;
+}
+
+.content h1:first-child {
+  margin-top: 0;
+}
+
+.content code {
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.content pre {
+  background: var(--code-bg);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.content pre code {
+  background: none;
+  padding: 0;
+}
+
+.content a {
+  color: var(--accent);
+}
+
+.ncc-list {
+  padding-left: 1.2rem;
+}
+
+@media (max-width: 700px) {
+  .layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

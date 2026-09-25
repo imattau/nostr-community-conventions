@@ -15,3 +15,9 @@ Each convention lives in its own subfolder with its own README, code, and histor
 `ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout NCC-00.
 
 For the full NCC-00 specification — purpose, scope, event kinds, tags, and governance model — see [`ncc-00/README.md`](ncc-00/README.md).
+
+## Docs Site
+
+Every convention's README is also published as a browsable page via GitHub Pages, built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml) and [`site/build.mjs`](site/build.mjs).
+
+**Adding a new NCC updates the site automatically** — no workflow changes needed. The build script discovers any top-level `ncc-<number>/` folder that contains a `README.md` and generates its doc page on the next push to `master`. To publish NCC-07, for example, just add `ncc-07/README.md` (following the pattern of the existing folders) and push.
