@@ -1,0 +1,29 @@
+{
+  "name": "nostr-election-36998",
+  "version": "0.1.0",
+  "description": "Modular TypeScript helpers for NCC-03 election and voting events (kind 36998).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node ./dist/tests/demo.js && node ./dist/tests/election.test.js"
+  },
+  "keywords": [
+    "nostr",
+    "election",
+    "voting",
+    "ncc-03",
+    "36998"
+  ],
+  "license": "CC0-1.0",
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.1",
+    "typescript": "^5.8.0"
+  }
+}
