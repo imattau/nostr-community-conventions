@@ -2,6 +2,8 @@
 
 This repository hosts **Nostr Community Conventions (NCCs)** — documented shared usage patterns for existing Nostr primitives, published, discovered, and revised using Nostr itself (see NCC-00 below).
 
+**[Browse the docs site](https://imattau.github.io/nostr-community-conventions/)**
+
 ## Repository Layout
 
 Each convention lives in its own subfolder with its own README, code, and history:
@@ -18,6 +20,6 @@ For the full NCC-00 specification — purpose, scope, event kinds, tags, and gov
 
 ## Docs Site
 
-Every convention's README is also published as a browsable page via GitHub Pages, built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml) and [`site/build.mjs`](site/build.mjs).
+Every convention's README is also published as a browsable page at **[imattau.github.io/nostr-community-conventions](https://imattau.github.io/nostr-community-conventions/)**, built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml) and [`site/build.mjs`](site/build.mjs).
 
 **Adding a new NCC updates the site automatically** — no workflow changes needed. The build script discovers any top-level `ncc-<number>/` folder that contains a `README.md` and generates its doc page on the next push to `master`. To publish NCC-07, for example, just add `ncc-07/README.md` (following the pattern of the existing folders) and push.
