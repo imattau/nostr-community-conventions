@@ -57,7 +57,11 @@ class CertificateAuthority:
         now = int(time.time())
         expiry = now + (valid_days * 24 * 60 * 60)
 
+        # d scopes this attestation to (service, subject) so a certifier's
+        # attestations for different services/subjects don't replace each
+        # other, per NCC-02's addressable event requirement for kind 30060.
         tags = [
+            ["d", f"{service_id}:{subject_pubkey}"],
             ["subj", subject_pubkey],
             ["srv", service_id],
             ["e", service_event_id],
@@ -74,7 +78,10 @@ class CertificateAuthority:
         return event
 
     def revoke_attestation(self, attestation_id: str, reason: str = ""):
-        tags = [["e", attestation_id]]
+        # d uses the revoked attestation's event id so a certifier's
+        # revocations don't replace each other, per NCC-02's addressable
+        # event requirement for kind 30061.
+        tags = [["d", attestation_id], ["e", attestation_id]]
         if reason:
             tags.append(["reason", reason])
 

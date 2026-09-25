@@ -1,7 +1,7 @@
 {
   "name": "nostr-election-36998",
   "version": "0.1.0",
-  "description": "Modular TypeScript helpers for NCC-03 election and voting events (kind 36998).",
+  "description": "Modular TypeScript helpers for NCC-03 election and voting events (kinds 36997-36999, 1071).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
