@@ -138,6 +138,9 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Certificate Attestation (Kind 30060).
+   * The event's `d` tag is derived as `<serviceId>:<subjectPubkey>` so that a
+   * certifier's attestations for different services/subjects do not replace
+   * each other (NCC-02 addressable event requirement).
    * @param {Object} options
    * @param {string} options.subjectPubkey - The 'subj' tag pubkey.
    * @param {string} options.serviceId - The 'srv' tag identifier.
@@ -153,10 +156,17 @@ export class NCC02Builder {
 
     const now = Math.floor(Date.now() / 1000);
     const expiry = now + (validDays * 24 * 60 * 60);
+    // Kind 30060 is a parameterised replaceable event (NIP-01, 30000-39999 range).
+    // Without a distinguishing `d` tag, every attestation from the same certifier
+    // pubkey would replace all others (implicit d=""). Scoping `d` to the service
+    // and subject lets one certifier hold independent attestations per (service,
+    // subject) pair while still allowing a fresh attestation to replace a stale
+    // one for that same pair.
     const event = {
       kind: KINDS.ATTESTATION,
       created_at: now,
       tags: [
+        ['d', `${serviceId}:${subjectPubkey}`],
         ['subj', subjectPubkey],
         ['srv', serviceId],
         ['e', serviceEventId],
@@ -172,6 +182,9 @@ export class NCC02Builder {
 
   /**
    * Creates a signed Revocation (Kind 30061).
+   * The event's `d` tag is set to the revoked attestation's event id so that a
+   * certifier's revocations do not replace each other (NCC-02 addressable
+   * event requirement).
    * @param {Object} options
    * @param {string} options.attestationId - The 'e' tag referencing the attestation.
    * @param {string} [options.reason=''] - Optional reason.
@@ -180,9 +193,16 @@ export class NCC02Builder {
     const { attestationId, reason = '' } = options;
     if (!attestationId) throw new Error('attestationId (e tag) is required');
 
-    const tags = [['e', attestationId]];
+    // Kind 30061 is also a parameterised replaceable event; without `d`, every
+    // revocation from a certifier would replace all its other revocations
+    // (implicit d=""). Using the revoked attestation's event id as `d` keeps
+    // each revocation independently addressable.
+    const tags = [
+      ['d', attestationId],
+      ['e', attestationId]
+    ];
     if (reason) tags.push(['reason', reason]);
-    
+
     const event = {
       kind: KINDS.REVOCATION,
       created_at: Math.floor(Date.now() / 1000),

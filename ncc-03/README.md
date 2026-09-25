@@ -4,7 +4,7 @@
 **Convention ID:** NCC-03
 **Status:** Draft  
 **Category:** Governance  
-**Version:** 0.2 (thin core)  
+**Version:** 0.3 (normative event kinds)  
 **License:** CC0-1.0  
 **Related:** NCC-00, NIP-01, NIP-10, NIP-23, NIP-25, NIP-33
 
@@ -53,15 +53,28 @@ A client is compliant with this convention if it:
 
 ## 5. Event Model
 
+### Event Kinds (Normative)
+
+| Event                | Kind    | Range                        | Replaceability                                    |
+|----------------------|---------|-------------------------------|----------------------------------------------------|
+| Election Definition  | `36998` | Addressable (30000–39999)     | Parameterised replaceable, `d` = election identifier |
+| Vote                 | `1071`  | Regular (1000–9999)           | Non-replaceable                                     |
+| Electoral Roll       | `36997` | Addressable (30000–39999)     | Parameterised replaceable, `d` = roll identifier    |
+| Audit                | `36999` | Addressable (30000–39999)     | Parameterised replaceable, `d` = election identifier |
+
+`36997` and `36998` are assigned by this convention and are not used by any published NIP or other NCC. The Electoral Roll previously used kind `30000`, which collides with NIP-51's "Follow set" list kind; implementations of earlier drafts MUST migrate rolls to `36997`.
+
 ### 5.1 Election Definition Event
 
 Declares the existence and parameters of an election.
 
+**Kind:** `36998` (addressable — NIP-01 parameterised replaceable event).
+
 **Election identifier**
-- The library now treats a freshly generated `npub` as the canonical handle for the election. Publishing that key via a `p` tag lets clients discover and encrypt to the election directly, and every roll, invite, challenge, and audit is tied to the `npub`. The `d` tag remains present for NCC-03 compatibility, but adopters should prioritize the election `npub` as the signed, authoritative identifier. This key ensures votes/registration can be verified and resists spoofing because only whoever holds the matching `nsec` can produce valid definitions, rolls, or audits.
+- The `d` tag carries the election identifier and is the event's replacement key, as for any addressable event. The library also treats a freshly generated `npub` as the canonical handle for the election: publishing that key via a `p` tag lets clients discover and encrypt to the election directly, and every roll, invite, challenge, and audit is tied to the `npub`. This key ensures votes/registration can be verified and resists spoofing because only whoever holds the matching `nsec` can produce valid definitions, rolls, or audits.
 
 **Properties**
-- Non-replaceable
+- Addressable (parameterised replaceable), keyed by `(kind, pubkey, d)`
 - Public
 - Canonical anchor for votes
 
@@ -70,8 +83,10 @@ Declares the existence and parameters of an election.
 - One or more options
 - Closing time
 
-**Recommended tags**
+**Required tags**
 - `d` — election identifier
+
+**Recommended tags**
 - `option` — available choices
 - `startsAt` — unix timestamp (optional)
 - `endsAt` — unix timestamp (required)
@@ -86,6 +101,10 @@ The Election Definition Event is the authoritative reference for all votes.
 
 Represents a voter’s selection in an election.
 
+**Kind:** `1071` (regular — NIP-01 regular event range).
+
+Vote events are always regular, non-replaceable events. A voter's later vote does not overwrite an earlier one at the relay/event level; §7's "greatest `created_at` wins" rule is the sole, mandatory mechanism for resolving multiple votes from the same pubkey. Earlier drafts allowed votes to optionally use NIP-33 addressable events instead; that option is removed to prevent clients from diverging on how duplicate votes are deduplicated.
+
 **Properties**
 - Signed by the voter’s pubkey
 - References exactly one election
@@ -93,14 +112,22 @@ Represents a voter’s selection in an election.
 
 **Required tags**
 - `e` — reference to Election Definition Event
-- `d` — election identifier
+- `d` — election identifier (informational; carried for correlation with the Election Definition, not for replacement)
 - `choice` — selected option identifier
 
-**Optional**
-- Vote events MAY be parameterised replaceable events (NIP-33),
-  using the election identifier as the parameter.
+### 5.3 Electoral Roll Event
 
-### 5.3 Audit Event
+Declares the set of pubkeys eligible to vote in an election.
+
+**Kind:** `36997` (addressable — NIP-01 parameterised replaceable event).
+
+**Required tags**
+- `d` — roll identifier
+- `p` — one tag per eligible pubkey
+
+An election implementation MAY attach a roll to an Election Definition so that votes from pubkeys outside the roll are ignored (§7, §8).
+
+### 5.4 Audit Event
 
 Election implementations that orchestrate themselves can publish Audit Events (kind `36999`) once votes are tallied. Each audit event contains the `d` election identifier, the electoral roll identifier, the summary hash over the tallied votes, and the total number of counted votes. Clients can recompute the hash from the described payload, verify the signature against the dedicated election `npub`, and therefore prove the published results were not tampered with.
 
@@ -127,8 +154,9 @@ If multiple valid votes from the same pubkey exist:
 - The vote with the greatest `created_at` timestamp before `endsAt` is counted
 - All earlier votes from that pubkey are ignored
 
-If parameterised replaceable events (NIP-33) are used, the latest event
-implicitly supersedes earlier ones.
+Because Vote events are regular, non-replaceable events (§5.2), this
+`created_at` comparison is the only deduplication mechanism; clients MUST NOT
+rely on relay-side replacement to enforce one vote per pubkey.
 
 ---
 
@@ -165,7 +193,7 @@ This convention does **not** provide:
 This convention is compatible with:
 - NIP-25 reactions (informal signalling)
 - NIP-23 governance documents
-- NIP-33 replaceable events
+- NIP-33 addressable/replaceable events (used by the Election Definition, Electoral Roll, and Audit kinds; Vote events are deliberately regular, non-replaceable events — see §5.2)
 - Trust or eligibility conventions defined elsewhere
 
 ---
@@ -182,9 +210,10 @@ non-normative appendices or companion conventions.
 
 To make NCC-03 easier to adopt, there is a companion npm package that
 exports `ElectionDefinition`, `VoteEvent`, and `Election` classes that
-cover the entire election and voting lifecycle defined above. Events
-and tallies are always emitted as kind `36998`, compliant with the
-Election Definition and Vote requirements.
+cover the entire election and voting lifecycle defined above. Election
+Definitions are emitted as kind `36998`, Vote events as kind `1071`,
+Electoral Rolls as kind `36997`, and Audit events as kind `36999`,
+matching the kinds required by §5.
 
 ### Installation
 
@@ -221,7 +250,7 @@ console.log(election.tally());
 
 ### Electoral Roll
 
-The companion library also exports an `ElectoralRoll` class that wraps a secure list-style event (kind `30000`). Rolls are the authoritative record of eligible `npub`s and can be attached to an `Election` so votes from outsiders are silently ignored.
+The companion library also exports an `ElectoralRoll` class that wraps a secure list-style event (kind `36997`). Rolls are the authoritative record of eligible `npub`s and can be attached to an `Election` so votes from outsiders are silently ignored.
 
 ```ts
 import { ElectoralRoll } from 'nostr-election-36998';

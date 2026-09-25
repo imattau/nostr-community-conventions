@@ -109,10 +109,10 @@ NCC-02 uses parameterised replaceable events with the following kinds:
   Parameterised replaceable (`d` tag = service identifier)
 
 - **30060** — Certificate / Transport Key Attestation  
-  Replaceable event binding a service identity to an observed transport key
+  Parameterised replaceable (`d` tag = `<srv>:<subj>`), binding a service identity to an observed transport key
 
 - **30061** — Revocation  
-  Replaceable event indicating withdrawal or invalidation of a prior record
+  Parameterised replaceable (`d` tag = revoked attestation event id), indicating withdrawal or invalidation of a prior record
 
 ### 1. Service Record
 
@@ -166,6 +166,7 @@ Provide assurance beyond self-assertion.
 
 #### Required tags
 
+- `d` – identifier scoping this attestation, formatted `<srv>:<subj>` (service identifier and subject pubkey). Kind 30060 sits in the NIP-01 addressable (30000–39999) range; without a distinguishing `d`, every attestation from the same certifier pubkey would replace all of its other attestations (implicit `d=""`). Scoping `d` to `(srv, subj)` lets a fresh attestation for a given service/subject pair correctly replace a stale one, while attestations for different services or subjects remain independent.
 - `subj` – subject pubkey  
 - `srv` – service identifier  
 - `e` – referenced Service Record event id  
@@ -191,6 +192,7 @@ A Revocation is an event of kind 30061 - a signed event published by a certifier
 
 #### Required tags
 
+- `d` – the revoked attestation's event id. Kind 30061 is also in the NIP-01 addressable range; without a distinguishing `d`, every revocation from the same certifier pubkey would replace all of its other revocations (implicit `d=""`). Using the revoked attestation's event id keeps each revocation independently addressable.
 - `e` – certificate event id being revoked  
 - Optional human-readable reason  
 

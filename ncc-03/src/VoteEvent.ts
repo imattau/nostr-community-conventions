@@ -1,5 +1,5 @@
 import { ElectionDefinition } from './ElectionDefinition';
-import { ELECTION_KIND, NostrEvent, Tag } from './types';
+import { VOTE_KIND, NostrEvent, Tag } from './types';
 
 export interface VoteEventParams {
   pubkey: string;
@@ -47,7 +47,7 @@ export class VoteEvent {
     const tags: Tag[] = [...filteredCore, ...this.extraTags];
 
     return {
-      kind: ELECTION_KIND,
+      kind: VOTE_KIND,
       id: overrides.id ?? '',
       pubkey: overrides.pubkey ?? this.pubkey,
       created_at: overrides.created_at ?? this.createdAt,
@@ -58,8 +58,8 @@ export class VoteEvent {
   }
 
   public static fromEvent(event: NostrEvent): VoteEvent {
-    if (event.kind !== ELECTION_KIND) {
-      throw new Error('Event is not kind 36998.');
+    if (event.kind !== VOTE_KIND) {
+      throw new Error('Event is not kind 1071.');
     }
     const electionTag = VoteEvent.findTag(event.tags, 'd');
     const choiceTag = VoteEvent.findTag(event.tags, 'choice');

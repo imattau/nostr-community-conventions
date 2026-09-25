@@ -1,5 +1,6 @@
 export const ELECTION_KIND = 36998;
-export const ELECTORAL_ROLL_KIND = 30000;
+export const VOTE_KIND = 1071;
+export const ELECTORAL_ROLL_KIND = 36997;
 export const ELECTION_AUDIT_KIND = 36999;
 
 export type Tag = [string, ...string[]];
