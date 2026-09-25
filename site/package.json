@@ -1,0 +1,13 @@
+{
+  "name": "ncc-docs-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static site builder that renders each ncc-XX/README.md as a GitHub Pages doc.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "marked": "^12.0.2"
+  }
+}
