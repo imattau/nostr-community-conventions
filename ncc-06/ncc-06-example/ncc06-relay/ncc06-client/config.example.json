@@ -1,0 +1,13 @@
+{
+  "relayUrl": "ws://127.0.0.1:7000",
+  "serviceIdentityUri": "wss://npub1example...",
+  "servicePubkey": "<hex public key>",
+  "serviceNpub": "<npub>",
+  "ncc02ExpectedKey": "TESTKEY:relay-local-dev-1",
+  "serviceId": "relay",
+  "locatorId": "relay-locator",
+  "torPreferred": false,
+  "locatorSecretKey": "<hex private key for locator friend>",
+  "locatorFriendPubkey": "<hex public key for locator friend>",
+  "ncc05TimeoutMs": 5000
+}
