@@ -1,0 +1,34 @@
+{
+  "name": "ncc-p2p-cli",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node dist/test_integration.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/node": "^25.0.3",
+    "@types/ws": "^8.18.1",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "enquirer": "^2.4.1",
+    "ncc-05-js": "file:../ncc-05-js",
+    "nostr-tools": "^2.19.4",
+    "ora": "^5.4.1",
+    "socks-proxy-agent": "^8.0.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/boxen": "^2.1.0",
+    "@types/ora": "^3.1.0"
+  }
+}

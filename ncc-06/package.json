@@ -1,0 +1,11 @@
+{
+  "name": "ncc-06-monorepo",
+  "private": true,
+  "workspaces": [
+    "ncc-sidecar",
+    "ncc-06-js"
+  ],
+  "scripts": {
+    "lint": "npm --prefix ncc-sidecar run lint && npm --prefix ncc-sidecar/ui run lint"
+  }
+}
