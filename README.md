@@ -18,6 +18,7 @@ Each convention lives in its own subfolder with its own README, code, and histor
 - [`ncc-09/`](ncc-09/) — Scoped Operator Authority
 - [`ncc-10/`](ncc-10/) — Service Operational State
 - [`ncc-11/`](ncc-11/) — Portable Trust Policy
+- [`ncc-13/`](ncc-13/) — Software Package Release Profile
 
 `ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout NCC-00.
 
