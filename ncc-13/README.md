@@ -1082,3 +1082,7 @@ NCC-13 is experimental. Implementers are encouraged to:
 - avoid central package registries becoming authoritative identity stores
 
 If NCC-13 is not implemented, existing NIP-51 software release behaviour remains unchanged.
+
+## Reference Implementation
+
+- [`ncc-13-js/`](ncc-13-js/) — TypeScript library built on `nostr-tools` implementing release building/parsing, addressable-event replacement, version comparison and constraint evaluation, dependency/conflict evaluation, and platform-based artefact selection.
