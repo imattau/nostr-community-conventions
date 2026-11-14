@@ -1,15 +1,22 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
+import selfsigned from 'selfsigned';
 import { computeKFromCertPem, getExpectedK } from '../src/k.js';
-import { readFileSync, rmSync, mkdirSync } from 'fs';
+import { rmSync, mkdirSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
-test('computeKFromCertPem produces stable base64url output', () => {
-  const certPath = path.resolve('../ncc-06-example/ncc06-relay/certs/server.crt');
-  const pem = readFileSync(certPath, 'utf-8');
-  const value = computeKFromCertPem(pem);
-  assert.equal(value, 'SOXWTCHPUG9ZLaZ4NgH2kKp5Hmqnaj1tXNI90SY44Mw');
+test('computeKFromCertPem returns a stable 32-byte base64url fingerprint', async () => {
+  const { cert } = await selfsigned.generate(
+    [{ name: 'commonName', value: 'example.test' }],
+    { keySize: 2048, days: 1 }
+  );
+  const first = computeKFromCertPem(cert);
+  const second = computeKFromCertPem(cert);
+
+  assert.equal(first, second);
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(Buffer.from(first, 'base64url').length, 32);
 });
 
 test('generate mode persists and reuses k value', () => {

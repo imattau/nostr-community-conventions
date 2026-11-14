@@ -8,22 +8,31 @@ import {
 import os from 'os';
 
 test('buildExternalEndpoints orders endpoints and adds k when needed', async () => {
-  const onion = { address: 'abc123.onion', servicePort: 80 };
-  const endpoints = await buildExternalEndpoints({
-    tor: { enabled: true },
-    ipv6: { enabled: true, protocol: 'wss', port: 8443 },
-    ipv4: { enabled: true, protocol: 'wss', address: '1.2.3.4', port: 7447 },
-    wsPort: 7000,
-    wssPort: 7447,
-    ncc02ExpectedKey: 'TESTKEY',
-    ensureOnionService: async () => onion
+  const original = os.networkInterfaces;
+  os.networkInterfaces = () => ({
+    lo: [{ address: '::1', family: 'IPv6', internal: true }],
+    eth0: [{ address: '2001:db8::1', family: 'IPv6', internal: false }]
   });
+  try {
+    const onion = { address: 'abc123.onion', servicePort: 80 };
+    const endpoints = await buildExternalEndpoints({
+      tor: { enabled: true },
+      ipv6: { enabled: true, protocol: 'wss', port: 8443 },
+      ipv4: { enabled: true, protocol: 'wss', address: '1.2.3.4', port: 7447 },
+      wsPort: 7000,
+      wssPort: 7447,
+      ncc02ExpectedKey: 'TESTKEY',
+      ensureOnionService: async () => onion
+    });
 
-  assert.equal(endpoints.length, 3);
-  assert.equal(endpoints[0].family, 'ipv4');
-  assert.equal(endpoints[1].family, 'ipv6');
-  assert.equal(endpoints[2].family, 'onion');
-  assert.equal(endpoints[0].k, 'TESTKEY');
+    assert.equal(endpoints.length, 3);
+    assert.equal(endpoints[0].family, 'ipv4');
+    assert.equal(endpoints[1].family, 'ipv6');
+    assert.equal(endpoints[2].family, 'onion');
+    assert.equal(endpoints[0].k, 'TESTKEY');
+  } finally {
+    os.networkInterfaces = original;
+  }
 });
 
 test('detectGlobalIPv6 filters private addresses', () => {
