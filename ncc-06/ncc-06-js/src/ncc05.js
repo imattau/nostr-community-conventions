@@ -59,9 +59,15 @@ function normalizeEndpoint(endpoint = {}) {
   if (!url) {
     return null;
   }
-  const protocol = endpoint.protocol || endpoint.type || (url.startsWith('wss://') ? 'wss' : 'ws');
+  const protocol = (
+    endpoint.protocol ||
+    endpoint.type ||
+    inferProtocol(url) ||
+    'http'
+  ).toLowerCase();
   const family = detectFamily(url, endpoint.family);
-  const priority = Number(endpoint.priority ?? endpoint.prio ?? 0);
+  const parsedPriority = Number(endpoint.priority ?? endpoint.prio ?? 1000);
+  const priority = Number.isFinite(parsedPriority) ? parsedPriority : 1000;
   const k = endpoint.k || endpoint.fingerprint || null;
   return {
     url,
@@ -71,6 +77,14 @@ function normalizeEndpoint(endpoint = {}) {
     k,
     raw: endpoint
   };
+}
+
+function inferProtocol(url) {
+  if (typeof url !== 'string') {
+    return null;
+  }
+  const match = url.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  return match ? match[1].toLowerCase() : null;
 }
 
 function detectFamily(url, override) {
