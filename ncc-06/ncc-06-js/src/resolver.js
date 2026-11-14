@@ -198,7 +198,7 @@ async function defaultResolveLocator({
     timeout
   });
   try {
-    return await resolver.resolveLatest(servicePubkey, locatorSecretKey, {
+    return await resolver.resolve(servicePubkey, locatorSecretKey, locatorId, {
       strict: false,
       gossip: false
     });

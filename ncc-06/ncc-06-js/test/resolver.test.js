@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'assert';
+import { NCC05Resolver } from 'ncc-05-js';
 import { resolveServiceEndpoint } from '../src/resolver.js';
 import { buildLocatorPayload } from '../src/ncc05.js';
 import { generateKeypair } from '../src/keys.js';
@@ -70,4 +71,56 @@ test('resolver falls back to NCC-02 when locator k mismatches', async () => {
   assert.equal(result.endpoint, 'wss://fallback');
   assert.equal(result.source, 'ncc02');
   assert.equal(result.selection.reason, 'fallback');
+});
+
+test('default locator resolver asks for the requested locatorId', async () => {
+  const { publicKey } = generateKeypair();
+  const mockServiceRecord = {
+    endpoint: 'wss://fallback',
+    fingerprint: 'TESTKEY:match',
+    expiry: Math.floor(Date.now() / 1000) + 60,
+    attestations: [],
+    eventId: 'mock-id',
+    pubkey: publicKey
+  };
+  const locatorPayload = buildLocatorPayload({
+    ttl: 60,
+    endpoints: [
+      { url: 'wss://match', protocol: 'wss', priority: 1, k: 'TESTKEY:match' }
+    ]
+  });
+
+  const calls = [];
+  const originalResolve = NCC05Resolver.prototype.resolve;
+  const originalResolveLatest = NCC05Resolver.prototype.resolveLatest;
+  const originalClose = NCC05Resolver.prototype.close;
+
+  NCC05Resolver.prototype.resolve = async function (pubkey, secretKey, identifier, options) {
+    calls.push({ pubkey, identifier, options });
+    return locatorPayload;
+  };
+  NCC05Resolver.prototype.resolveLatest = async function () {
+    throw new Error('defaultResolveLocator must not call resolveLatest');
+  };
+  NCC05Resolver.prototype.close = function () {};
+
+  try {
+    const result = await resolveServiceEndpoint({
+      bootstrapRelays: ['wss://example'],
+      servicePubkey: publicKey,
+      serviceId: SERVICE_ID,
+      locatorId: LOCATOR_ID,
+      expectedK: 'TESTKEY:match',
+      ncc02Resolver: { resolve: async () => mockServiceRecord }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].identifier, LOCATOR_ID);
+    assert.equal(result.endpoint, 'wss://match');
+    assert.equal(result.source, 'locator');
+  } finally {
+    NCC05Resolver.prototype.resolve = originalResolve;
+    NCC05Resolver.prototype.resolveLatest = originalResolveLatest;
+    NCC05Resolver.prototype.close = originalClose;
+  }
 });
