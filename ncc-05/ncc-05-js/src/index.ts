@@ -21,6 +21,15 @@ import {
 
 export const TAG_PRIVATE = 'private';
 
+/**
+ * Public bootstrap relays used when the caller does not provide any. Never use a
+ * placeholder such as `wss://npub1...` as a default: it is not a relay URL.
+ */
+export const DEFAULT_BOOTSTRAP_RELAYS = [
+    'wss://relay.damus.io',
+    'wss://nos.lol'
+];
+
 export function isPrivateLocator(event: Event): boolean {
     return event.tags.some(t => t[0] === TAG_PRIVATE && t[1] === 'true');
 }
@@ -271,7 +280,7 @@ export class NCC05Resolver {
     constructor(options: ResolverOptions = {}) {
         this._ownPool = !options.pool;
         this.pool = options.pool || new SimplePool();
-        this.bootstrapRelays = options.bootstrapRelays || ['wss://relay.damus.io', 'wss://npub1...'];
+        this.bootstrapRelays = options.bootstrapRelays || [...DEFAULT_BOOTSTRAP_RELAYS];
         this.timeout = options.timeout || 10000;
         this.urlTransformer = options.urlTransformer;
     }
@@ -390,15 +399,24 @@ export class NCC05Resolver {
 
     private async fetchFreshestRecord(
         hexPubkey: string,
+        identifier: string | undefined,
         signer?: NostrSigner,
         gossip?: boolean
     ): Promise<PayloadRecord | null> {
         const queryRelays = await this.discoverRelays(hexPubkey, gossip);
-        const filter = {
+        const filter: {
+            authors: string[];
+            kinds: number[];
+            limit: number;
+            '#d'?: string[];
+        } = {
             authors: [hexPubkey],
             kinds: [30058],
             limit: 50
         };
+        if (identifier !== undefined) {
+            filter['#d'] = [identifier];
+        }
 
         try {
             const queryPromise = this.pool.querySync(queryRelays, filter);
@@ -418,7 +436,18 @@ export class NCC05Resolver {
 
             if (validEvents.length === 0) return null;
 
-            return this.buildPayloadRecord(validEvents[0], hexPubkey, signer);
+            // The newest event may be malformed or encrypted for someone else. Try the
+            // next candidate instead of terminating resolution on the first failure.
+            for (const event of validEvents) {
+                try {
+                    const record = await this.buildPayloadRecord(event, hexPubkey, signer);
+                    if (record) return record;
+                } catch (error) {
+                    if (error instanceof NCC05DecryptionError) continue;
+                    throw error;
+                }
+            }
+            return null;
         } catch (e) {
             if (e instanceof NCC05Error) throw e;
             throw new NCC05RelayError(`Relay query failed: ${(e as Error).message}`);
@@ -434,7 +463,9 @@ export class NCC05Resolver {
      * @param targetPubkey - The pubkey (hex or npub) of the service owner.
      * @param secretKey - Your secret key (required if the record is encrypted).
      * @param identifier - The 'd' tag of the record (default: 'addr').
-     * @param options - Resolution options (strict mode, gossip discovery).
+     * @param options - Resolution options (gossip discovery). `strict` is retained for
+     *                  compatibility but expired records are never returned: NCC-05 §8
+     *                  says clients MUST NOT use them.
      * @returns The resolved and validated NCC05Payload, or null if not found.
      * @throws {NCC05TimeoutError} if resolution times out.
      * @throws {NCC05RelayError} if underlying relay communication fails.
@@ -460,7 +491,7 @@ export class NCC05Resolver {
         if (cached) this.cache.delete(cacheKey);
 
         const signer = signerInput ? toSigner(signerInput) : undefined;
-        const record = await this.fetchFreshestRecord(hexPubkey, signer, options.gossip);
+        const record = await this.fetchFreshestRecord(hexPubkey, identifier, signer, options.gossip);
         if (!record) return null;
 
         const tagIdentifier = record.event.tags.find(t => t[0] === 'd')?.[1];
@@ -468,9 +499,8 @@ export class NCC05Resolver {
 
         const transformedPayload = this.applyUrlTransformer(record.payload);
         if (now > record.expiry) {
-            if (options.strict) return null;
-            console.warn('NCC-05 record expired');
-            return transformedPayload;
+            console.warn('NCC-05 record expired; refusing to use it');
+            return null;
         }
 
         this.cache.set(cacheKey, { payload: transformedPayload, expires: record.expiry });
@@ -482,7 +512,8 @@ export class NCC05Resolver {
      *
      * @param targetPubkey - The pubkey (hex or npub) of the service owner.
      * @param secretKey - Your secret key (required if the record is encrypted).
-     * @param options - Resolution options (strict mode, gossip discovery).
+     * @param options - Resolution options (gossip discovery). Expired records are
+     *                  never returned.
      */
     async resolveLatest(
         targetPubkey: string,
@@ -506,14 +537,13 @@ export class NCC05Resolver {
         }
 
         const signer = signerInput ? toSigner(signerInput) : undefined;
-        const record = await this.fetchFreshestRecord(hexPubkey, signer, options.gossip);
+        const record = await this.fetchFreshestRecord(hexPubkey, undefined, signer, options.gossip);
         if (!record) return null;
 
         const transformedPayload = this.applyUrlTransformer(record.payload);
         if (now > record.expiry) {
-            if (options.strict) return null;
-            console.warn('NCC-05 record expired');
-            return transformedPayload;
+            console.warn('NCC-05 record expired; refusing to use it');
+            return null;
         }
 
         this.cache.set(cacheKey, { payload: transformedPayload, expires: record.expiry });

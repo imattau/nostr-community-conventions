@@ -74,11 +74,9 @@ async function testSpecCompliance() {
         const res1 = await resolver.resolve(pk, sk, 'expired-test', { strict: true });
         if (res1 !== null) throw new Error('Should have returned null due to expiration tag');
         
-        // Attempt resolve without strict (should warn but return)
-        // Wait, current impl warns but returns payload if strictly not null? 
-        // Logic: if (now > expiry) { if (strict) return null; console.warn... } return payload;
+        // Attempt resolve without strict: expired records are still unusable.
         const res2 = await resolver.resolve(pk, sk, 'expired-test', { strict: false });
-        if (!res2) throw new Error('Should have returned payload in non-strict mode');
+        if (res2 !== null) throw new Error('Expired record must never be returned');
         
         console.log('Expiration Tag Logic: OK');
 
