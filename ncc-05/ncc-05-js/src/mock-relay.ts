@@ -4,8 +4,10 @@ export class MockRelay {
     private static instance: MockRelay;
     private wss: WebSocketServer;
     private events: any[] = [];
+    private readonly replaceable: boolean;
 
-    constructor(port: number = 8080) {
+    constructor(port: number = 8080, options: { replaceable?: boolean } = {}) {
+        this.replaceable = options.replaceable !== false;
         this.wss = new WebSocketServer({ port });
         MockRelay.instance = this;
         this.wss.on('connection', (ws: WebSocket) => {
@@ -16,7 +18,7 @@ export class MockRelay {
                 if (type === 'EVENT') {
                     const event = msg[1];
                     // Basic replaceable logic for test consistency (NIP-16)
-                    if (event.kind === 30058 || event.kind === 10002) {
+                    if (this.replaceable && (event.kind === 30058 || event.kind === 10002)) {
                         const dTag = event.tags.find((t: any) => t[0] === 'd')?.[1] || "";
                         
                         const existingIndex = this.events.findIndex(e => 
@@ -65,8 +67,21 @@ export class MockRelay {
         });
     }
 
-    stop() {
-        this.wss.close();
+    get port(): number {
+        const address = this.wss.address();
+        return typeof address === 'object' && address ? address.port : 0;
+    }
+
+    async ready(): Promise<void> {
+        if (this.wss.address()) return;
+        await new Promise<void>((resolve) => this.wss.once('listening', () => resolve()));
+    }
+
+    async stop(): Promise<void> {
+        for (const client of this.wss.clients) {
+            client.terminate();
+        }
+        await new Promise<void>((resolve) => this.wss.close(() => resolve()));
     }
 
     public static getNostrConnections(): WebSocket[] {
