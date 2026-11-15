@@ -40,3 +40,9 @@ git push origin npm-ncc-02-js-v0.6.0
 ```
 
 The workflow verifies the package name and version, installs dependencies, runs available build and test scripts, then publishes to npm using trusted publishing (OIDC). No npm token is stored in GitHub. In each package's npm settings, configure a GitHub Actions trusted publisher with organization/user `imattau`, repository `nostr-community-conventions`, and workflow filename `npm-publish.yml`; allow direct publishing. The package's `repository` field must point to this repository. npm generates provenance automatically for trusted publishes. Supported package slugs are `ncc-02-js`, `nostr-election-36998`, `ncc-05-js`, `ncc-06-js`, `ncc-sidecar`, `ncc-07-js`, `ncc-08-js`, `ncc-09-js`, `ncc-10-js`, `ncc-11-js`, `ncc-13-js`, and `ncc-manager` (the latter publishes as `@0xx0lostcause0xx0/ncc-manager`).
+
+Packages that gitignore `package-lock.json` are installed with `npm install`; the others use `npm ci`. To retry a release without moving its tag — for example after configuring a trusted publisher for a brand-new package — run the workflow from the tag ref:
+
+```sh
+gh workflow run npm-publish.yml --ref npm-ncc-07-js-v0.1.0 -f release_tag=npm-ncc-07-js-v0.1.0
+```

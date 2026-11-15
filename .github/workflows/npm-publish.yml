@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'npm-*'
+  # Retry a release without moving the tag: run from the tag ref and pass its name.
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to publish, e.g. npm-ncc-07-js-v0.1.0'
+        required: true
 
 permissions:
   contents: read
@@ -16,7 +22,7 @@ jobs:
       - name: Resolve package from release tag
         id: package
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
 
