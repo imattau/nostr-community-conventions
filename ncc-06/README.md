@@ -49,6 +49,7 @@ This convention specifies:
 - Required and recommended behaviours for services, sidecars, and clients under this profile
 - Deterministic conflict handling and caching rules for clients (without moving logic into services)
 - Publication redundancy expectations for sidecars to reduce single points of failure
+- Optional client request metadata for routing multiple NCC services through one HTTP(S) endpoint
 
 ### Identity-First Addressing
 
@@ -60,12 +61,46 @@ These identity-based URIs MUST NOT be dereferenced directly. Clients MUST resolv
 
 Services MUST NOT accept, interpret, or resolve identity-based URIs.
 
+### Shared HTTP(S) endpoint routing (Optional)
+
+A deployment MAY expose multiple NCC services through the same HTTP(S) endpoint
+(the same scheme, host, and port), for example through a reverse proxy. In that
+case, an NCC-aware HTTP client MAY send the following request headers to the
+selected endpoint so the gateway can route the request to the service selected
+by the identity reference:
+
+| Header | Value |
+| --- | --- |
+| `X-NCC-Pubkey` | The resolved service identity as a 64-character lowercase hexadecimal public key. |
+| `X-NCC-Service` | The service identifier selected by the identity reference and corresponding NCC-02 Service Record. |
+
+Clients that send these headers:
+
+- MUST derive both values from identity resolution and the selected service, not from page-supplied header values.
+- MUST replace any existing values for these headers before sending the request.
+- MUST send them only to the selected endpoint for the resolved NCC service.
+- MUST NOT treat them as credentials or as proof that a request is authorized.
+
+A gateway MAY use both values to select a backend. A gateway MUST NOT use these
+headers as an authorization decision. A gateway that forwards a request to an
+application SHOULD remove the headers unless that application explicitly needs
+them. This keeps the service protocol unchanged and makes the routing metadata
+an optional client-to-gateway convention; clients and services that do not
+support shared-endpoint routing remain interoperable using the concrete
+endpoint URL alone.
+
+For example, a deployment could publish `https://192.0.2.10:8443/` for both an
+`npanel` service and a `ditto` service, with `X-NCC-Service` distinguishing the
+backends. A relay could use the same listener with a path-bearing endpoint such
+as `wss://192.0.2.10:8443/relay/`; ordinary WebSocket clients then route by URL
+path and do not need these HTTP request headers.
+
 This convention does not specify:
 
 - New service-client protocol behaviour
 - Service-side trust enforcement or validation
 - DNS-based discovery or identifiers
-- Browser or WebView integration
+- Browser or WebView user-interface integration
 - Internal service architecture or storage design
 
 ---
