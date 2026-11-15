@@ -196,8 +196,9 @@ export async function runPublishCycle(service, options = {}) {
   }
 
   if (!eventsToPublish.length) {
-    updateService(id, { state: { ...state, is_probing: false } });
-    return state;
+    const clearedState = { ...state, is_probing: false, last_inventory: filteredInventory };
+    updateService(id, { state: clearedState });
+    return clearedState;
   }
 
   const publishResults = await publishToRelays(publicationRelays, eventsToPublish, secretKey);

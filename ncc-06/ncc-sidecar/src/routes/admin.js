@@ -5,7 +5,7 @@ import {
 import { generateKeypair, toNpub, fromNpub, fromNsec, getPublicKey } from 'ncc-06-js';
 import { sendInviteDM } from '../dm.js';
 
-export default async function adminRoutes(server, onInitialized) {
+export default async function adminRoutes(server, { onInitialized } = {}) {
   server.get('/api/setup/status', async () => {
     return { initialized: isInitialized() };
   });

@@ -71,8 +71,9 @@ export async function startWebServer(initialPort = 3000, onInitialized, options 
     });
   }
 
-  // Register Routes
-  await server.register(adminRoutes, onInitialized);
+  // Register Routes. Fastify always passes an options object to a plugin, so wrap
+  // the callback instead of passing it positionally.
+  await server.register(adminRoutes, { onInitialized });
   await server.register(serviceRoutes);
   await server.register(configRoutes);
   await server.register(dbRoutes);

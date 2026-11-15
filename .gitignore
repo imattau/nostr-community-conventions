@@ -7,3 +7,5 @@ _site/
 ncc-manager/src/ncc_manager.sqlite
 ncc-02_1766310604.json
 ncc-02_content.md
+*.db-shm
+*.db-wal
