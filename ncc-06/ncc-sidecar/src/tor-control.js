@@ -35,6 +35,13 @@ export class TorControl {
       }
     });
 
+    this.socket.on('close', () => {
+      if (!this.pending) return;
+      const pending = this.pending;
+      this.pending = null;
+      pending.reject(new Error('Tor control connection closed before replying'));
+    });
+
     this.socket.on('data', chunk => {
       this.buffer += chunk;
       this._processBuffer();
