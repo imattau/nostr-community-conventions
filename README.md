@@ -29,3 +29,14 @@ For the full NCC-00 specification — purpose, scope, event kinds, tags, and gov
 Every convention's README is also published as a browsable page at **[imattau.github.io/nostr-community-conventions](https://imattau.github.io/nostr-community-conventions/)**, built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml) and [`site/build.mjs`](site/build.mjs).
 
 **Adding a new NCC updates the site automatically** — no workflow changes needed. The build script discovers any top-level `ncc-<number>/` folder that contains a `README.md` and generates its doc page on the next push to `master`. To publish NCC-07, for example, just add `ncc-07/README.md` (following the pattern of the existing folders) and push.
+
+## npm Releases
+
+The [`npm-publish.yml`](.github/workflows/npm-publish.yml) workflow publishes a package when its version tag is pushed. First update the package version in `package.json` (and its lockfile, if present), commit the change, then tag that commit using `npm-<package-slug>-v<version>`. For example:
+
+```sh
+git tag npm-ncc-02-js-v0.6.0
+git push origin npm-ncc-02-js-v0.6.0
+```
+
+The workflow verifies the package name and version, installs dependencies, runs available build and test scripts, then publishes to npm using trusted publishing (OIDC). No npm token is stored in GitHub. In each package's npm settings, configure a GitHub Actions trusted publisher with organization/user `imattau`, repository `nostr-community-conventions`, and workflow filename `npm-publish.yml`; allow direct publishing. The package's `repository` field must point to this repository. npm generates provenance automatically for trusted publishes. Supported package slugs are `ncc-02-js`, `nostr-election-36998`, `ncc-05-js`, `ncc-06-js`, `ncc-sidecar`, `ncc-07-js`, `ncc-08-js`, `ncc-09-js`, `ncc-10-js`, `ncc-11-js`, `ncc-13-js`, and `ncc-manager` (the latter publishes as `@0xx0lostcause0xx0/ncc-manager`).
