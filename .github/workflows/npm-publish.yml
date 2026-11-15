@@ -72,7 +72,14 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ steps.package.outputs.directory }}
-        run: npm ci
+        run: |
+          set -euo pipefail
+          # Libraries may deliberately gitignore their lockfile; npm ci requires one.
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
 
       - name: Build and test
         working-directory: ${{ steps.package.outputs.directory }}
