@@ -1,4 +1,5 @@
 import express from "express";
+import { resolve } from "node:path";
 import WebSocket from "ws";
 import { marked } from "marked";
 import sanitizeHtml from "sanitize-html";
@@ -404,7 +405,7 @@ async function getData(relays) {
   return bucket.pending;
 }
 
-app.use(express.static("public"));
+app.use(express.static("dist"));
 
 app.get("/api/nccs", async (req, res) => {
   try {
@@ -459,6 +460,13 @@ app.get("/api/nccs/:d/proposals", async (req, res) => {
 app.get("/api/health", (req, res) => {
   const relays = getRelaysFromRequest(req);
   res.json({ ok: true, relays });
+});
+
+app.get("*", (req, res) => {
+  const page = req.path === "/ncc.html" || req.path === "/endorsements.html" || req.path === "/proposals.html"
+    ? req.path.slice(1)
+    : "index.html";
+  res.sendFile(resolve("dist", page));
 });
 
 app.listen(PORT, () => {

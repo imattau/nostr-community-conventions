@@ -2,11 +2,11 @@ import {
   shorten,
   formatTimestamp,
   getQueryParam,
-  buildApiUrl,
   initRelayControls,
   setRelayCount,
   setDefaultRelays
 } from "./app.js";
+import { loadData } from "./data.js";
 
 const titleEl = document.getElementById("ncc-title");
 const subtitleEl = document.getElementById("ncc-subtitle");
@@ -53,14 +53,11 @@ async function load() {
   if (!dTag) return renderEmpty();
 
   try {
-    const response = await fetch(
-      buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}`, { event_id: eventId })
-    );
-    if (!response.ok) throw new Error("Failed to load");
-    const data = await response.json();
-    const details = data.details;
-    if (data.default_relays) setDefaultRelays(data.default_relays);
-    setRelayCount(data.relays.length);
+    const { data, relays, default_relays } = await loadData();
+    const details = data.details(dTag, eventId);
+    if (!details) return renderEmpty();
+    setDefaultRelays(default_relays);
+    setRelayCount(relays.length);
 
     titleEl.textContent = `${details.d.toUpperCase()} · ${details.title}`;
     subtitleEl.textContent = `Event: ${shorten(details.event_id)} · Pubkey: ${shorten(details.pubkey)}`;

@@ -68,20 +68,6 @@ export function saveRelayOverrides(relays) {
   return sanitized;
 }
 
-export function buildApiUrl(path, params = {}) {
-  const url = new URL(path, window.location.origin);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, value);
-    }
-  });
-  const relays = getRelayOverrides();
-  if (relays.length) {
-    url.searchParams.set("relays", relays.join(","));
-  }
-  return url.pathname + url.search;
-}
-
 export function getRelayCacheKey(baseKey) {
   const relays = getRelayOverrides();
   return `${baseKey}:${relays.join("|")}`;

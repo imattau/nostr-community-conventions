@@ -2,20 +2,31 @@
 
 Lightweight server + UI for browsing Nostr Community Conventions (NCC), succession records (NSR), and endorsement signals.
 
-## Run
+## Run the web server
 
 ```bash
 npm install
 npm start
 ```
 
-Then open `http://localhost:4321`.
+Then open `http://localhost:4321`. The server build retains the `/api/*` endpoints for deployments that want server-side relay aggregation.
+
+## Static build and NIP-5A
+
+The viewer UI can run without an application server: it queries Nostr relays directly from the browser and stores relay preferences and its list cache in local storage. Build it with:
+
+```bash
+npm install
+npm run build
+```
+
+The static site is written to `dist/` and contains the index, NCC detail, proposal, and endorsement pages. Upload the files in `dist/` to Blossom and publish a NIP-5A root (`15128`) or named (`35128`) site manifest whose `path` tags map each file to its SHA-256 hash. The manifest should include a `server` tag for the Blossom host. Relay connectivity and browser CORS support are required; the Express API is not used by the static build.
 
 ## Configuration
 
 - `NCC_RELAYS` comma-separated list of relays
 - `NCC_CACHE_TTL_MS` cache refresh interval in milliseconds (default 60000)
-- `NCC_SINCE_SECONDS` unix timestamp to limit history (default 0)
+- `NCC_SINCE_SECONDS` server-side unix timestamp to limit history (default 0)
 - `PORT` server port (default 4321)
 
 ## Docker

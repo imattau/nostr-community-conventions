@@ -4,10 +4,13 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --omit=dev
+COPY package-lock.json ./
+RUN npm ci
 
 COPY server.js ./
 COPY public ./public
+COPY vite.config.js ./
+RUN npm run build
 
 EXPOSE 4321
 
