@@ -59,7 +59,7 @@ export async function prepareServiceRecords({ service, filteredInventory, normal
     secretKey,
     publicKey,
     serviceId: service.service_id,
-    locatorId: service.service_id + '-locator'
+    locatorId: service.config.locator_id || service.service_id + '-locator'
   }, filteredInventory, {
     privateRecipients: normalizedRecipients
   });
