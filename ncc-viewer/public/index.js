@@ -1,12 +1,13 @@
 import {
   shorten,
   formatTimestamp,
-  buildApiUrl,
   getRelayCacheKey,
   initRelayControls,
   setRelayCount,
   setDefaultRelays
 } from "./app.js";
+import { loadData } from "./data.js";
+import { initSigner } from "./signer.js";
 
 const listEl = document.getElementById("ncc-list");
 const CACHE_KEY = "ncc-viewer-cache";
@@ -64,19 +65,17 @@ async function load() {
   }
 
   try {
-    const response = await fetch(buildApiUrl("/api/nccs"));
-    if (!response.ok) throw new Error("Failed to load");
-    const data = await response.json();
-    setRelayCount(data.relays.length);
-    if (data.default_relays) setDefaultRelays(data.default_relays);
-    renderList(data.items || []);
+    const { data, relays, default_relays } = await loadData();
+    setRelayCount(relays.length);
+    setDefaultRelays(default_relays);
+    renderList(data.list());
     window.localStorage.setItem(
       cacheKey,
       JSON.stringify({
         at: Date.now(),
-        relays: data.relays,
-        default_relays: data.default_relays,
-        items: data.items
+        relays,
+        default_relays,
+        items: data.list()
       })
     );
   } catch (error) {
@@ -85,4 +84,5 @@ async function load() {
 }
 
 initRelayControls(() => load());
+initSigner();
 load();

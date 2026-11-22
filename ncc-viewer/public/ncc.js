@@ -2,11 +2,12 @@ import {
   shorten,
   formatTimestamp,
   getQueryParam,
-  buildApiUrl,
   initRelayControls,
   setRelayCount,
   setDefaultRelays
 } from "./app.js";
+import { loadData } from "./data.js";
+import { initSigner, publishEndorsement } from "./signer.js";
 
 const titleEl = document.getElementById("ncc-title");
 const subtitleEl = document.getElementById("ncc-subtitle");
@@ -53,14 +54,11 @@ async function load() {
   if (!dTag) return renderEmpty();
 
   try {
-    const response = await fetch(
-      buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}`, { event_id: eventId })
-    );
-    if (!response.ok) throw new Error("Failed to load");
-    const data = await response.json();
-    const details = data.details;
-    if (data.default_relays) setDefaultRelays(data.default_relays);
-    setRelayCount(data.relays.length);
+    const { data, relays, default_relays } = await loadData();
+    const details = data.details(dTag, eventId);
+    if (!details) return renderEmpty();
+    setDefaultRelays(default_relays);
+    setRelayCount(relays.length);
 
     titleEl.textContent = `${details.d.toUpperCase()} · ${details.title}`;
     subtitleEl.textContent = `Event: ${shorten(details.event_id)} · Pubkey: ${shorten(details.pubkey)}`;
@@ -84,4 +82,27 @@ async function load() {
 }
 
 initRelayControls(() => load());
+initSigner();
+const endorseButton = document.getElementById("endorse-submit");
+endorseButton.addEventListener("click", async () => {
+  const status = document.getElementById("endorse-status");
+  endorseButton.disabled = true;
+  status.textContent = "Signing and publishing…";
+  try {
+    const details = await loadData().then(({ data }) => data.details(getQueryParam("d"), getQueryParam("event")));
+    if (!details) throw new Error("NCC document is no longer available");
+    await publishEndorsement({
+      d: details.d,
+      eventId: details.event_id,
+      role: document.getElementById("endorse-role").value,
+      implementation: document.getElementById("endorse-implementation").value.trim(),
+      note: document.getElementById("endorse-note").value.trim()
+    });
+    status.textContent = "Endorsement published.";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    endorseButton.disabled = !document.getElementById("signer-toggle").textContent.startsWith("Signed in");
+  }
+});
 load();

@@ -2,11 +2,12 @@ import {
   shorten,
   formatTimestamp,
   getQueryParam,
-  buildApiUrl,
   initRelayControls,
   setRelayCount,
   setDefaultRelays
 } from "./app.js";
+import { loadData } from "./data.js";
+import { initSigner } from "./signer.js";
 
 const titleEl = document.getElementById("proposal-title");
 const subtitleEl = document.getElementById("proposal-subtitle");
@@ -52,16 +53,17 @@ async function load() {
   subtitleEl.textContent = "Alternative NCC documents discovered on relays.";
 
   try {
-    const response = await fetch(buildApiUrl(`/api/nccs/${encodeURIComponent(dTag)}/proposals`));
-    if (!response.ok) throw new Error("Failed to load");
-    const data = await response.json();
-    if (data.default_relays) setDefaultRelays(data.default_relays);
-    setRelayCount(data.relays.length);
-    renderList(data.proposals || [], dTag);
+    const { data, relays, default_relays } = await loadData();
+    const proposals = data.proposals(dTag);
+    if (!proposals) throw new Error("NCC not found");
+    setDefaultRelays(default_relays);
+    setRelayCount(relays.length);
+    renderList(proposals, dTag);
   } catch (error) {
     renderEmpty("Unable to load proposals right now.");
   }
 }
 
 initRelayControls(() => load());
+initSigner();
 load();

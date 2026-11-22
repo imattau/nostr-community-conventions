@@ -231,6 +231,34 @@ header p {
   position: relative;
 }
 
+.signer-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: 85vh;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 22px;
+  color: var(--text);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.signer-dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+.signer-form { display: grid; gap: 14px; }
+.signer-form input, .signer-form textarea, .endorse-fields input, .endorse-fields select {
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+}
+.signer-form textarea { min-height: 92px; resize: vertical; }
+.endorse-panel { margin-top: 20px; padding: 18px; border: 1px solid var(--stroke); border-radius: var(--radius-sm); background: rgba(255,255,255,.025); }
+.endorse-panel h3 { margin: 0 0 8px; }
+.endorse-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.endorse-fields #endorse-note, .endorse-fields #endorse-status { grid-column: 1 / -1; }
+.badge:disabled { opacity: .5; cursor: not-allowed; }
+
 .relay-panel {
   position: absolute;
   top: 44px;
@@ -326,4 +354,7 @@ header p {
   .card {
     padding: 16px;
   }
+
+  .endorse-fields { grid-template-columns: 1fr; }
+  .endorse-fields #endorse-note, .endorse-fields #endorse-status { grid-column: auto; }
 }
