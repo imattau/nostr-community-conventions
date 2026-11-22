@@ -7,6 +7,7 @@ import {
   setDefaultRelays
 } from "./app.js";
 import { loadData } from "./data.js";
+import { initSigner, publishEndorsement } from "./signer.js";
 
 const titleEl = document.getElementById("ncc-title");
 const subtitleEl = document.getElementById("ncc-subtitle");
@@ -81,4 +82,27 @@ async function load() {
 }
 
 initRelayControls(() => load());
+initSigner();
+const endorseButton = document.getElementById("endorse-submit");
+endorseButton.addEventListener("click", async () => {
+  const status = document.getElementById("endorse-status");
+  endorseButton.disabled = true;
+  status.textContent = "Signing and publishing…";
+  try {
+    const details = await loadData().then(({ data }) => data.details(getQueryParam("d"), getQueryParam("event")));
+    if (!details) throw new Error("NCC document is no longer available");
+    await publishEndorsement({
+      d: details.d,
+      eventId: details.event_id,
+      role: document.getElementById("endorse-role").value,
+      implementation: document.getElementById("endorse-implementation").value.trim(),
+      note: document.getElementById("endorse-note").value.trim()
+    });
+    status.textContent = "Endorsement published.";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    endorseButton.disabled = !document.getElementById("signer-toggle").textContent.startsWith("Signed in");
+  }
+});
 load();

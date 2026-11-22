@@ -7,6 +7,7 @@ import {
   setDefaultRelays
 } from "./app.js";
 import { loadData } from "./data.js";
+import { initSigner } from "./signer.js";
 
 const titleEl = document.getElementById("endorsement-title");
 const subtitleEl = document.getElementById("endorsement-subtitle");
@@ -67,4 +68,5 @@ async function load() {
 }
 
 initRelayControls(() => load());
+initSigner();
 load();

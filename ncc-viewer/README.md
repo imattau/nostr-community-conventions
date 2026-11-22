@@ -22,6 +22,12 @@ npm run build
 
 The static site is written to `dist/` and contains the index, NCC detail, proposal, and endorsement pages. Upload the files in `dist/` to Blossom and publish a NIP-5A root (`15128`) or named (`35128`) site manifest whose `path` tags map each file to its SHA-256 hash. The manifest should include a `server` tag for the Blossom host. Relay connectivity and browser CORS support are required; the Express API is not used by the static build.
 
+## Signing and endorsements
+
+All pages support NIP-07 browser extensions and NIP-46 remote signers. On an NCC detail page, connect a signer and use **Publish endorsement** to sign a kind `30052` event. The viewer publishes to the account's latest NIP-65 (`10002`) relays marked for writing (unmarked `r` entries are treated as read/write), along with the viewer's configured relays. NIP-46 supports `bunker://` connection strings and a generated `nostrconnect://` URI; keep the page open until the remote signer connects.
+
+The same static assets and signing flows are included in nsite builds. Nsite hosting must permit browser connections to the chosen relays and signing extension.
+
 ## Configuration
 
 - `NCC_RELAYS` comma-separated list of relays

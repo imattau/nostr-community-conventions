@@ -7,6 +7,7 @@ import {
   setDefaultRelays
 } from "./app.js";
 import { loadData } from "./data.js";
+import { initSigner } from "./signer.js";
 
 const listEl = document.getElementById("ncc-list");
 const CACHE_KEY = "ncc-viewer-cache";
@@ -83,4 +84,5 @@ async function load() {
 }
 
 initRelayControls(() => load());
+initSigner();
 load();
