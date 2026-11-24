@@ -146,6 +146,8 @@ export function initPowerShell(appState, appVersion, getConfigFunc, setConfigFun
 }
 
 function setupGlobalListeners() {
+    eventBus.on('operation-status', updateStatus);
+
     eventBus.on('revision-created', (newDraft) => {
         if (newDraft) {
             revisionSourceId = currentItemId; // Track where we came from
