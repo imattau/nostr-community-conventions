@@ -125,26 +125,37 @@ Bind a pubkey to a reachable endpoint and its transport-level key.
 #### Required tags
 
 - `d` – service identifier (for example `api`, `media`, `wallet`)  
-- `u` – endpoint URI (`https://`, `wss://`, `tcp://`, `onion://`)  
-- `k` – endpoint public key fingerprint (for example SPKI hash)  
+- `u` – endpoint URI (`https://`, `wss://`, `tcp://`, `onion://`). Private and invite-only records MAY omit it (see below)  
+- `k` – endpoint public key fingerprint (for example SPKI hash). Required as set out in `k` requirements. A record that omits `u` MAY also omit it  
 - `exp` – expiry timestamp (Unix seconds)  
 
 ### Private and invite-only services (Clarifying)
 
-A valid NCC-02 Service Record MAY intentionally omit a publicly routable endpoint (`u`) in private or invite-only deployments.
+A valid NCC-02 Service Record MAY intentionally omit a publicly routable endpoint (`u`) in private or invite-only deployments. A record that omits `u` MAY also omit `k`.
 
-The absence of `u` does not invalidate the Service Record.
+The absence of `u`, or of both `u` and `k`, does not invalidate the Service Record.
+
+A Service Record is readable by anyone who can obtain it. A server presents its transport key to anyone who connects, so a published `k` can be matched against servers found by scanning, which can disclose the location that omitting `u` withholds and associate it with the publishing pubkey and service identifier. The same `k` on several records also links them to each other. Omitting `k` prevents this matching through the Service Record. It does not hide the server from scanning, or from anyone authorised to resolve its endpoint.
 
 In such cases:
 - NCC-02 continues to serve as the service identity and trust anchor.
 - NCC-05 provides the exclusive mechanism for authorised endpoint discovery.
 - Clients MUST NOT treat the absence of a public `u` value as a reason to bypass NCC-02 anchoring requirements.
 
+When such a record also omits `k`:
+- Clients MUST NOT treat the missing `k` as a fingerprint mismatch, or as a reason to bypass NCC-02 anchoring requirements.
+- The transport key, if any, comes from the `k` of the endpoint in the NCC-05 locator. Clients apply to it the verification and fail-closed rules given below.
+- A publisher whose private endpoint relies on key pinning, for example one with a self-signed certificate, SHOULD include `k` on that endpoint inside the encrypted locator.
+- The Service Record then makes no statement about the transport key. It cannot be used to cross-check the locator's `k`, and an attestation of that record does not by itself attest a transport key.
+
+A publisher MAY still include `k` in a record without `u`. When it is present, clients continue to apply it as part of NCC-02 trust semantics.
+
 ### `k` requirements (Normative)
 
 The `k` tag binds a service endpoint to a transport-level public key fingerprint.
 
 - If the `u` endpoint uses a TLS-protected scheme (for example `https://` or `wss://`), clients SHOULD treat `k` as REQUIRED unless explicitly operating in an override or recovery mode.
+- A record without `u` is not subject to that requirement, whatever scheme the privately resolved endpoint uses.
 - Clients SHOULD verify that the observed transport identity matches `k` and SHOULD fail closed on mismatch.
 
 
@@ -210,7 +221,7 @@ A client resolving a service SHOULD follow these steps:
 4. Filter attestations by trusted certifier pubkeys and validity  
 5. Apply local policy requirements  
 6. Connect to the endpoint  
-7. Verify the endpoint key matches fingerprint `k`  
+7. Verify the endpoint key matches fingerprint `k`, taken from the Service Record or, when a record without `u` omits it, from the NCC-05 locator endpoint  
 8. Fail closed on mismatch unless explicitly overridden by the user  
 
 ---
@@ -340,7 +351,8 @@ Publish kind 30059 with:
 Publish kind 30059 with:
 - `d`: "relay"
 - (omit `u`)
-- `k`: "<spki_hash>"
+- (`k` MAY be omitted; leaving it out keeps the transport fingerprint out of public view)
+- `exp`: "<unix_seconds>"
 
 Authorised clients resolve reachability via NCC-05 locators for this same service identity.
 If NCC-05 resolution succeeds, clients prefer the NCC-05 endpoint while keeping NCC-02 as the trust anchor.
@@ -356,7 +368,7 @@ A resolver or client verifier SHOULD perform the following steps:
 - Select the latest valid, unexpired record  
 - Apply local attestation and trust policy  
 - Connect to the resolved endpoint  
-- Verify the endpoint key fingerprint matches the declared value  
+- Verify the endpoint key fingerprint matches the declared value, from the Service Record or, for a private record without `k`, from the NCC-05 locator  
 
 ---
 
