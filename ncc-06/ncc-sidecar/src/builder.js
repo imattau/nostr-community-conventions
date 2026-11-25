@@ -11,7 +11,9 @@ export async function buildRecords(config, inventory, options = {}) {
   // 1. Build NCC-02 Service Record
   // In private mode, we typically don't publish a 'u' tag (endpoint) in the NCC-02 record.
   const primaryEndpoint = isPrivate ? undefined : (inventory[0]?.url || '');
-  const primaryK = inventory[0]?.k || null;
+  // A private record is readable by anyone, and its `k` could be matched against
+  // scanned servers. NCC-02 lets it be omitted; the encrypted locator keeps it.
+  const primaryK = isPrivate ? undefined : (inventory[0]?.k || undefined);
 
   const ncc02Event = await buildNcc02ServiceRecord({
     secretKey: config.secretKey,
