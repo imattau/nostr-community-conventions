@@ -1,6 +1,6 @@
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure';
 import { nip19 } from 'nostr-tools';
-import { NCC02Builder, NCC02Resolver, MockRelay, isExpired, encryptPrivateRecipients, isPrivateRecipientAuthorized, decryptPrivateRecipient } from '../dist/index.mjs';
+import { KINDS, NCC02Builder, NCC02Resolver, MockRelay, isExpired, encryptPrivateRecipients, isPrivateRecipientAuthorized, decryptPrivateRecipient } from '../dist/index.mjs';
 
 async function runTests() {
   console.log('--- NCC-02 JS Comprehensive Test Suite ---');
@@ -255,6 +255,48 @@ async function runTests() {
   } else {
     throw new Error('Failed to resolve private service record correctly.');
   }
+
+  console.log('Test: Private service without `k` or a `private` tag...');
+  const sign = (serviceId, extraTags) => finalizeEvent({
+    kind: KINDS.SERVICE_RECORD,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [['d', serviceId], ['exp', String(Math.floor(Date.now() / 1000) + 3600)], ...extraTags],
+    content: ''
+  }, ownerSk);
+  await relay.publish(sign('bare-private', []));
+  const resBare = await resolver.resolve(ownerPk, 'bare-private');
+  if (resBare.endpoint !== undefined || resBare.fingerprint !== undefined || resBare.isPrivate !== true) {
+    throw new Error('A record with only d and exp should resolve as private');
+  }
+  await relay.publish(sign('bare-public', [['u', 'tcp://203.0.113.1:9000']]));
+  if ((await resolver.resolve(ownerPk, 'bare-public')).isPrivate !== false) {
+    throw new Error('A record with an endpoint and no private tag should not be private');
+  }
+  await relay.publish(sign('bad-flag', [['private', 'yes']]));
+  try {
+    await resolver.resolve(ownerPk, 'bad-flag');
+    throw new Error('An invalid private tag should be rejected');
+  } catch (e) {
+    if (e.code !== 'MALFORMED_RECORD') throw e;
+  }
+  console.log('✅ Passed');
+
+  console.log('Test: verifyEndpoint with a locator fingerprint...');
+  const check = (expected, status, actual, options, label) => {
+    if (resolver.verifyEndpoint(status, actual, options) !== expected) {
+      throw new Error(`verifyEndpoint: ${label}`);
+    }
+  };
+  check(true, resBare, 'pin', { locatorFingerprint: 'pin' }, 'locator k should match');
+  check(false, resBare, 'other', { locatorFingerprint: 'pin' }, 'locator k mismatch should fail');
+  check(false, resBare, 'pin', undefined, 'nothing to compare should fail');
+  check(false, resBare, undefined, undefined, 'two missing values must not match');
+  check(false, resBare, '', { locatorFingerprint: '' }, 'two empty values must not match');
+  check(false, resPrivate, 'pin', { locatorFingerprint: 'pin' }, 'the record k takes precedence');
+  check(true, resPrivate, 'fp_private', { locatorFingerprint: 'pin' }, 'the record k still matches');
+  check(false, { endpoint: 'tcp://203.0.113.1:9000' }, 'pin', { locatorFingerprint: 'pin' },
+    'a record with u must not borrow the locator k');
+  console.log('✅ Passed');
 
   console.log('Test: Private recipient metadata & helpers...');
   const inviteeSk = generateSecretKey();
