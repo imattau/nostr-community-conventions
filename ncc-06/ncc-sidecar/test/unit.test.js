@@ -70,3 +70,23 @@ test('builder produces deterministic events', async () => {
   const locDTag = ncc05EventTemplate.tags.find(t => t[0] === 'd');
   assert.strictEqual(locDTag[1], 'test-locator');
 });
+
+test('a private service record has no readable fingerprint; the locator keeps it', async () => {
+  const { secretKey, publicKey } = generateKeypair();
+  const inventory = [{ url: 'https://203.0.113.5:8443', family: 'ipv4', priority: 1, k: 'key' }];
+  const build = (service_mode) => buildRecords(
+    { secretKey, publicKey, serviceId: 'svc', locatorId: 'svc-locator', ncc02ExpiryDays: 1, ncc05_ttl_hours: 1, service_mode },
+    inventory
+  );
+  const tag = (event, name) => event.tags.find(t => t[0] === name)?.[1];
+
+  const hidden = await build('private');
+  assert.strictEqual(tag(hidden.ncc02Event, 'private'), 'true');
+  assert.strictEqual(tag(hidden.ncc02Event, 'u'), undefined);
+  assert.strictEqual(tag(hidden.ncc02Event, 'k'), undefined);
+  assert.strictEqual(hidden.locatorPayload.endpoints[0].k, 'key');
+
+  const open = await build('public');
+  assert.strictEqual(tag(open.ncc02Event, 'k'), 'key');
+  assert.strictEqual(tag(open.ncc02Event, 'u'), 'https://203.0.113.5:8443');
+});

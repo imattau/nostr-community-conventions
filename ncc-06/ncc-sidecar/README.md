@@ -43,6 +43,10 @@ NCC-06 Sidecar keeps your services (relays, APIs, media, etc.) discoverable on N
   - The profile editor shares the same familiar controls for secrets, endpoint rotation, TLS regeneration, and recipient management – all actions trigger a publish cycle with helpful log metadata.
   - Use the “Force Connection” modal to validate admins manually (via `npub` hex or `nsec`) when remote clients struggle.
 
+- **Private services**
+  - The public NCC-02 record has no endpoint (`u`) and no TLS fingerprint (`k`). Clients take the fingerprint from the endpoint in the encrypted NCC-05 locator.
+  - Records published by an earlier version may still show `k`. Use a forced publish on each private service to replace them; relays and others may keep old copies.
+
 - **Publication relays & logs**
   - Publication relays are shared across services; update them once through the “Publishing Relays” modal under the hamburger menu.
   - System logs now expand with rich metadata: event IDs (NCC-02/NCC-05/kind-0), locator payloads, TLS fingerprints, and per-relay publish results.
