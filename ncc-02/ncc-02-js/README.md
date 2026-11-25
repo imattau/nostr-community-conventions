@@ -80,7 +80,7 @@ await builder.createRevocation({
 The builder helpers emit the expected NCC-02 event kinds: Kind 30059 for service records, 30060 for attestations, and 30061 for revocations. `createServiceRecord` always includes the `d` and `exp` tags while optionally populating `u` and `k`. Attestations include a `d` tag scoped to `<serviceId>:<subjectPubkey>` (so a certifier's attestations for different services/subjects don't replace each other), plus `subj`, `srv`, `e`, `std`, `lvl`, `nbf`, and `exp`. Revocations include a `d` tag set to the revoked attestation's event id, plus the `e` tag and an optional reason. You can supply either a raw private key (hex string or `Uint8Array`) or a signer implementing `getPublicKey`/`signEvent`.
 
 #### Private Service Metadata
-Service records now require a boolean `private` tag (set via `isPrivate` when calling `createServiceRecord`). When private services should only be used by a curated set of users, you can provide pre-encrypted `privateRecipients` values that contain authorized `npub` identifiers. The helper utilities derive NIP-44 conversation keys: `await encryptPrivateRecipients(ownerPrivateKey, recipients)` when publishing so each recipient gets a ciphertext they can decrypt, and `await isPrivateRecipientAuthorized(privateRecipients, ownerPubkey, recipientPrivateKey)` on the client-side to verify if the signed-in key is on the allowlist (or `await decryptPrivateRecipient(...)` if you need the raw `npub`). The helpers accept either raw private keys or NIP-07/NIP-46 style signer objects (they will call `nip44Encrypt/nip44Decrypt` or fall back to legacy `nip04` if present). The resolver surfaces `isPrivate` and `privateRecipients` on the returned `ServiceStatus`.
+`createServiceRecord` adds a boolean `private` tag, set with `isPrivate`. NCC-02 does not require the tag, so the resolver also accepts records without it: `isPrivate` is then true when the record has no `u`. A tag with any value other than `true` or `false` is rejected. When private services should only be used by a curated set of users, you can provide pre-encrypted `privateRecipients` values that contain authorized `npub` identifiers. The helper utilities derive NIP-44 conversation keys: `await encryptPrivateRecipients(ownerPrivateKey, recipients)` when publishing so each recipient gets a ciphertext they can decrypt, and `await isPrivateRecipientAuthorized(privateRecipients, ownerPubkey, recipientPrivateKey)` on the client-side to verify if the signed-in key is on the allowlist (or `await decryptPrivateRecipient(...)` if you need the raw `npub`). The helpers accept either raw private keys or NIP-07/NIP-46 style signer objects (they will call `nip44Encrypt/nip44Decrypt` or fall back to legacy `nip04` if present). The resolver surfaces `isPrivate` and `privateRecipients` on the returned `ServiceStatus`.
 
 ### 3. Trust Model & Security
 
@@ -112,7 +112,7 @@ await resolver.resolve(ownerPubkey, 'api');
 
 ### 7. Endpoint Verification Helpers
 
-After resolving a service, call `resolver.verifyEndpoint(serviceStatus, actualFingerprint)` to ensure the runtime transport fingerprint matches the declared `k` tag. Use `verifyNCC02Event` when you ingest raw events and `isExpired` to quickly skip expired records before attempting network validation.
+After resolving a service, call `resolver.verifyEndpoint(serviceStatus, actualFingerprint)` to ensure the runtime transport fingerprint matches the declared `k` tag. A private record without `u` may omit `k`. In that case pass the `k` of the NCC-05 locator endpoint you are connecting to, from a locator you have verified as signed by the same pubkey: `resolver.verifyEndpoint(serviceStatus, actualFingerprint, { locatorFingerprint })`. The library does not fetch or verify locators. A record's own `k` always takes precedence, and the method returns false when there is nothing to compare. Use `verifyNCC02Event` when you ingest raw events and `isExpired` to quickly skip expired records before attempting network validation.
 
 ## API Reference
 
@@ -127,8 +127,10 @@ After resolving a service, call `resolver.verifyEndpoint(serviceStatus, actualFi
 - `options.standard`: Expected `std` tag value (defaults to `nostr-service-trust-v0.1`).
 - Returns `ServiceStatus` including `endpoint`, `fingerprint`, `expiry`, `attestations`, `attestationCount`, `isRevoked`, `eventId`, `pubkey`, and the raw `serviceEvent`.
 
-#### `verifyEndpoint(resolved, actualFingerprint)`
-- Compares the resolved fingerprint with the observed transport fingerprint for an additional rejection guard.
+#### `verifyEndpoint(resolved, actualFingerprint, options?)`
+- Compares the observed transport fingerprint with the record's `k`.
+- `options.locatorFingerprint`: The NCC-05 endpoint's `k`, used only when the record has neither `u` nor `k`.
+- Returns `false` if the observed fingerprint or the expected one is missing.
 
 #### `close()`
 - Closes relay subscriptions when the resolver owns the `SimplePool`.

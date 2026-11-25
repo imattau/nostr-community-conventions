@@ -146,9 +146,12 @@ export class NCC02Resolver {
 
     const serviceTags = Object.fromEntries(serviceEvent.tags);
     const now = Math.floor(Date.now() / 1000);
+    // NCC-02 does not require a `private` tag. Without one, a record that withholds its
+    // endpoint is treated as private. A tag that is present must still be valid.
     const privateFlag = parsePrivateFlag(serviceEvent.tags);
-    if (privateFlag === null) {
-      throw new NCC02Error('MALFORMED_RECORD', 'Service record is missing required tag (private)');
+    const hasPrivateTag = serviceEvent.tags.some((tag) => tag[0] === 'private');
+    if (hasPrivateTag && privateFlag === null) {
+      throw new NCC02Error('MALFORMED_RECORD', 'Service record has an invalid private tag');
     }
 
     // Security Fix: exp is REQUIRED by NCC-02 spec
@@ -187,7 +190,7 @@ export class NCC02Resolver {
       attestations: trustData.validAttestations,
       attestationCount: trustData.validAttestations.length,
       isRevoked: trustData.isRevoked,
-      isPrivate: privateFlag,
+      isPrivate: privateFlag ?? !serviceTags.u,
       privateRecipients: collectPrivateRecipients(serviceEvent.tags),
       eventId: serviceEvent.id,
       pubkey: serviceEvent.pubkey,
@@ -320,13 +323,23 @@ export class NCC02Resolver {
 
   /**
    * Verifies that the actual fingerprint found during transport-level connection
-   * matches the one declared in the signed service record.
-   * 
+   * matches the declared one. It returns false when there is nothing to compare.
+   *
+   * The service record's `k` is authoritative. A record without `u` may omit `k`; the
+   * fingerprint then comes from the `k` of the NCC-05 locator endpoint being connected
+   * to, which the caller passes as `locatorFingerprint`.
+   *
    * @param {ServiceStatus} resolved - The object returned by resolve().
    * @param {string} actualFingerprint - The fingerprint obtained from the service.
+   * @param {Object} [options={}]
+   * @param {string} [options.locatorFingerprint] - `k` of the NCC-05 endpoint, taken from
+   * a locator signed by the same pubkey that the caller has already verified.
    * @returns {boolean}
    */
-  verifyEndpoint(resolved, actualFingerprint) {
-    return resolved.fingerprint === actualFingerprint;
+  verifyEndpoint(resolved, actualFingerprint, options = {}) {
+    if (!actualFingerprint) return false;
+    const expected =
+      resolved.fingerprint || (resolved.endpoint ? undefined : options.locatorFingerprint);
+    return expected === actualFingerprint;
   }
 }
