@@ -1,0 +1,62 @@
+name: Sync GitHub refs to ngit
+
+# One-way sync from this GitHub repository to its ngit repository. Keep the
+# Nostr repository as the canonical copy and do not merge independently on
+# GitHub; divergent refs require manual reconciliation.
+on:
+  push:
+    branches: [master]
+    tags: ['*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ngit-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Never expose the Nostr signer to untrusted pull request code.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: danconwaydev/setup-ngit@v3
+        with:
+          version: 3.2.0
+
+      - name: Configure ngit signer
+        env:
+          NGIT_REPOSITORY: nostr://npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q/nostr-community-conventions
+          NGIT_NBUNKSEC: ${{ secrets.NGIT_NBUNKSEC }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NGIT_NBUNKSEC" ]; then
+            echo "Repository secret NGIT_NBUNKSEC must contain a dedicated, authorized ngit remote-signer connection." >&2
+            exit 1
+          fi
+          key_file="$(mktemp)"
+          chmod 600 "$key_file"
+          printf '%s' "$NGIT_NBUNKSEC" > "$key_file"
+          echo "NGIT_SIGNER_FILE=$key_file" >> "$GITHUB_ENV"
+          echo "NGIT_REPOSITORY=$NGIT_REPOSITORY" >> "$GITHUB_ENV"
+
+      - name: Push master branch and tags to ngit
+        run: |
+          set -euo pipefail
+          ngit account login --nbunksec-file "$NGIT_SIGNER_FILE" --profile ci --local --defaults --json
+          git remote add ngit "$NGIT_REPOSITORY"
+          git -c nostr.signer=ci push ngit refs/remotes/origin/master:refs/heads/master
+          git -c nostr.signer=ci push ngit --tags
+
+      - name: Remove temporary signer file
+        if: always()
+        run: |
+          if [ -n "${NGIT_SIGNER_FILE:-}" ]; then
+            rm -f "$NGIT_SIGNER_FILE"
+          fi
