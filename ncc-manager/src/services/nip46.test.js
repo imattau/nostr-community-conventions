@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import nip46 from './nip46.js';
-import { pool } from './nostr.js';
+import { relayTransport } from './relay_transport.js';
 
 test('nip46.connect() should generate valid nostrconnect URI when no bunkerUrl provided', async () => {
-    // Mock pool.subscribe to avoid network calls
-    const originalSubscribe = pool.subscribe;
-    pool.subscribe = () => {
+    // Mock the relay adapter to avoid opening real connections.
+    const originalSubscribe = relayTransport.subscribe;
+    relayTransport.subscribe = () => {
         return { close: () => {} };
     };
 
@@ -16,8 +16,6 @@ test('nip46.connect() should generate valid nostrconnect URI when no bunkerUrl p
 
         const uri = await nip46.connect(null, () => {});
         
-        console.log('Generated URI:', uri);
-
         // Check scheme
         assert.ok(uri.startsWith('nostrconnect://'), 'Should start with nostrconnect://');
         
@@ -28,6 +26,6 @@ test('nip46.connect() should generate valid nostrconnect URI when no bunkerUrl p
         assert.doesNotMatch(uri, /relay=wss:\/\//, 'Relay URL should be encoded');
     } finally {
         // Restore original method
-        pool.subscribe = originalSubscribe;
+        relayTransport.subscribe = originalSubscribe;
     }
 });

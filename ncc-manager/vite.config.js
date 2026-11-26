@@ -1,4 +1,9 @@
 import { defineConfig } from "vite";
+import { cpSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -9,7 +14,15 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      plugins: [{
+        name: "copy-manager-docs",
+        closeBundle() {
+          cpSync(resolve(root, "docs"), resolve(root, "dist/docs"), { recursive: true });
+        }
+      }]
+    }
   },
   worker: {
     format: 'es',

@@ -45,6 +45,12 @@ npm start
 
 Use `npm run dev:all` for the Vite dev server + Express API combo during active development.
 
+### Static build and NIP-5A
+
+The browser app can also run without the Express API. It uses IndexedDB for local drafts and settings, with the bundled relay list when no local server provides relay defaults. Build the static app with `npm run build`; the deployable files are written to `dist/`.
+
+To publish it as an NIP-5A site, upload every file in `dist/` to a Blossom server and publish a root manifest (kind `15128`) or named manifest (kind `35128`). Add a `path` tag for every file with its absolute site path and SHA-256 hash, plus a `server` tag identifying the Blossom host. The static site requires browser access to the configured Nostr relays; the CLI and Express/SQLite server remain available for local use.
+
 ## Configuration
 
 - `NCC_RELAYS`: comma-separated list of relays used by the server default response.
@@ -67,7 +73,7 @@ Additional optional tags are available (for_event, type, language, topics, autho
 
 - NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
 - The UI listens for `online`/`offline` events and informs you via toasts; NCC/endorsement events fetched from relays are cached in `localStorage` for five minutes per relay set, so you still see data when temporarily offline.
-- Drafts are persisted via the server’s SQLite store whenever it is reachable, and a fallback in-memory cache keeps the most recent drafts available even while offline. Publishing while offline will queue the request but eventually retries the relay publish attempts once connectivity returns.
+- Drafts are persisted via the server’s SQLite store when it is reachable and fall back to IndexedDB in the browser. Editing and saved drafts remain available offline; publishing requires relay connectivity, and a failed publish can be retried from the draft.
 
 ### Database location
 
