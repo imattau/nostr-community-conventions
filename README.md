@@ -46,3 +46,11 @@ Packages that gitignore `package-lock.json` are installed with `npm install`; th
 ```sh
 gh workflow run npm-publish.yml --ref npm-ncc-07-js-v0.1.0 -f release_tag=npm-ncc-07-js-v0.1.0
 ```
+
+## ngit Sync
+
+`.github/workflows/ngit-sync.yml` pushes `master` and tags to the [ngit repository](https://gitworkshop.dev/npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q/relay.ngit.dev/nostr-community-conventions/tree/master) after GitHub pushes. Configure this repository secret first:
+
+- Secret `NGIT_NBUNKSEC`: a dedicated NIP-46 connection authorized to publish to that repository.
+
+The workflow does not run for pull requests. Keep GitHub and ngit from accepting independent changes: this workflow is a one-way GitHub-to-ngit push, and divergent histories need manual reconciliation. The ngit repository must already exist and recognize the signer as a maintainer.
