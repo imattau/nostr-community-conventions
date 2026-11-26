@@ -432,7 +432,8 @@ async function fetchDefaults() {
     void _error; // Explicitly consume unused variable
     stateManager.updateState({ defaults: FALLBACK_RELAYS });
     await setConfig("default_relays", state.defaults);
-    showToast("Using fallback default relays (server unavailable).", "error");
+    // A static deployment intentionally has no API server; using bundled
+    // defaults is the normal path there, not an application error.
   }
 }
 

@@ -45,6 +45,25 @@ npm start
 
 Use `npm run dev:all` for the Vite dev server + Express API combo during active development.
 
+## Static site and nsite publishing
+
+The Vite build can run as a static site without the Express server. Drafts and preferences use browser IndexedDB, while relay access and event publishing happen directly from the browser. This is suitable for NIP-5A hosting, including nsites.
+
+Build the static assets with:
+
+```bash
+npm ci
+npm run build
+```
+
+To publish the build as the named `ncc-manager` nsite, install ngit and sign in with the Nostr account that will publish the site, then run:
+
+```bash
+npm run publish:nsite
+```
+
+The command rebuilds `dist/` and publishes it using `.nsite/config.json`. The publisher's Blossom server list and relays must be configured in ngit. The resulting nsite is a separate static deployment; it does not provide the local Express API or synchronize browser IndexedDB data between devices. For a server-backed local instance, use `npm start` instead.
+
 ## Configuration
 
 - `NCC_RELAYS`: comma-separated list of relays used by the server default response.

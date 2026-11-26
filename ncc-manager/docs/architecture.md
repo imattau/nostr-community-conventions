@@ -28,6 +28,7 @@ The frontend is built using **Lit** for web components and **Vite** for the buil
 - **Nostr Integration**: Uses `nostr-tools` to interact with relays. It supports both NIP-07 (browser extensions) and NIP-46 (Nostr Connect) for signing.
 - **Validation Worker**: A dedicated Web Worker (`validationWorker.js`) handles complex chain validation logic for NCC revisions to keep the UI thread responsive.
 - **Storage fallback**: Uses `localStorage` and `IndexedDB` as fallbacks if the server-side storage is unavailable.
+- **Static hosting**: Vite emits relative asset URLs so the build can be served from a root or named NIP-5A/nsite path. In static deployments, drafts and preferences stay in that browser's IndexedDB and bundled relay defaults are used if the API is absent.
 
 ## Backend
 
