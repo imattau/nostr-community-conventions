@@ -19,6 +19,7 @@ Each convention lives in its own subfolder with its own README, code, and histor
 - [`ncc-10/`](ncc-10/) — Service Operational State
 - [`ncc-11/`](ncc-11/) — Portable Trust Policy
 - [`ncc-13/`](ncc-13/) — Software Package Release Profile
+- [`ncc-14/`](ncc-14/) — Application Composition and Service Binding
 
 `ncc-manager/` and `ncc-viewer/` are supporting tooling for authoring and browsing NCCs; `ncc_publish.py` is the CLI publisher referenced throughout NCC-00.
 
@@ -28,7 +29,7 @@ For the full NCC-00 specification — purpose, scope, event kinds, tags, and gov
 
 Every convention's README is also published as a browsable page at **[imattau.github.io/nostr-community-conventions](https://imattau.github.io/nostr-community-conventions/)**, built by [`.github/workflows/pages.yml`](.github/workflows/pages.yml) and [`site/build.mjs`](site/build.mjs).
 
-**Adding a new NCC updates the site automatically** — no workflow changes needed. The build script discovers any top-level `ncc-<number>/` folder that contains a `README.md` and generates its doc page on the next push to `master`. To publish NCC-07, for example, just add `ncc-07/README.md` (following the pattern of the existing folders) and push.
+**Adding a new NCC updates the site automatically** — no workflow changes needed. The build script discovers any top-level `ncc-<number>/` folder that contains a `README.md` and generates its doc page on the next push to `master`. Add the new convention's folder and `README.md` (following the pattern of the existing folders) and push.
 
 ## npm Releases
 
