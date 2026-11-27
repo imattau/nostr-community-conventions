@@ -54,9 +54,9 @@ The sidecar supplies `title`, `status`, optional `type`, language, topics, autho
 The `.github/workflows/ncc-publish.yml` workflow publishes with [`nscript`](https://github.com/imattau/nscript):
 
 - pushing a tag such as `ncc-02-v0.6.0` publishes the document and its supporting documents;
-- `workflow_dispatch` selects an action: `document`, `supporting`, `succession`, `endorsement`, or `all`;
+- `workflow_dispatch` selects an action: `document`, `supporting`, `succession`, `endorsement`, `latest`, or `all`;
 - a document dispatch can also publish a succession referencing the newly signed document;
-- succession and endorsement dispatches accept an explicit document event id;
+- succession and endorsement dispatches accept an explicit document event id or `latest` (with an optional author);
 - `.github/workflows/ncc-check.yml` validates documents and supporting sidecars on pull requests;
 - the signing key is the existing `NGIT_NSEC` secret, so NCC events and the ngit mirror share one identity.
 

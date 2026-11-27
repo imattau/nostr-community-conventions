@@ -20,6 +20,7 @@ on:
           - supporting
           - succession
           - endorsement
+          - latest
           - all
         default: document
       ncc:
@@ -41,7 +42,10 @@ on:
         description: 'Succession: optional effective Unix timestamp'
         required: false
       endorse_event:
-        description: 'Endorsement: document event id'
+        description: 'Endorsement: document event id, or latest'
+        required: false
+      author:
+        description: 'Latest/endorsement: document author pubkey or npub'
         required: false
       status:
         description: 'Endorsement: status (default published)'
@@ -79,7 +83,7 @@ concurrency:
 
 env:
   NSCRIPT_REPOSITORY: https://github.com/imattau/nscript
-  NSCRIPT_REV: 62ce5f59b098132259a9844a7c637f8484dfe713
+  NSCRIPT_REV: 7765ffd0b6771aa2c82d65d3d00463c72d968279
 
 jobs:
   publish:
@@ -126,6 +130,7 @@ jobs:
             previous="${{ github.event.inputs.previous }}"
             effective_at="${{ github.event.inputs.effective_at }}"
             endorse_event="${{ github.event.inputs.endorse_event }}"
+            author="${{ github.event.inputs.author }}"
             status="${{ github.event.inputs.status }}"
             role="${{ github.event.inputs.role }}"
             implementation="${{ github.event.inputs.implementation }}"
@@ -180,6 +185,9 @@ jobs:
                   exit 1
                 fi
                 args+=(--ncc "$ncc" --authoritative "$authoritative")
+                if [[ -n "$author" ]]; then
+                  args+=(--author "$author")
+                fi
                 if [[ -n "$steward" ]]; then
                   args+=(--steward "$steward")
                 fi
@@ -203,6 +211,9 @@ jobs:
                   exit 1
                 fi
                 args+=(--ncc "$ncc" --event "$endorse_event")
+                if [[ -n "$author" ]]; then
+                  args+=(--author "$author")
+                fi
                 if [[ -n "$status" ]]; then
                   args+=(--status "$status")
                 fi
@@ -224,6 +235,27 @@ jobs:
                 if [[ -n "$content" ]]; then
                   args+=(--content "$content")
                 fi
+                ;;
+              latest)
+                command="latest"
+                if [[ -z "$ncc" ]]; then
+                  echo "latest requires an NCC identifier" >&2
+                  exit 1
+                fi
+                args+=(--ncc "$ncc")
+                if [[ -n "$author" ]]; then
+                  args+=(--author "$author")
+                fi
+                relays="${NCC_RELAYS:-wss://relay.damus.io,wss://relay.primal.net,wss://nos.lol,wss://relay.nostr.band,wss://nostr-01.yakihonne.com,wss://relay.ditto.pub}"
+                IFS=',' read -ra relay_list <<< "$relays"
+                for relay in "${relay_list[@]}"; do
+                  relay="${relay//[[:space:]]/}"
+                  if [[ -n "$relay" ]]; then
+                    args+=(--relay "$relay")
+                  fi
+                done
+                nscript ncc latest "${args[@]}" --json
+                exit 0
                 ;;
               all)
                 command="publish"

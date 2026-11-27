@@ -20,7 +20,7 @@ concurrency:
 
 env:
   NSCRIPT_REPOSITORY: https://github.com/imattau/nscript
-  NSCRIPT_REV: 62ce5f59b098132259a9844a7c637f8484dfe713
+  NSCRIPT_REV: 7765ffd0b6771aa2c82d65d3d00463c72d968279
 
 jobs:
   check:
