@@ -41,21 +41,35 @@ Each convention has an `ncc.json` beside its `README.md`:
 
 `README.md` is published as the exact event content. `ncc.json` supplies the `title`, `status`, and optional metadata; the convention identifier (`d`) comes from the directory name.
 
-The `.github/workflows/ncc-publish.yml` workflow publishes kind `30050` events with [`nscript`](https://github.com/imattau/nscript):
+Supporting documents live beside the convention:
 
-- pushing a tag such as `ncc-02-v0.6.0` publishes `ncc-02` with that version;
-- `workflow_dispatch` can publish one convention or all of them, with an optional dry run;
-- `.github/workflows/ncc-check.yml` validates every `ncc.json` and README on pull requests;
+```text
+ncc-00/supporting/
+  implementation.md
+  implementation.json
+```
+
+The sidecar supplies `title`, `status`, optional `type`, language, topics, authors, license, `for_event`, and `published_at`. The identifier defaults to `<ncc-id>-<slug>`.
+
+The `.github/workflows/ncc-publish.yml` workflow publishes with [`nscript`](https://github.com/imattau/nscript):
+
+- pushing a tag such as `ncc-02-v0.6.0` publishes the document and its supporting documents;
+- `workflow_dispatch` selects an action: `document`, `supporting`, `succession`, `endorsement`, or `all`;
+- a document dispatch can also publish a succession referencing the newly signed document;
+- succession and endorsement dispatches accept an explicit document event id;
+- `.github/workflows/ncc-check.yml` validates documents and supporting sidecars on pull requests;
 - the signing key is the existing `NGIT_NSEC` secret, so NCC events and the ngit mirror share one identity.
 
 Local preview:
 
 ```sh
 nscript ncc check --all
-nscript ncc publish --all --include-drafts --dry-run
+nscript ncc publish --all --include-drafts --supporting --dry-run
+nscript ncc succession --ncc ncc-00 --authoritative <event-id> --dry-run
+nscript ncc endorse --ncc ncc-00 --event <event-id> --role client --dry-run
 ```
 
-See the [nscript NCC guide](https://github.com/imattau/nscript/blob/main/docs/NCC.md) for the full metadata schema and command reference.
+See the [nscript NCC guide](https://github.com/imattau/nscript/blob/main/docs/NCC.md) for the metadata schema, event kinds, and command reference.
 
 For the full NCC-00 specification — purpose, scope, event kinds, tags, and governance model — see [`ncc-00/README.md`](ncc-00/README.md).
 

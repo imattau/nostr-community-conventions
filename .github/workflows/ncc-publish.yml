@@ -1,8 +1,8 @@
-name: Publish NCC document to Nostr
+name: Publish NCC events to Nostr
 
-# Publishes one or more NCC-00 convention documents as kind 30050 events.
-# A release tag such as ncc-02-v0.6.0 publishes that convention and uses the
-# tag's version. workflow_dispatch can publish one convention or all of them.
+# Publishes NCC-00 documents, supporting documents, succession records, and
+# endorsements. A release tag publishes that convention and its supporting
+# documents; workflow_dispatch selects one of the other actions.
 # Pull requests are checked separately by ncc-check.yml and never receive the
 # signing key.
 
@@ -12,12 +12,59 @@ on:
       - 'ncc-*'
   workflow_dispatch:
     inputs:
+      action:
+        description: 'What to publish'
+        type: choice
+        options:
+          - document
+          - supporting
+          - succession
+          - endorsement
+          - all
+        default: document
       ncc:
-        description: 'NCC identifier (e.g. ncc-02); leave empty to publish every convention'
+        description: 'NCC identifier (e.g. ncc-02); empty means all for document/all'
         required: false
       version:
-        description: 'Version override for a single convention'
+        description: 'Version override for a single document'
         required: false
+      authoritative:
+        description: 'Succession: authoritative document event id'
+        required: false
+      steward:
+        description: 'Succession: optional steward pubkey or npub'
+        required: false
+      previous:
+        description: 'Succession: optional previous event id'
+        required: false
+      effective_at:
+        description: 'Succession: optional effective Unix timestamp'
+        required: false
+      endorse_event:
+        description: 'Endorsement: document event id'
+        required: false
+      status:
+        description: 'Endorsement: status (default published)'
+        required: false
+      role:
+        description: 'Endorsement: role (author, client, or user); comma-separated'
+        required: false
+      implementation:
+        description: 'Endorsement: implementation name or URL'
+        required: false
+      note:
+        description: 'Endorsement: short note'
+        required: false
+      reason:
+        description: 'Succession reason or document succession reason'
+        required: false
+      content:
+        description: 'Event content; falls back to a default'
+        required: false
+      succession:
+        description: 'Document action: publish a succession for the new document'
+        type: boolean
+        default: false
       dry_run:
         description: 'Print event templates without signing or publishing'
         type: boolean
@@ -32,7 +79,7 @@ concurrency:
 
 env:
   NSCRIPT_REPOSITORY: https://github.com/imattau/nscript
-  NSCRIPT_REV: 9c527bd3f427ff2d7c99a02e5715d403404c4d15
+  NSCRIPT_REV: 1355076f6a11be9cd596a966f1b2753d9eb9d985
 
 jobs:
   publish:
@@ -65,30 +112,133 @@ jobs:
 
           args=(--repo .)
           dry_run="${{ github.event.inputs.dry_run || 'false' }}"
+          action="${{ github.event.inputs.action }}"
+          command="publish"
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             tag="$GITHUB_REF_NAME"
-            args+=(--tag "$tag" --published-at "$(git log -1 --format=%ct "$tag")")
+            args+=(--tag "$tag" --published-at "$(git log -1 --format=%ct "$tag")" --supporting)
           else
             ncc="${{ github.event.inputs.ncc }}"
             version="${{ github.event.inputs.version }}"
-            if [[ -z "$ncc" && -n "$version" ]]; then
+            authoritative="${{ github.event.inputs.authoritative }}"
+            steward="${{ github.event.inputs.steward }}"
+            previous="${{ github.event.inputs.previous }}"
+            effective_at="${{ github.event.inputs.effective_at }}"
+            endorse_event="${{ github.event.inputs.endorse_event }}"
+            status="${{ github.event.inputs.status }}"
+            role="${{ github.event.inputs.role }}"
+            implementation="${{ github.event.inputs.implementation }}"
+            note="${{ github.event.inputs.note }}"
+            reason="${{ github.event.inputs.reason }}"
+            content="${{ github.event.inputs.content }}"
+            succession="${{ github.event.inputs.succession }}"
+
+            if [[ -n "$version" && -z "$ncc" ]]; then
               echo "version requires an NCC identifier" >&2
               exit 1
             fi
-            if [[ -n "$ncc" ]]; then
-              args+=("$ncc")
-              if [[ -n "$version" ]]; then
-                args+=(--version "$version")
-              fi
-            else
-              args+=(--all --include-drafts)
-            fi
+
+            case "$action" in
+              document)
+                command="publish"
+                if [[ -n "$ncc" ]]; then
+                  args+=("$ncc")
+                else
+                  args+=(--all --include-drafts)
+                fi
+                if [[ -n "$version" ]]; then
+                  args+=(--version "$version")
+                fi
+                args+=(--supporting)
+                if [[ "$succession" == "true" ]]; then
+                  if [[ -z "$ncc" ]]; then
+                    echo "succession requires an NCC identifier" >&2
+                    exit 1
+                  fi
+                  args+=(--succession)
+                  if [[ -n "$reason" ]]; then
+                    args+=(--succession-reason "$reason")
+                  fi
+                  if [[ -n "$content" ]]; then
+                    args+=(--succession-content "$content")
+                  fi
+                fi
+                ;;
+              supporting)
+                command="support"
+                if [[ -n "$ncc" ]]; then
+                  args+=(--ncc "$ncc")
+                else
+                  args+=(--all)
+                fi
+                ;;
+              succession)
+                command="succession"
+                if [[ -z "$ncc" || -z "$authoritative" ]]; then
+                  echo "succession requires ncc and authoritative" >&2
+                  exit 1
+                fi
+                args+=(--ncc "$ncc" --authoritative "$authoritative")
+                if [[ -n "$steward" ]]; then
+                  args+=(--steward "$steward")
+                fi
+                if [[ -n "$previous" ]]; then
+                  args+=(--previous "$previous")
+                fi
+                if [[ -n "$reason" ]]; then
+                  args+=(--reason "$reason")
+                fi
+                if [[ -n "$effective_at" ]]; then
+                  args+=(--effective-at "$effective_at")
+                fi
+                if [[ -n "$content" ]]; then
+                  args+=(--content "$content")
+                fi
+                ;;
+              endorsement)
+                command="endorse"
+                if [[ -z "$ncc" || -z "$endorse_event" ]]; then
+                  echo "endorsement requires ncc and endorse_event" >&2
+                  exit 1
+                fi
+                args+=(--ncc "$ncc" --event "$endorse_event")
+                if [[ -n "$status" ]]; then
+                  args+=(--status "$status")
+                fi
+                if [[ -n "$role" ]]; then
+                  IFS=',' read -ra roles <<< "$role"
+                  for item in "${roles[@]}"; do
+                    item="${item//[[:space:]]/}"
+                    if [[ -n "$item" ]]; then
+                      args+=(--role "$item")
+                    fi
+                  done
+                fi
+                if [[ -n "$implementation" ]]; then
+                  args+=(--implementation "$implementation")
+                fi
+                if [[ -n "$note" ]]; then
+                  args+=(--note "$note")
+                fi
+                if [[ -n "$content" ]]; then
+                  args+=(--content "$content")
+                fi
+                ;;
+              all)
+                command="publish"
+                args+=(--all --include-drafts --supporting)
+                ;;
+              *)
+                echo "unknown action: $action" >&2
+                exit 1
+                ;;
+            esac
           fi
 
           if [[ "$dry_run" == "true" ]]; then
             args+=(--dry-run --json)
-            nscript ncc publish "${args[@]}"
+            nscript ncc "$command" "${args[@]}"
             exit 0
           fi
 
@@ -107,4 +257,4 @@ jobs:
           done
 
           args+=(--signer-key-env NGIT_NSEC --require-accepted 1)
-          nscript ncc publish "${args[@]}"
+          nscript ncc "$command" "${args[@]}"
