@@ -45,16 +45,17 @@ npm start
 
 Use `npm run dev:all` for the Vite dev server + Express API combo during active development.
 
-## Static site and nsite publishing
+## Static hosting and nsite publishing
 
-The Vite build can run as a static site without the Express server. Drafts and preferences use browser IndexedDB, while relay access and event publishing happen directly from the browser. This is suitable for NIP-5A hosting, including nsites.
+The Vite build can run without the Express server. Drafts and preferences use browser IndexedDB, while relay access and event publishing happen directly from the browser. In static mode the app uses saved relay preferences or bundled defaults; data stays in that browser's storage and is not synchronized between devices.
 
 Build the static assets with:
 
 ```bash
-npm ci
 npm run build
 ```
+
+To host it using NIP-5A manually, upload every file in `dist/` to a Blossom server and publish a root manifest (kind `15128`) or named manifest (kind `35128`) with a `path` and SHA-256 hash for every file, plus a `server` tag for the Blossom host.
 
 To publish the build as the named `ncc-manager` nsite, install ngit and sign in with the Nostr account that will publish the site, then run:
 
@@ -62,7 +63,7 @@ To publish the build as the named `ncc-manager` nsite, install ngit and sign in 
 npm run publish:nsite
 ```
 
-The command rebuilds `dist/` and publishes it using `.nsite/config.json`. The publisher's Blossom server list and relays must be configured in ngit. The resulting nsite is a separate static deployment; it does not provide the local Express API or synchronize browser IndexedDB data between devices. For a server-backed local instance, use `npm start` instead.
+The command rebuilds `dist/` and publishes it using `.nsite/config.json`. Configure ngit's Blossom server list and relays first. Static hosting does not provide the local Express API. For a server-backed local instance, use `npm start` instead.
 
 ## Configuration
 
@@ -86,7 +87,7 @@ Additional optional tags are available (for_event, type, language, topics, autho
 
 - NCC documents fetched from relays are cached in `localStorage` per relay list for five minutes (TTL). The refresh button forces a new fetch, but when the cache is fresh or you’re offline the cached data is reused so you don’t hit the relays unnecessarily.
 - The UI listens for `online`/`offline` events and informs you via toasts; NCC/endorsement events fetched from relays are cached in `localStorage` for five minutes per relay set, so you still see data when temporarily offline.
-- Drafts are persisted via the server’s SQLite store whenever it is reachable, and a fallback in-memory cache keeps the most recent drafts available even while offline. Publishing while offline will queue the request but eventually retries the relay publish attempts once connectivity returns.
+- Drafts are persisted via the server’s SQLite store when it is reachable and fall back to IndexedDB in the browser. Editing and saved drafts remain available offline; publishing requires relay connectivity, and a failed publish can be retried from the draft.
 
 ### Database location
 

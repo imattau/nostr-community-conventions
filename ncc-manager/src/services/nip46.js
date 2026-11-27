@@ -1,5 +1,5 @@
 import { generateSecretKey, getPublicKey, nip04, nip44, finalizeEvent } from 'nostr-tools';
-import { pool } from './nostr.js';
+import { relayTransport } from './relay_transport.js';
 
 let secretKey = null; // Our ephemeral secret key
 let publicKey = null; // Our ephemeral public key
@@ -18,11 +18,10 @@ function toHex(bytes) {
 async function publishToRelays(event) {
   if (!connectionRelays.length) return;
   try {
-    const promises = pool.publish(connectionRelays, event);
-    // Catch errors on individual relay promises to avoid unhandled rejections
-    promises.forEach(p => p.catch(err => console.warn("[NIP-46] Publish failed on a relay:", err)));
+    const result = await relayTransport.publish(connectionRelays, event, { timeoutMs: 8_000 });
+    if (!result.accepted) console.warn("[NIP-46] No relay accepted the signing request.");
   } catch (err) {
-    console.error("[NIP-46] Error calling pool.publish:", err);
+    console.error("[NIP-46] Error publishing signing request:", err);
   }
 }
 
@@ -163,11 +162,11 @@ async function connectBunker(bunkerUrl) {
             throw new Error("Invalid bunker URL");
         }
 
-        sub = pool.subscribe(connectionRelays, {
+        sub = relayTransport.subscribe(connectionRelays, {
             kinds: [24133],
             authors: [remotePubkey],
             '#p': [publicKey],
-        }, { onevent: handleEvent });
+        }, handleEvent);
 
         const connectPubkey = await sendRequest('connect', [publicKey]);
         if (connectPubkey && onConnectCallback) {
@@ -196,10 +195,10 @@ const self = {
         const defaultRelays = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
         connectionRelays = defaultRelays;
         
-        sub = pool.subscribe(connectionRelays, {
+        sub = relayTransport.subscribe(connectionRelays, {
             kinds: [24133],
             '#p': [publicKey],
-        }, { onevent: handleEvent });
+        }, handleEvent);
 
         const params = defaultRelays.map(r => `relay=${encodeURIComponent(r)}`).join("&");
         return `nostrconnect://${publicKey}?${params}`;

@@ -422,19 +422,18 @@ async function updateSignerStatus() {
 }
 
 async function fetchDefaults() {
-  const state = stateManager.getState();
+  const savedDefaults = stateManager.getState().defaults;
+  let relays = Array.isArray(savedDefaults) && savedDefaults.length ? savedDefaults : FALLBACK_RELAYS;
   try {
     const res = await fetch("/api/defaults");
+    if (!res.ok) throw new Error(`Defaults endpoint returned ${res.status}`);
     const data = await res.json();
-    stateManager.updateState({ defaults: data.relays || [] });
-    await setConfig("default_relays", state.defaults);
-  } catch (_error) {
-    void _error; // Explicitly consume unused variable
-    stateManager.updateState({ defaults: FALLBACK_RELAYS });
-    await setConfig("default_relays", state.defaults);
-    // A static deployment intentionally has no API server; using bundled
-    // defaults is the normal path there, not an application error.
+    if (Array.isArray(data.relays) && data.relays.length) relays = data.relays;
+  } catch {
+    // Static deployments have no defaults endpoint; use saved or bundled defaults.
   }
+  stateManager.updateState({ defaults: relays });
+  await setConfig("default_relays", relays);
 }
 
 async function loadConfig() {
@@ -790,17 +789,21 @@ async function withdrawDraft(id) {
 async function publishDraft(draft, kind, shouldAnnounce = false) {
   const state = stateManager.getState();
   try {
+    eventBus.emit("operation-status", "Checking draft…");
     const validationError = validateDraftForPublish(draft);
     if (validationError) throw new Error(validationError);
     const relays = await getRelays(getConfig);
     if (!relays.length) throw new Error("No relays configured");
     const signerMode = state.signerMode;
+    eventBus.emit("operation-status", "Waiting for signer…");
     const signer = await getSigner(signerMode);
 
     const publishableDraft = { ...draft, status: "published" };
     const template = createEventTemplate(publishableDraft);
     
+    eventBus.emit("operation-status", "Signing event…");
     const event = await signer.signEvent(template);
+    eventBus.emit("operation-status", `Publishing to ${relays.length} relays…`);
     const result = await publishEvent(relays, event);
 
     const updated = {
@@ -823,6 +826,7 @@ async function publishDraft(draft, kind, shouldAnnounce = false) {
     showToast(
       `Published to ${result.accepted}/${result.total} relays.`
     );
+    eventBus.emit("operation-status", `Published to ${result.accepted}/${result.total} relays.`);
 
     if (shouldAnnounce) {
         eventBus.emit('open-announcement-modal', { item: updated, eventId: event.id });
@@ -873,6 +877,7 @@ async function publishDraft(draft, kind, shouldAnnounce = false) {
       }
     }
   } catch (_error) {
+    eventBus.emit("operation-status", `Publish failed: ${_error.message}`);
     showToast(`Publish failed: ${_error.message}`, "error");
   }
 }
@@ -923,6 +928,7 @@ function setupEventListeners() {
     
     eventBus.on('save-publish-item', async ({ id, content, item, shouldAnnounce }) => {
         try {
+            eventBus.emit("operation-status", "Saving draft…");
             const savedItem = await handlePowerSave(id, content, item);
             if (savedItem) {
                 // Determine kind string for publishDraft
@@ -933,6 +939,7 @@ function setupEventListeners() {
             }
         } catch (err) {
             console.error("Save & Publish failed:", err);
+            eventBus.emit("operation-status", `Save & Publish failed: ${err.message}`);
             showToast(`Save & Publish failed: ${err.message}`, "error");
         }
     });

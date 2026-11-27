@@ -1,0 +1,171 @@
+name: CI
+
+# Builds and tests every publishable package on PRs and on push to master,
+# so a regression is caught before it reaches npm. See npm-publish.yml for
+# how (and when) a package actually gets published.
+
+on:
+  pull_request:
+    paths:
+      - 'ncc-02/ncc-02-js/**'
+      - 'ncc-03/**'
+      - 'ncc-05/ncc-05-js/**'
+      - 'ncc-06/ncc-06-js/**'
+      - 'ncc-06/ncc-sidecar/**'
+      - 'ncc-07/ncc-07-js/**'
+      - 'ncc-08/ncc-08-js/**'
+      - 'ncc-09/ncc-09-js/**'
+      - 'ncc-10/ncc-10-js/**'
+      - 'ncc-11/ncc-11-js/**'
+      - 'ncc-13/ncc-13-js/**'
+      - 'ncc-manager/**'
+      - '.github/workflows/ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'ncc-02/ncc-02-js/**'
+      - 'ncc-03/**'
+      - 'ncc-05/ncc-05-js/**'
+      - 'ncc-06/ncc-06-js/**'
+      - 'ncc-06/ncc-sidecar/**'
+      - 'ncc-07/ncc-07-js/**'
+      - 'ncc-08/ncc-08-js/**'
+      - 'ncc-09/ncc-09-js/**'
+      - 'ncc-10/ncc-10-js/**'
+      - 'ncc-11/ncc-11-js/**'
+      - 'ncc-13/ncc-13-js/**'
+      - 'ncc-manager/**'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - directory: ncc-02/ncc-02-js
+            name: ncc-02-js
+            tag_prefix: npm-ncc-02-js-v
+          - directory: ncc-03
+            name: nostr-election-36998
+            tag_prefix: npm-nostr-election-36998-v
+          - directory: ncc-05/ncc-05-js
+            name: ncc-05-js
+            tag_prefix: npm-ncc-05-js-v
+          - directory: ncc-06/ncc-06-js
+            name: ncc-06-js
+            tag_prefix: npm-ncc-06-js-v
+          - directory: ncc-06/ncc-sidecar
+            name: ncc-sidecar
+            tag_prefix: npm-ncc-sidecar-v
+          - directory: ncc-07/ncc-07-js
+            name: ncc-07-js
+            tag_prefix: npm-ncc-07-js-v
+          - directory: ncc-08/ncc-08-js
+            name: ncc-08-js
+            tag_prefix: npm-ncc-08-js-v
+          - directory: ncc-09/ncc-09-js
+            name: ncc-09-js
+            tag_prefix: npm-ncc-09-js-v
+          - directory: ncc-10/ncc-10-js
+            name: ncc-10-js
+            tag_prefix: npm-ncc-10-js-v
+          - directory: ncc-11/ncc-11-js
+            name: ncc-11-js
+            tag_prefix: npm-ncc-11-js-v
+          - directory: ncc-13/ncc-13-js
+            name: ncc-13-js
+            tag_prefix: npm-ncc-13-js-v
+          - directory: ncc-manager
+            name: '@0xx0lostcause0xx0/ncc-manager'
+            tag_prefix: npm-ncc-manager-v
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.directory }}
+        run: |
+          set -euo pipefail
+          # Libraries may deliberately gitignore their lockfile; npm ci requires one.
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Build and test
+        working-directory: ${{ matrix.directory }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.name }}" = "ncc-sidecar" ]; then
+            npm --prefix ui ci
+            npm --prefix ui run build
+          fi
+          npm run build --if-present
+          npm run test --if-present
+
+  check-unpublished-changes:
+    # Advisory only: flags packages whose source changed since their last
+    # published release tag, so a fix doesn't sit merged-but-unpublished
+    # (see commit f373a43 for the incident this is meant to catch). Never
+    # fails the run.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare each package against its last release tag
+        run: |
+          set -uo pipefail
+
+          packages=(
+            "ncc-02/ncc-02-js:ncc-02-js:npm-ncc-02-js-v"
+            "ncc-03:nostr-election-36998:npm-nostr-election-36998-v"
+            "ncc-05/ncc-05-js:ncc-05-js:npm-ncc-05-js-v"
+            "ncc-06/ncc-06-js:ncc-06-js:npm-ncc-06-js-v"
+            "ncc-06/ncc-sidecar:ncc-sidecar:npm-ncc-sidecar-v"
+            "ncc-07/ncc-07-js:ncc-07-js:npm-ncc-07-js-v"
+            "ncc-08/ncc-08-js:ncc-08-js:npm-ncc-08-js-v"
+            "ncc-09/ncc-09-js:ncc-09-js:npm-ncc-09-js-v"
+            "ncc-10/ncc-10-js:ncc-10-js:npm-ncc-10-js-v"
+            "ncc-11/ncc-11-js:ncc-11-js:npm-ncc-11-js-v"
+            "ncc-13/ncc-13-js:ncc-13-js:npm-ncc-13-js-v"
+            "ncc-manager:@0xx0lostcause0xx0/ncc-manager:npm-ncc-manager-v"
+          )
+
+          {
+            echo "| Package | Last published tag | Since then | Status |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for entry in "${packages[@]}"; do
+            IFS=':' read -r directory name tag_prefix <<< "$entry"
+
+            last_tag=$(git tag -l "${tag_prefix}*" --sort=-v:refname | head -1)
+
+            if [ -z "$last_tag" ]; then
+              echo "| $name | _never published_ | — | — |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            tag_version="${last_tag#"$tag_prefix"}"
+            local_version=$(node -p "require('./$directory/package.json').version" 2>/dev/null || echo "?")
+
+            if git diff --quiet "$last_tag"..HEAD -- "$directory" -- ':!**/node_modules' ':!**/dist' 2>/dev/null; then
+              echo "| $name | $last_tag | no changes | ok |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            if [ "$local_version" = "$tag_version" ]; then
+              echo "| $name | $last_tag | **changed, version not bumped** | ⚠️ bump package.json and push a \`${tag_prefix}<new-version>\` tag to publish |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $name | $last_tag | changed, version bumped to $local_version | ℹ️ push tag \`${tag_prefix}${local_version}\` to publish |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done

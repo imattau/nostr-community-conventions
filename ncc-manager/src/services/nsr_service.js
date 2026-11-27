@@ -1,7 +1,7 @@
-import { 
-  pool, 
+import {
   createEventTemplate, 
-  publishEvent
+  publishEvent,
+  relayTransport
 } from "./nostr.js";
 import { nowSeconds } from "../utils.js";
 import { KINDS } from "../state.js";
@@ -28,7 +28,7 @@ export const nsrService = {
       });
     }
 
-    const existing = await pool.querySync(relays, filters, { maxWait: 3000 });
+    const existing = await relayTransport.query(relays, filters, { maxWait: 3000 });
     return existing.length > 0 ? existing[0] : null;
   },
 

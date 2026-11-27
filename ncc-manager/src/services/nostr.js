@@ -1,8 +1,8 @@
-import { SimplePool } from "nostr-tools/pool";
 import { waitForNostr } from "../utils.js";
 import nip46 from './nip46.js';
+import { relayTransport } from "./relay_transport.js";
 
-export const pool = new SimplePool();
+export { relayTransport };
 
 function normalizeSupersedes(value) {
   const trimmed = (value || "").trim();
@@ -207,7 +207,7 @@ export async function fetchProfile(pubkey, relays = []) {
     return cached.profile;
   }
 
-  const events = await pool.querySync(
+  const events = await relayTransport.query(
     relays,
     {
       kinds: [0],
@@ -250,14 +250,13 @@ export async function publishEvent(relays, event, options = {}) {
   let lastOutcome = { accepted: 0, total: relays.length };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const results = await Promise.allSettled(pool.publish(relays, event));
-    const accepted = results.filter((result) => result.status === "fulfilled");
+    const result = await relayTransport.publish(relays, event);
     lastOutcome = {
-      accepted: accepted.length,
-      total: results.length
+      accepted: result.accepted,
+      total: result.total
     };
 
-    if (accepted.length > 0) {
+    if (result.accepted > 0) {
       return { ...lastOutcome, attempts: attempt };
     }
 
@@ -272,7 +271,7 @@ export async function publishEvent(relays, event, options = {}) {
 }
 
 export async function verifyEvent(relays, eventId) {
-  const events = await pool.querySync(relays, { ids: [eventId] }, { maxWait: 3500 });
+  const events = await relayTransport.query(relays, { ids: [eventId] }, { maxWait: 3500 });
   return events.length > 0;
 }
 
@@ -285,7 +284,7 @@ export async function fetchNccDocuments(relays, authorPubkey = null) {
   }
   filter.limit = 500; // Re-add limit now that we have authors, to reduce relay load if author has many.
 
-  const events = await pool.querySync(
+  const events = await relayTransport.query(
     relays,
     filter,
     { maxWait: 8000 }
@@ -312,7 +311,7 @@ export async function fetchEndorsements(relays, eventIds) {
   // If relays are smart, they'll dedup.
   
   // For now, let's keep it simple with one query that Nostr-tools should handle.
-  return pool.querySync(relays, filters, { maxWait: 4000 });
+  return relayTransport.query(relays, filters, { maxWait: 4000 });
 }
 
 export async function fetchSuccessionRecords(relays, dValues) {
@@ -327,12 +326,12 @@ export async function fetchSuccessionRecords(relays, dValues) {
     limit: 1000
   }];
 
-  return pool.querySync(relays, filters, { maxWait: 4000 });
+  return relayTransport.query(relays, filters, { maxWait: 4000 });
 }
 
 export async function fetchAuthorEndorsements(relays, pubkey) {
   if (!relays.length || !pubkey) return [];
-  return pool.querySync(
+  return relayTransport.query(
     relays,
     {
       kinds: [30052],
