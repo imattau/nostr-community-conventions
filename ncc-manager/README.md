@@ -45,11 +45,25 @@ npm start
 
 Use `npm run dev:all` for the Vite dev server + Express API combo during active development.
 
-### Static build and NIP-5A
+## Static hosting and nsite publishing
 
-The browser app can also run without the Express API. It uses IndexedDB for local drafts and settings, with the bundled relay list when no local server provides relay defaults. Build the static app with `npm run build`; the deployable files are written to `dist/`.
+The Vite build can run without the Express server. Drafts and preferences use browser IndexedDB, while relay access and event publishing happen directly from the browser. In static mode the app uses saved relay preferences or bundled defaults; data stays in that browser's storage and is not synchronized between devices.
 
-To publish it as an NIP-5A site, upload every file in `dist/` to a Blossom server and publish a root manifest (kind `15128`) or named manifest (kind `35128`). Add a `path` tag for every file with its absolute site path and SHA-256 hash, plus a `server` tag identifying the Blossom host. The static site requires browser access to the configured Nostr relays; the CLI and Express/SQLite server remain available for local use.
+Build the static assets with:
+
+```bash
+npm run build
+```
+
+To host it using NIP-5A manually, upload every file in `dist/` to a Blossom server and publish a root manifest (kind `15128`) or named manifest (kind `35128`) with a `path` and SHA-256 hash for every file, plus a `server` tag for the Blossom host.
+
+To publish the build as the named `ncc-manager` nsite, install ngit and sign in with the Nostr account that will publish the site, then run:
+
+```bash
+npm run publish:nsite
+```
+
+The command rebuilds `dist/` and publishes it using `.nsite/config.json`. Configure ngit's Blossom server list and relays first. Static hosting does not provide the local Express API. For a server-backed local instance, use `npm start` instead.
 
 ## Configuration
 

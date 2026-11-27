@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  // Relative asset URLs let the same build work from a site root, a named
+  // NIP-5A/nsite path, or a local static preview directory.
+  base: "./",
   plugins: [
     // Removed babel plugin for simplicity and to isolate issues.
   ],

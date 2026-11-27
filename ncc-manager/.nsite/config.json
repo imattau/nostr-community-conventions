@@ -1,0 +1,6 @@
+{
+  "id": "ncc-manager",
+  "title": "NCC Manager",
+  "description": "Create, publish, and verify Nostr Community Conventions.",
+  "source": "https://github.com/imattau/nostr-community-conventions"
+}

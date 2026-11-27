@@ -26,6 +26,7 @@
     "dev:api": "node server.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
     "build": "vite build",
+    "publish:nsite": "npm run build && ngit nsite publish dist --json",
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint .",
     "test": "node --test src/*.test.js src/**/*.test.js",

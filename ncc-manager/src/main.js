@@ -429,8 +429,8 @@ async function fetchDefaults() {
     if (!res.ok) throw new Error(`Defaults endpoint returned ${res.status}`);
     const data = await res.json();
     if (Array.isArray(data.relays) && data.relays.length) relays = data.relays;
-  } catch (_error) {
-    // Static Nsite builds have no defaults endpoint; use the bundled list.
+  } catch {
+    // Static deployments have no defaults endpoint; use saved or bundled defaults.
   }
   stateManager.updateState({ defaults: relays });
   await setConfig("default_relays", relays);
