@@ -32,31 +32,45 @@ jobs:
 
       - name: Configure ngit signer
         env:
-          NGIT_REPOSITORY: nostr://npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q/nostr-community-conventions
-          NGIT_NBUNKSEC: ${{ secrets.NGIT_NBUNKSEC }}
+          NGIT_REPOSITORY: nostr://npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q/relay.ngit.dev/nostr-community-conventions
+          NGIT_NSEC: ${{ secrets.NGIT_NSEC }}
         run: |
           set -euo pipefail
-          if [ -z "$NGIT_NBUNKSEC" ]; then
-            echo "Repository secret NGIT_NBUNKSEC must contain a dedicated, authorized ngit remote-signer connection." >&2
+          if [ -z "$NGIT_NSEC" ]; then
+            echo "Repository secret NGIT_NSEC must contain the authorized Nostr private key for this mirror." >&2
             exit 1
           fi
           key_file="$(mktemp)"
           chmod 600 "$key_file"
-          printf '%s' "$NGIT_NBUNKSEC" > "$key_file"
-          echo "NGIT_SIGNER_FILE=$key_file" >> "$GITHUB_ENV"
+          printf '%s\n' "$NGIT_NSEC" > "$key_file"
+          echo "NGIT_KEY_FILE=$key_file" >> "$GITHUB_ENV"
           echo "NGIT_REPOSITORY=$NGIT_REPOSITORY" >> "$GITHUB_ENV"
 
       - name: Push master branch and tags to ngit
         run: |
           set -euo pipefail
-          ngit account login --nbunksec-file "$NGIT_SIGNER_FILE" --profile ci --local --defaults --json
+          key_file="$NGIT_KEY_FILE"
+          cleanup() {
+            git config --unset nostr.nsec 2>/dev/null || true
+            rm -f "$key_file"
+          }
+          trap cleanup EXIT
+          git config nostr.nsec "$(cat "$key_file")"
+          git config nostr.repo-relay-only true
           git remote add ngit "$NGIT_REPOSITORY"
-          git -c nostr.signer=ci push ngit refs/remotes/origin/master:refs/heads/master
-          git -c nostr.signer=ci push ngit --tags
+          git fetch --no-tags origin master
+          master_sha="$(git rev-parse origin/master)"
+          git push ngit "${master_sha}:refs/heads/master"
+          git push ngit --tags
+          remote_master="$(git ls-remote ngit refs/heads/master | awk '$2 == "refs/heads/master" { print $1 }')"
+          if [ "$remote_master" != "$master_sha" ]; then
+            echo "ngit mirror master is ${remote_master:-missing}, expected $master_sha" >&2
+            exit 1
+          fi
 
       - name: Remove temporary signer file
         if: always()
         run: |
-          if [ -n "${NGIT_SIGNER_FILE:-}" ]; then
-            rm -f "$NGIT_SIGNER_FILE"
+          if [ -n "${NGIT_KEY_FILE:-}" ]; then
+            rm -f "$NGIT_KEY_FILE"
           fi
