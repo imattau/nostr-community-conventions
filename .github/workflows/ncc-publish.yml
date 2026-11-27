@@ -3,6 +3,9 @@ name: Publish NCC events to Nostr
 # Publishes NCC-00 documents, supporting documents, succession records, and
 # endorsements. A release tag publishes that convention and its supporting
 # documents; workflow_dispatch selects one of the other actions.
+# Manual dispatches share the master ref and are serialized: dispatch one
+# action at a time. Use the document action with succession=true to publish a
+# document, its supporting documents, and its succession in one ordered run.
 # Pull requests are checked separately by ncc-check.yml and never receive the
 # signing key.
 
@@ -78,7 +81,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ncc-publish
+  group: ncc-publish-${{ github.ref }}
   cancel-in-progress: false
 
 env:

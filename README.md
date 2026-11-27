@@ -60,6 +60,8 @@ The `.github/workflows/ncc-publish.yml` workflow publishes with [`nscript`](http
 - `.github/workflows/ncc-check.yml` validates documents and supporting sidecars on pull requests;
 - the signing key is the existing `NGIT_NSEC` secret, so NCC events and the ngit mirror share one identity.
 
+Manual dispatches share the `master` ref and are serialized. Dispatch one action at a time; use a `document` dispatch with `succession` to publish a document, its supporting documents, and its succession in one ordered run.
+
 Local preview:
 
 ```sh
