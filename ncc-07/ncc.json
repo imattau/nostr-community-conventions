@@ -1,0 +1,15 @@
+{
+  "title": "Service Capability Manifest",
+  "summary": "A minimal, machine-readable method for a Nostr-identified service to advertise the capabilities it claims to support.",
+  "status": "draft",
+  "topics": [
+    "nostr",
+    "capabilities",
+    "manifests"
+  ],
+  "lang": "en",
+  "license": "CC0-1.0",
+  "authors": [
+    "npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q"
+  ]
+}

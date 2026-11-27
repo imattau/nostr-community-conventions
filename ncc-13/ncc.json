@@ -1,0 +1,15 @@
+{
+  "title": "Software Package Release Profile",
+  "summary": "Package-manager semantics for software releases represented with existing Nostr release primitives.",
+  "status": "draft",
+  "topics": [
+    "nostr",
+    "releases",
+    "packages"
+  ],
+  "lang": "en",
+  "license": "CC0-1.0",
+  "authors": [
+    "npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q"
+  ]
+}

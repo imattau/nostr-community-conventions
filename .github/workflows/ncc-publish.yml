@@ -1,0 +1,110 @@
+name: Publish NCC document to Nostr
+
+# Publishes one or more NCC-00 convention documents as kind 30050 events.
+# A release tag such as ncc-02-v0.6.0 publishes that convention and uses the
+# tag's version. workflow_dispatch can publish one convention or all of them.
+# Pull requests are checked separately by ncc-check.yml and never receive the
+# signing key.
+
+on:
+  push:
+    tags:
+      - 'ncc-*'
+  workflow_dispatch:
+    inputs:
+      ncc:
+        description: 'NCC identifier (e.g. ncc-02); leave empty to publish every convention'
+        required: false
+      version:
+        description: 'Version override for a single convention'
+        required: false
+      dry_run:
+        description: 'Print event templates without signing or publishing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ncc-publish
+  cancel-in-progress: false
+
+env:
+  NSCRIPT_REPOSITORY: https://github.com/imattau/nscript
+  NSCRIPT_REV: e1d6a27525737ddf2e2a2eb973f1f90174e3ba77
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: nscript-${{ env.NSCRIPT_REV }}
+
+      - name: Install nscript
+        run: cargo install --git "$NSCRIPT_REPOSITORY" --rev "$NSCRIPT_REV" --locked nscript-cli
+
+      - name: Publish
+        shell: bash
+        env:
+          NCC_PUBLISH_NSEC: ${{ secrets.NCC_PUBLISH_NSEC || secrets.NGIT_NSEC }}
+          NCC_RELAYS: ${{ vars.NCC_RELAYS }}
+        run: |
+          set -euo pipefail
+
+          args=(--repo .)
+          dry_run="${{ github.event.inputs.dry_run || 'false' }}"
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="$GITHUB_REF_NAME"
+            args+=(--tag "$tag" --published-at "$(git log -1 --format=%ct "$tag")")
+          else
+            ncc="${{ github.event.inputs.ncc }}"
+            version="${{ github.event.inputs.version }}"
+            if [[ -z "$ncc" && -n "$version" ]]; then
+              echo "version requires an NCC identifier" >&2
+              exit 1
+            fi
+            if [[ -n "$ncc" ]]; then
+              args+=("$ncc")
+              if [[ -n "$version" ]]; then
+                args+=(--version "$version")
+              fi
+            else
+              args+=(--all --include-drafts)
+            fi
+          fi
+
+          if [[ "$dry_run" == "true" ]]; then
+            args+=(--dry-run --json)
+            nscript ncc publish "${args[@]}"
+            exit 0
+          fi
+
+          if [[ -z "${NCC_PUBLISH_NSEC:-}" ]]; then
+            echo "Repository secret NCC_PUBLISH_NSEC or NGIT_NSEC is required." >&2
+            exit 1
+          fi
+
+          relays="${NCC_RELAYS:-wss://relay.damus.io,wss://relay.primal.net,wss://nos.lol,wss://relay.nostr.band,wss://nostr-01.yakihonne.com,wss://relay.ditto.pub}"
+          IFS=',' read -ra relay_list <<< "$relays"
+          for relay in "${relay_list[@]}"; do
+            relay="${relay//[[:space:]]/}"
+            if [[ -n "$relay" ]]; then
+              args+=(--relay "$relay")
+            fi
+          done
+
+          args+=(--signer-key-env NCC_PUBLISH_NSEC --require-accepted 1)
+          nscript ncc publish "${args[@]}"

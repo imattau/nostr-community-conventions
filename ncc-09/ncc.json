@@ -1,0 +1,15 @@
+{
+  "title": "Scoped Operator Authority",
+  "summary": "A method for a service identity to authorise another pubkey to perform explicitly scoped actions.",
+  "status": "draft",
+  "topics": [
+    "nostr",
+    "authority",
+    "operations"
+  ],
+  "lang": "en",
+  "license": "CC0-1.0",
+  "authors": [
+    "npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q"
+  ]
+}

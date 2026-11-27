@@ -1,0 +1,15 @@
+{
+  "title": "Pubkey-Owned Service Discovery and Trust",
+  "summary": "A Nostr-native mechanism for discovering and verifying pubkey-owned services without DNS or public certificate authorities.",
+  "status": "published",
+  "topics": [
+    "nostr",
+    "service-discovery",
+    "trust"
+  ],
+  "lang": "en",
+  "license": "CC0-1.0",
+  "authors": [
+    "npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q"
+  ]
+}

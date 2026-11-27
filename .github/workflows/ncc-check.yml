@@ -1,0 +1,45 @@
+name: Check NCC metadata
+
+# Validates every ncc-XX/ncc.json and README.md without reading a signing key
+# or connecting to a relay. Pull-request code never sees repository secrets.
+
+on:
+  pull_request:
+    paths:
+      - 'ncc-*/README.md'
+      - 'ncc-*/ncc.json'
+      - '.github/workflows/ncc-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ncc-check
+  cancel-in-progress: true
+
+env:
+  NSCRIPT_REPOSITORY: https://github.com/imattau/nscript
+  NSCRIPT_REV: e1d6a27525737ddf2e2a2eb973f1f90174e3ba77
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: nscript-${{ env.NSCRIPT_REV }}
+
+      - name: Install nscript
+        run: cargo install --git "$NSCRIPT_REPOSITORY" --rev "$NSCRIPT_REV" --locked nscript-cli
+
+      - name: Check conventions
+        run: nscript ncc check --all

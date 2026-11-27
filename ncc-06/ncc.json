@@ -1,0 +1,15 @@
+{
+  "title": "NCC-02 / NCC-05 Service Profile",
+  "summary": "An opt-in service participation profile composing NCC-02 service discovery with NCC-05 dynamic locators.",
+  "status": "published",
+  "topics": [
+    "nostr",
+    "service-profile",
+    "routing"
+  ],
+  "lang": "en",
+  "license": "CC0-1.0",
+  "authors": [
+    "npub1khf5amw8mrupe649a5mhkk3d2d8wjj06urz6kwawpftk4f68tjlstdmd3q"
+  ]
+}
