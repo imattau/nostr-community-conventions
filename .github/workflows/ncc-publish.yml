@@ -58,7 +58,7 @@ jobs:
       - name: Publish
         shell: bash
         env:
-          NCC_PUBLISH_NSEC: ${{ secrets.NCC_PUBLISH_NSEC || secrets.NGIT_NSEC }}
+          NGIT_NSEC: ${{ secrets.NGIT_NSEC }}
           NCC_RELAYS: ${{ vars.NCC_RELAYS }}
         run: |
           set -euo pipefail
@@ -92,8 +92,8 @@ jobs:
             exit 0
           fi
 
-          if [[ -z "${NCC_PUBLISH_NSEC:-}" ]]; then
-            echo "Repository secret NCC_PUBLISH_NSEC or NGIT_NSEC is required." >&2
+          if [[ -z "${NGIT_NSEC:-}" ]]; then
+            echo "Repository secret NGIT_NSEC is required." >&2
             exit 1
           fi
 
@@ -106,5 +106,5 @@ jobs:
             fi
           done
 
-          args+=(--signer-key-env NCC_PUBLISH_NSEC --require-accepted 1)
+          args+=(--signer-key-env NGIT_NSEC --require-accepted 1)
           nscript ncc publish "${args[@]}"

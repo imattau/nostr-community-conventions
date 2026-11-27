@@ -46,7 +46,7 @@ The `.github/workflows/ncc-publish.yml` workflow publishes kind `30050` events w
 - pushing a tag such as `ncc-02-v0.6.0` publishes `ncc-02` with that version;
 - `workflow_dispatch` can publish one convention or all of them, with an optional dry run;
 - `.github/workflows/ncc-check.yml` validates every `ncc.json` and README on pull requests;
-- the signing key comes from the `NCC_PUBLISH_NSEC` secret, falling back to `NGIT_NSEC`.
+- the signing key is the existing `NGIT_NSEC` secret, so NCC events and the ngit mirror share one identity.
 
 Local preview:
 
